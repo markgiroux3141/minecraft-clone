@@ -33,7 +33,11 @@ void Player::SetLook(float yawDegrees, float pitchDegrees) {
 }
 
 void Player::ToggleMode() {
-    m_mode = (m_mode == Mode::Walk) ? Mode::Fly : Mode::Walk;
+    SetMode(m_mode == Mode::Walk ? Mode::Fly : Mode::Walk);
+}
+
+void Player::SetMode(Mode mode) {
+    m_mode = mode;
     m_velocity = glm::vec3{0.0f};
 }
 

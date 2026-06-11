@@ -72,10 +72,16 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   (`vox::MeshPool` + gl_DrawID SSBO), Minecraft-style cave-culling
   occlusion (face-connectivity BFS from the eye), half-res LOD shell out
   to ~512 blocks (downsampled real terrain, same mesher/pool, 2x scale).
-- **M10 — TBD**: candidates: UI/menus (crosshair, hotbar HUD, pause,
-  world select), gameplay depth (trees, water + transparency pass, more
-  blocks, day/night), or perf polish (vertex compression, per-frame
-  upload budget).
+- **M10 — UI/menus** ✅: batched 2D overlay renderer (`vox::UiRenderer`:
+  rects, bitmap-font text, texture-array tiles in one draw), crosshair +
+  hotbar HUD, pause menu with a Title/Playing/Paused state machine, title
+  screen with world select / new-world creation (random seed), player
+  position/look/mode persisted in the save manifest.
+- **M11 — Gameplay depth** (next): trees/structures, water + transparent
+  mesh pass, more block types, day/night cycle (sun direction + sky
+  gradient).
+- **M12 — Perf polish**: vertex compression (ChunkVertex 48 B -> ~12 B),
+  per-frame GPU upload budget.
 
 Each milestone lands as a vertical slice that runs; no big-bang integration.
 

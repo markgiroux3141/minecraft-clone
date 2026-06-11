@@ -3,6 +3,7 @@
 #include <cstring>
 #include <format>
 #include <fstream>
+#include <iomanip>
 #include <string>
 
 #include "vox/core/Log.h"
@@ -100,11 +101,34 @@ void WorldSave::ReadManifest(int defaultSeed) {
             m_seed = static_cast<int>(seed);
         } else {
             GAME_ERROR("Save: malformed {}; using seed {}", path.string(), defaultSeed);
+            return;
+        }
+        PlayerState player;
+        int fly = 0;
+        if (in >> tag >> player.position.x >> player.position.y >> player.position.z >>
+                player.yaw >> player.pitch >> fly &&
+            tag == "player") {
+            player.fly = fly != 0;
+            m_player = player;
         }
         return;
     }
-    std::ofstream out{path};
+    WriteManifest();
+}
+
+void WorldSave::WriteManifest() const {
+    std::ofstream out{m_dir / "level.dat"};
     out << "voxcraft-save " << kManifestVersion << "\nseed " << m_seed << '\n';
+    if (m_player) {
+        out << std::setprecision(9) << "player " << m_player->position.x << ' '
+            << m_player->position.y << ' ' << m_player->position.z << ' ' << m_player->yaw << ' '
+            << m_player->pitch << ' ' << (m_player->fly ? 1 : 0) << '\n';
+    }
+}
+
+void WorldSave::SetPlayerState(const PlayerState& state) {
+    m_player = state;
+    WriteManifest();
 }
 
 void WorldSave::ReadRegionFile(const std::filesystem::path& path) {

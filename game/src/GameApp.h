@@ -1,8 +1,10 @@
 #pragma once
 
 #include <array>
+#include <filesystem>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 #include "vox/core/Application.h"
@@ -27,13 +29,21 @@ protected:
     void OnShutdown() override;
 
 private:
-    // Captured-cursor gameplay vs released-cursor pause menu.
-    enum class State : uint8_t { Playing, Paused };
+    // Title/world-select (no world, free cursor), captured-cursor gameplay,
+    // or the pause menu over a live world (free cursor).
+    enum class State : uint8_t { Title, Playing, Paused };
 
     void SetPaused(bool paused);
+    void RefreshWorldList();
+    // Loads (or creates) saves/<name>; defaultSeed only matters for a brand
+    // new save — an existing manifest's seed wins.
+    void EnterWorld(const std::string& name, int defaultSeed);
+    void CreateNewWorld();
+    void ExitToTitle(); // persists player state, drops the world
+    void PersistPlayerState();
     void HandleInput(double frameDt);
     void DrawTargetOutline();
-    void DrawUi(); // HUD + pause menu; may change state (menu clicks)
+    void DrawUi(); // HUD + menus; may change state (menu clicks)
 
     vox::PerspectiveCamera m_camera;
     Player m_player{m_camera};
@@ -61,7 +71,9 @@ private:
     // comparing drawn-chunk counts and spotting false culling.
     bool m_occlusionCulling = true;
 
-    State m_state = State::Playing;
+    State m_state = State::Title;
+    std::filesystem::path m_savesRoot;
+    std::vector<std::string> m_worlds; // directory names under m_savesRoot
 
     // Edge/repeat tracking for per-frame input.
     bool m_modeKeyWasDown = false;

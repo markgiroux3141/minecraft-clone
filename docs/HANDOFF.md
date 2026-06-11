@@ -1,14 +1,14 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-11, end of M9 (user-verified in-game: MDI renders
-identically at 60 fps, cave culling collapses drawn counts underground,
-LOD horizon to ~512 blocks with clean seams). Read alongside
-`ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md` (build
-commands, conventions).
+Updated: 2026-06-11, end of M10 (user-verified in-game: HUD, pause menu,
+world select, position persistence all working). Agreed milestone
+sequence: M10 UI/menus ✅ → M11 gameplay depth → M12 perf polish. Read
+alongside `ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md`
+(build commands, conventions).
 
 ## Where the project stands
 
-M0–M9 are done and verified:
+M0–M10 are done and verified:
 - Engine (`engine/src/vox/`, namespace `vox`): fixed-timestep app loop
   (20 TPS + interpolated render), GLFW window/input (incl. cursor capture),
   GL 4.6 renderer facade with DSA abstractions (Shader, Buffer/VertexArray,
@@ -28,11 +28,14 @@ M0–M9 are done and verified:
 
 ## Controls
 
-Cursor is always captured. WASD move, mouse look, Space jump (walk) or
-rise (fly), LeftShift sink (fly), LeftControl sprint/boost, F toggles
-walk/fly, O toggles occlusion culling (debug), LMB break, RMB place,
-1/2/3/4 hotbar (stone/dirt/grass/glowstone), Esc quits. Spawn at
-(8.5, 48, 8.5), falls to the terrain.
+Starts on the title screen (cursor free): click a world / New World /
+Quit. In game the cursor is captured: WASD move, mouse look, Space jump
+(walk) or rise (fly), LeftShift sink (fly), LeftControl sprint/boost,
+F toggles walk/fly, O toggles occlusion culling (debug), LMB break,
+RMB place, 1/2/3/4 hotbar (stone/dirt/grass/glowstone). Esc pauses
+(Resume / Save & Quit to Title) — quitting the app is the title screen's
+Quit button or the window X. Default spawn (8.5, 48, 8.5); a world with
+saved player state restores position/look/mode instead.
 
 ## M4 threaded pipeline + M6 versioned edits (how it works)
 
@@ -118,9 +121,11 @@ M6 break/place/fly. Exercise clean shutdown (`CloseMainWindow()`, expect
   when crossing chunk borders in debug builds; minor in release (user
   confirmed). Fix when it matters: cap uploaded bytes/frame, carry over.
 - Mesh pool sits at ~96 MB with the LOD shell (ChunkVertex is a lazy
-  48 B of floats — vertex compression to ~12 B is the known fix).
-- Block outline is near-black and low-contrast on dirt; revisit when HUD
-  work happens (crosshair is also still missing).
+  48 B of floats — vertex compression to ~12 B is the known fix, M12).
+- Block outline is light gray since M10 — fine on dirt/stone/grass, may
+  wash out on pale blocks (glowstone); GL core can't draw thick lines,
+  so a real fix means quad-based outlines.
+- Title screen world list shows at most 6 worlds (no scrolling yet).
 - Remote: https://github.com/markgiroux3141/minecraft-clone.git (branch
   `main`). Commit + push at milestone boundaries.
 
@@ -250,20 +255,56 @@ Stage 3 — LOD shell:
   every real chunk under it is meshed (DetailMeshedUnder) — no hole ring
   chasing a fast player.
 
-## Next: M10 — TBD (decide with the user)
+## M10 UI/menus (how it works)
 
-Candidates, roughly in discussed order of interest:
-- UI/menus milestone: crosshair + hotbar HUD, pause menu, world select
-  (WorldSave already supports multiple worlds — one directory each),
-  player-position persistence. Needs text/2D rendering + uncaptured-
-  cursor input + a game-state notion. Would also fix the low-contrast
-  block outline.
-- Gameplay depth: trees/structures, water + a transparent mesh pass,
-  more block types, day/night cycle (sun direction + sky gradient).
-- Perf polish (opportunistic, not urgent at 60 fps): vertex compression
-  (ChunkVertex 48 B -> ~12 B packed; halves the 96 MB pool and upload
-  bursts), per-frame GPU upload budget (smooths the walk-streaming
-  jitter the user noticed; release build already made it minor).
+- `vox::UiRenderer` (engine/renderer): batched 2D overlay — solid rects,
+  monospace bitmap text, and single texture-array layers (block icons),
+  one blended draw call per End() (auto-flush at 4096 quads). Pixel
+  coords, origin top-left; draws with depth off + blend on, restores GL
+  state after. The shader is EMBEDDED in UiRenderer.cpp (vertex layout
+  and sampler contract live with the batcher; per-vertex mode selects
+  solid/font/atlas, textureLod avoids derivative issues in the branches).
+- Font: `scripts/gen_font.py` (Pillow) bakes Consolas 16 px, thresholded
+  to 1-bit, into `assets/fonts/ascii.png` — ASCII 32..127 in a 16x6 grid
+  of 9x17 cells. Game passes it to SetFont; glyph size derives from the
+  image. Texture loads flipped (GL bottom-left origin) — glyph/icon UV
+  math in UiRenderer/DrawAtlasTile accounts for it.
+- Game UI (game/src/ui/): `Hud` (crosshair + hotbar + name label),
+  `PauseMenu`, `TitleScreen`, shared `Widgets` (UiButton/ShadowedText).
+  All immediate-mode statics: Draw(ui, screen, mouse, clickEdge) returns
+  what was clicked; GameApp owns all state. `GuiScale()` (Hud.h) is
+  Minecraft's auto rule: largest integer scale fitting 320x240 (3 at
+  1600x900); hotbar icons are 16 px tiles at integer scale (crisp).
+- GameApp state machine: Title (no world, free cursor), Playing
+  (captured), Paused (free cursor over live world). Esc toggles pause;
+  while paused the player tick / mouse look / targeting / edits freeze
+  but world streaming keeps running. Two guards worth keeping: Player
+  look-delta tracking resets while look is disabled (no camera jerk on
+  resume), and EnterWorld/SetPaused(false) set break/place wasDown +
+  cooldowns so the menu click can't fall through into a block edit.
+- World lifecycle: GameApp::EnterWorld creates vc::World on demand
+  (saves/<name>); ExitToTitle persists player state, resets the
+  unique_ptr (~World saves edited chunks + force-flushes), rescans the
+  world list. New World picks the first free of world, world2, ... with
+  a std::random_device seed (manifest persists it; existing manifests
+  win over any default).
+- Player state in the manifest: optional `player x y z yaw pitch fly`
+  line in level.dat (WorldSave::Get/SetPlayerState; SetPlayerState
+  rewrites the manifest immediately — quit-path only). Absent line =
+  pre-M10 save = default spawn. savetest covers the round-trip and that
+  seed/chunks survive the manifest rewrite.
+
+## Next: M11 — gameplay depth (then M12 perf polish)
+
+Agreed scope, staging TBD at session start: trees/structures (terrain
+gen decoration pass — needs cross-chunk placement), water + a
+transparent mesh pass (second pool stream or sorted pass; mesher
+currently skips non-opaque), more block types (sand, wood, leaves,
+water; texture layers via gen_textures.py), day/night cycle (sun
+direction + sky gradient; skylight already separate from block light in
+the shader, so tinting/scaling the sky term is the hook). M12 after:
+vertex compression (48 B -> ~12 B; halves the ~96 MB pool and upload
+bursts) + per-frame GPU upload budget.
 
 ## How to verify (UPDATED working agreement)
 

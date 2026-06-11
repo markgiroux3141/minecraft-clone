@@ -147,6 +147,9 @@ public:
     // glMultiDrawElementsIndirect via Meshes().Draw(items).
     vox::MeshPool& Meshes() { return m_meshPool; }
 
+    // The on-disk store (player state lives in its manifest). Main thread only.
+    WorldSave& SaveStore() { return m_save; }
+
     size_t LoadedChunkCount() const { return m_chunks.size(); }
     size_t PendingMeshCount() const { return m_pendingMeshes; }
     size_t JobsInFlight() const { return m_jobsInFlight; }

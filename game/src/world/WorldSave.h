@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -17,7 +18,9 @@ namespace vc {
 // from the generator are stored; everything else regenerates from the seed.
 //
 // Layout (all fields little-endian):
-//   <dir>/level.dat           text manifest: save format version + seed
+//   <dir>/level.dat           text manifest: save format version + seed,
+//                             plus an optional "player x y z yaw pitch fly"
+//                             line (absent in pre-M10 saves)
 //   <dir>/r.<rx>.<rz>.vxr     region file covering 32x32 chunk columns:
 //     uint32 magic "VXR1", uint32 chunkCount,
 //     chunkCount x { int32 cx, cy, cz; uint32 blobSize },
@@ -41,6 +44,18 @@ public:
     WorldSave(std::filesystem::path dir, int defaultSeed);
 
     int Seed() const { return m_seed; }
+
+    // Where the player left off, stored in the manifest. Absent in saves
+    // that predate it (the game falls back to the default spawn).
+    struct PlayerState {
+        glm::vec3 position{0.0f}; // feet center
+        float yaw = 0.0f;
+        float pitch = 0.0f;
+        bool fly = false;
+    };
+    const std::optional<PlayerState>& GetPlayerState() const { return m_player; }
+    // Rewrites the manifest immediately (it's a quit-path write, not per-frame).
+    void SetPlayerState(const PlayerState& state);
 
     // Null when the chunk was never saved. Invalidated by the next Put.
     const std::vector<uint8_t>* FindBlob(const glm::ivec3& chunkCoord) const;
@@ -77,11 +92,13 @@ private:
     }
 
     void ReadManifest(int defaultSeed);
+    void WriteManifest() const;
     void ReadRegionFile(const std::filesystem::path& path);
     void WriteRegionFile(const glm::ivec2& region) const;
 
     std::filesystem::path m_dir;
     int m_seed = 0;
+    std::optional<PlayerState> m_player;
     std::unordered_map<glm::ivec2, RegionChunks, IVec2Hash> m_regions;
     std::unordered_set<glm::ivec2, IVec2Hash> m_dirtyRegions;
     size_t m_count = 0;

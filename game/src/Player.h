@@ -31,7 +31,13 @@ public:
     void OnRender(double alpha, bool mouseLook = true);
 
     void ToggleMode();
+    void SetMode(Mode mode);
     Mode GetMode() const { return m_mode; }
+
+    // Persisted into the world save on exit.
+    glm::vec3 Position() const { return m_position; } // feet center
+    float Yaw() const { return m_yaw; }
+    float Pitch() const { return m_pitch; }
 
     // Does the player's AABB overlap this block? (placement check)
     bool Intersects(const glm::ivec3& block) const;

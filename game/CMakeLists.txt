@@ -8,6 +8,10 @@ add_executable(game
     src/ui/Hud.h
     src/ui/PauseMenu.cpp
     src/ui/PauseMenu.h
+    src/ui/TitleScreen.cpp
+    src/ui/TitleScreen.h
+    src/ui/Widgets.cpp
+    src/ui/Widgets.h
     src/world/Block.cpp
     src/world/Block.h
     src/world/Chunk.h
