@@ -56,8 +56,45 @@ def glowstone(x, y):
     return speckle(GLOWSTONE, x, y, 4, 18)
 
 
+SAND = (219, 207, 163)
+
+
+def sand(x, y):
+    return speckle(SAND, x, y, 6, 10)
+
+
+LOG = (104, 82, 50)
+LOG_DARK = (82, 64, 38)
+LOG_RING = (151, 124, 81)
+
+
+def log_side(x, y):
+    # Vertical bark striations: stripe choice keyed on x only.
+    if hash01(x, 0, 7) > 0.6:
+        return speckle(LOG_DARK, x, y, 7, 8)
+    return speckle(LOG, x, y, 7, 10)
+
+
+def log_top(x, y):
+    # Square growth rings inside a dark bark rim.
+    ring = max(abs(2 * x - 15), abs(2 * y - 15)) // 2  # 0..7 from center
+    if ring >= 7:
+        return speckle(LOG_DARK, x, y, 8, 8)
+    return speckle(LOG_RING if ring % 2 == 0 else LOG, x, y, 8, 6)
+
+
+LEAF = (58, 118, 41)
+
+
+def leaves(x, y):
+    # Mottled foliage with darker gaps.
+    if hash01(x, y, 9) > 0.8:
+        return speckle((40, 86, 30), x, y, 9, 8)
+    return speckle(LEAF, x, y, 9, 14)
+
+
 # Layer index in the texture array == position in this list.
-TILES = [stone, dirt, grass_side, grass_top, glowstone]
+TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top, leaves]
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:

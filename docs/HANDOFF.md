@@ -126,6 +126,9 @@ M6 break/place/fly. Exercise clean shutdown (`CloseMainWindow()`, expect
   wash out on pale blocks (glowstone); GL core can't draw thick lines,
   so a real fix means quad-based outlines.
 - Title screen world list shows at most 6 worlds (no scrolling yet).
+- Sand doesn't fall (user noted during M11 stage 1 verification). Needs a
+  block-update/scheduled-tick system — a good fit for a later gameplay
+  milestone alongside water flow.
 - Remote: https://github.com/markgiroux3141/minecraft-clone.git (branch
   `main`). Commit + push at milestone boundaries.
 

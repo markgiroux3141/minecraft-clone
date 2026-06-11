@@ -1,0 +1,124 @@
+// Structural regression test for terrain generation + decoration. Chunks
+// generate independently, so every tree must come out identical no matter
+// which chunk regenerates which part of it — seam bugs show up as floating
+// leaves or truncated trunks. Exits 0 on pass, 1 on the first failure.
+
+#include <cstdio>
+#include <cstdlib>
+#include <unordered_map>
+
+#include <glm/glm.hpp>
+
+#include "vox/core/Log.h"
+
+#include "world/Block.h"
+#include "world/Chunk.h"
+#include "world/Light.h"
+#include "world/TerrainGen.h"
+
+namespace {
+
+int g_failures = 0;
+
+void Check(bool ok, const char* what) {
+    std::printf("%s %s\n", ok ? "  ok " : "FAIL ", what);
+    if (!ok) {
+        ++g_failures;
+    }
+}
+
+struct IVec3Hash {
+    size_t operator()(const glm::ivec3& v) const {
+        return static_cast<size_t>(v.x) * 73856093u ^ static_cast<size_t>(v.y) * 19349663u ^
+               static_cast<size_t>(v.z) * 83492791u;
+    }
+};
+
+} // namespace
+
+int main() {
+    vox::Log::Init();
+    vc::blocks::RegisterDefaults();
+
+    constexpr int kSeed = 1337;
+    constexpr int kRadius = 3; // chunks; region spans [-48, 64) in x/z
+    const vc::TerrainGenerator gen(kSeed);
+
+    std::unordered_map<glm::ivec3, vc::Chunk, IVec3Hash> region;
+    for (int cz = -kRadius; cz <= kRadius; ++cz) {
+        for (int cx = -kRadius; cx <= kRadius; ++cx) {
+            for (int cy = 0; cy < vc::kWorldHeightChunks; ++cy) {
+                gen.Generate(region[{cx, cy, cz}], {cx, cy, cz});
+            }
+        }
+    }
+
+    const auto blockAt = [&](int wx, int wy, int wz) -> vc::BlockId {
+        if (wy < 0 || wy >= vc::kWorldHeightBlocks) {
+            return vc::blocks::Air;
+        }
+        const glm::ivec3 coord{wx >> 4, wy >> 4, wz >> 4};
+        const auto it = region.find(coord);
+        return it == region.end() ? vc::blocks::Air
+                                  : it->second.Get(wx & 15, wy & 15, wz & 15);
+    };
+
+    // Re-generating a chunk must be bit-identical (threaded gen relies on it).
+    {
+        vc::Chunk again;
+        gen.Generate(again, {1, 2, -1});
+        Check(again.Raw() == region.at({1, 2, -1}).Raw(), "generation is deterministic");
+    }
+
+    // Structural sweep over the interior (margin so canopies near the region
+    // edge don't reference ungenerated chunks).
+    const int lo = -kRadius * vc::Chunk::kSize + vc::Chunk::kSize;
+    const int hi = (kRadius + 1) * vc::Chunk::kSize - vc::Chunk::kSize;
+    size_t logs = 0;
+    size_t leafBlocks = 0;
+    bool trunksIntact = true;
+    bool leavesAnchored = true;
+    for (int wz = lo; wz < hi; ++wz) {
+        for (int wx = lo; wx < hi; ++wx) {
+            for (int wy = 1; wy < vc::kWorldHeightBlocks - 1; ++wy) {
+                const vc::BlockId id = blockAt(wx, wy, wz);
+                if (id == vc::blocks::Log) {
+                    ++logs;
+                    // A trunk runs dirt -> logs -> canopy with no gaps; a
+                    // vertical-seam bug would leave air above or below.
+                    const vc::BlockId below = blockAt(wx, wy - 1, wz);
+                    const vc::BlockId above = blockAt(wx, wy + 1, wz);
+                    if (below != vc::blocks::Log && below != vc::blocks::Dirt) {
+                        trunksIntact = false;
+                    }
+                    if (above != vc::blocks::Log && above != vc::blocks::Leaves) {
+                        trunksIntact = false;
+                    }
+                } else if (id == vc::blocks::Leaves) {
+                    ++leafBlocks;
+                    // Every canopy block sits within 2 blocks of its trunk; a
+                    // horizontal-seam bug strands leaves with no log nearby.
+                    bool anchored = false;
+                    for (int dy = -2; dy <= 2 && !anchored; ++dy) {
+                        for (int dz = -2; dz <= 2 && !anchored; ++dz) {
+                            for (int dx = -2; dx <= 2 && !anchored; ++dx) {
+                                anchored = blockAt(wx + dx, wy + dy, wz + dz) == vc::blocks::Log;
+                            }
+                        }
+                    }
+                    leavesAnchored &= anchored;
+                }
+            }
+        }
+    }
+    Check(logs > 0 && leafBlocks > 0, "trees actually generate");
+    Check(trunksIntact, "trunks are contiguous across chunk seams");
+    Check(leavesAnchored, "every leaf block has a trunk within reach");
+
+    if (g_failures == 0) {
+        std::printf("GenTest: all checks passed (%zu logs, %zu leaves)\n", logs, leafBlocks);
+    } else {
+        std::printf("GenTest: %d check(s) FAILED\n", g_failures);
+    }
+    return g_failures == 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+}

@@ -64,7 +64,7 @@ private:
     std::unique_ptr<vox::UiRenderer> m_ui;
 
     // Hotbar: keys 1..N select into this list (filled after block registration).
-    std::array<vc::BlockId, 4> m_hotbar{};
+    std::array<vc::BlockId, 7> m_hotbar{};
     size_t m_hotbarSlot = 0;
 
     // Occlusion culling (cave culling) is on by default; O toggles it for

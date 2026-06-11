@@ -50,6 +50,9 @@ extern BlockId Stone;
 extern BlockId Dirt;
 extern BlockId Grass;
 extern BlockId Glowstone;
+extern BlockId Sand;
+extern BlockId Log;
+extern BlockId Leaves;
 
 void RegisterDefaults();
 

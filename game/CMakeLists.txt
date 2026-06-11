@@ -41,3 +41,13 @@ add_executable(savetest
 target_include_directories(savetest PRIVATE src)
 target_link_libraries(savetest PRIVATE vox::engine)
 vox_set_target_defaults(savetest)
+
+# Structural regression test for terrain gen + tree decoration (run manually).
+add_executable(gentest
+    tests/GenTest.cpp
+    src/world/Block.cpp
+    src/world/TerrainGen.cpp
+)
+target_include_directories(gentest PRIVATE src)
+target_link_libraries(gentest PRIVATE vox::engine fastnoise)
+vox_set_target_defaults(gentest)

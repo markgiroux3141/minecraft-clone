@@ -29,6 +29,9 @@ BlockId Stone = 0;
 BlockId Dirt = 0;
 BlockId Grass = 0;
 BlockId Glowstone = 0;
+BlockId Sand = 0;
+BlockId Log = 0;
+BlockId Leaves = 0;
 
 void RegisterDefaults() {
     auto& registry = BlockRegistry::Get();
@@ -37,7 +40,9 @@ void RegisterDefaults() {
     }
 
     // Tile indices match the layer order in scripts/gen_textures.py:
-    // 0 stone, 1 dirt, 2 grass side, 3 grass top, 4 glowstone.
+    // 0 stone, 1 dirt, 2 grass side, 3 grass top, 4 glowstone, 5 sand,
+    // 6 log side, 7 log top, 8 leaves. Existing save blobs store BlockIds,
+    // so only APPEND registrations — never reorder.
     Stone = registry.Register(BlockDef::Uniform("stone", 0));
     Dirt = registry.Register(BlockDef::Uniform("dirt", 1));
 
@@ -49,6 +54,16 @@ void RegisterDefaults() {
     BlockDef glowstone = BlockDef::Uniform("glowstone", 4);
     glowstone.emission = 15;
     Glowstone = registry.Register(std::move(glowstone));
+
+    Sand = registry.Register(BlockDef::Uniform("sand", 5));
+
+    BlockDef log = BlockDef::Uniform("log", 6);
+    log.faceTiles[static_cast<size_t>(BlockFace::PosY)] = 7;
+    log.faceTiles[static_cast<size_t>(BlockFace::NegY)] = 7;
+    Log = registry.Register(std::move(log));
+
+    // Opaque for now; cutout leaves come with the M11 transparency pass.
+    Leaves = registry.Register(BlockDef::Uniform("leaves", 8));
 
     GAME_INFO("Registered {} block types", registry.Count());
 }
