@@ -48,8 +48,13 @@ private:
     std::array<vc::BlockId, 4> m_hotbar{};
     size_t m_hotbarSlot = 0;
 
+    // Occlusion culling (cave culling) is on by default; O toggles it for
+    // comparing drawn-chunk counts and spotting false culling.
+    bool m_occlusionCulling = true;
+
     // Edge/repeat tracking for per-frame input.
     bool m_modeKeyWasDown = false;
+    bool m_occlusionKeyWasDown = false;
     bool m_breakWasDown = false;
     bool m_placeWasDown = false;
     double m_breakCooldown = 0.0;

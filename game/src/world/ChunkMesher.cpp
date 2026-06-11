@@ -190,6 +190,71 @@ void EmitQuad(ChunkMesh& mesh, const FaceBasis& fb, int slice, int u0, int v0, i
     }
 }
 
+// Face connectivity for occlusion culling: flood fill the chunk's
+// non-opaque cells; every component connects all the faces it touches.
+// Cell index i is YZX (Chunk::Index), so x = i & 15, z = (i>>4) & 15,
+// y = i >> 8.
+VisibilityBits ComputeVisibility(const PaddedVolume& vol) {
+    std::array<uint8_t, Chunk::kVolume> visited{};
+    std::array<uint16_t, Chunk::kVolume> queue;
+    VisibilityBits bits = 0;
+
+    for (int start = 0; start < Chunk::kVolume; ++start) {
+        const int sx = start & 15;
+        const int sz = (start >> 4) & 15;
+        const int sy = start >> 8;
+        if (visited[start] || vol.opaque[PadIndex(sx, sy, sz)]) {
+            continue;
+        }
+        visited[start] = 1;
+        queue[0] = static_cast<uint16_t>(start);
+        size_t head = 0;
+        size_t tail = 1;
+        int faces = 0; // touched-face mask, BlockFace order
+
+        while (head < tail) {
+            const int i = queue[head++];
+            const int x = i & 15;
+            const int z = (i >> 4) & 15;
+            const int y = i >> 8;
+            faces |= (x == 15) << 0 | (x == 0) << 1 | (y == 15) << 2 | (y == 0) << 3 |
+                     (z == 15) << 4 | (z == 0) << 5;
+
+            constexpr int kStep[6][4] = {
+                // dx, dy, dz, Chunk::Index delta
+                {+1, 0, 0, 1},   {-1, 0, 0, -1},   {0, +1, 0, 256},
+                {0, -1, 0, -256}, {0, 0, +1, 16},  {0, 0, -1, -16},
+            };
+            for (const auto& s : kStep) {
+                const int nx = x + s[0];
+                const int ny = y + s[1];
+                const int nz = z + s[2];
+                if (!Chunk::InBounds(nx, ny, nz)) {
+                    continue;
+                }
+                const int ni = i + s[3];
+                if (visited[ni] || vol.opaque[PadIndex(nx, ny, nz)]) {
+                    continue;
+                }
+                visited[ni] = 1;
+                queue[tail++] = static_cast<uint16_t>(ni);
+            }
+        }
+
+        for (int a = 0; a < 6; ++a) {
+            for (int b = a + 1; b < 6; ++b) {
+                if ((faces >> a & 1) && (faces >> b & 1)) {
+                    bits |= static_cast<VisibilityBits>(1u << FacePairBit(a, b));
+                }
+            }
+        }
+        if (bits == kAllFacesConnected) {
+            return bits; // can't grow further
+        }
+    }
+    return bits;
+}
+
 } // namespace
 
 ChunkMesh ChunkMesher::Build(const ChunkSnapshot& snapshot) {
@@ -201,6 +266,7 @@ ChunkMesh ChunkMesher::Build(const ChunkSnapshot& snapshot) {
     const auto& registry = BlockRegistry::Get();
 
     ChunkMesh mesh;
+    mesh.visibility = ComputeVisibility(vol);
     uint64_t mask[Chunk::kSize * Chunk::kSize];
 
     for (int face = 0; face < 6; ++face) {

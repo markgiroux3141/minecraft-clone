@@ -23,6 +23,7 @@ enum class Key : int {
     E = 69,
     F = 70,
     G = 71,
+    O = 79,
     Q = 81,
     R = 82,
     S = 83,

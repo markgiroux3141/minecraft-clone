@@ -12,6 +12,7 @@
 #include <glm/glm.hpp>
 
 #include "vox/core/ThreadPool.h"
+#include "vox/renderer/Frustum.h"
 #include "vox/renderer/MeshPool.h"
 
 #include "world/Chunk.h"
@@ -36,6 +37,7 @@ struct ChunkEntry {
     // Allocation in World's MeshPool; invalid until uploaded, or if empty.
     vox::MeshPool::MeshHandle mesh = vox::MeshPool::kInvalidMesh;
     uint32_t indexCount = 0;
+    VisibilityBits visibility = 0; // face connectivity, valid once meshedVersion != 0
     bool edited = false; // diverges from the save store — persist before unload
 };
 
@@ -91,6 +93,16 @@ public:
                                             float maxDistance) const;
 
     const Chunk* GetChunk(const glm::ivec3& chunkCoord) const;
+
+    // Builds the frame's draw list. With occlusion on, BFS-walks the chunk
+    // grid from the eye through each chunk's face-connectivity bits
+    // (Minecraft-style cave culling) so chunks sealed behind terrain are
+    // skipped; chunks without visibility data yet are traversed
+    // permissively (over-draw, never false culling). The frustum gates
+    // drawing, not traversal. With occlusion off: plain frustum cull of
+    // everything. Draw order is the BFS order — roughly front-to-back.
+    void CollectVisibleChunks(const glm::vec3& eye, const vox::Frustum& frustum, bool occlusion,
+                              std::vector<vox::MeshPool::DrawItem>& out);
 
     template <typename Fn> // fn(chunkCoord, meshHandle, indexCount)
     void ForEachRenderableChunk(Fn&& fn) const {
@@ -165,6 +177,18 @@ private:
     size_t m_pendingMeshes = 0; // chunks in radius without an up-to-date mesh
     size_t m_jobsInFlight = 0;  // main-thread counter: ++submit, --drain
     std::chrono::steady_clock::time_point m_lastAutosave;
+
+    // CollectVisibleChunks scratch, reused across frames. The visit grid
+    // covers the view square (stamped instead of cleared); the queue holds
+    // the BFS frontier.
+    struct VisitNode {
+        glm::ivec3 coord;
+        uint8_t enterFace; // BlockFace the walk entered through; 6 = seed
+        uint8_t dirMask;   // directions stepped on this path, BlockFace bits
+    };
+    std::vector<uint32_t> m_visitGrid;
+    uint32_t m_visitStamp = 0;
+    std::vector<VisitNode> m_bfsQueue;
 
     std::mutex m_completedMutex; // guards the result queues
     std::vector<GenResult> m_completedGen;

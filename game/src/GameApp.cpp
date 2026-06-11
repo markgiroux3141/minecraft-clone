@@ -82,6 +82,14 @@ void GameApp::HandleInput(double frameDt) {
     }
     m_modeKeyWasDown = modeKey;
 
+    // O toggles occlusion culling (debug/comparison; frustum-only when off).
+    const bool occlusionKey = vox::Input::IsKeyDown(vox::Key::O);
+    if (occlusionKey && !m_occlusionKeyWasDown) {
+        m_occlusionCulling = !m_occlusionCulling;
+        GAME_INFO("Occlusion culling {}", m_occlusionCulling ? "on" : "off");
+    }
+    m_occlusionKeyWasDown = occlusionKey;
+
     // 1..N select the hotbar block.
     for (size_t i = 0; i < m_hotbar.size(); ++i) {
         if (vox::Input::IsKeyDown(static_cast<vox::Key>(static_cast<int>(vox::Key::Num1) + i))) {
@@ -143,20 +151,7 @@ void GameApp::OnRender(double alpha, double frameDt) {
     m_blockTextures->Bind(0);
 
     const auto frustum = vox::Frustum::FromViewProjection(m_camera.ViewProjection());
-    m_chunksWithMesh = 0;
-    m_trianglesLoaded = 0;
-    m_drawItems.clear();
-    m_world->ForEachRenderableChunk(
-        [&](const glm::ivec3& coord, vox::MeshPool::MeshHandle mesh, uint32_t indexCount) {
-            ++m_chunksWithMesh;
-            m_trianglesLoaded += indexCount / 3;
-            const glm::vec3 min = glm::vec3(coord * vc::Chunk::kSize);
-            const glm::vec3 max = min + glm::vec3(static_cast<float>(vc::Chunk::kSize));
-            if (!frustum.IntersectsAABB(min, max)) {
-                return;
-            }
-            m_drawItems.push_back({mesh, glm::vec4(min, 0.0f)});
-        });
+    m_world->CollectVisibleChunks(m_camera.Position(), frustum, m_occlusionCulling, m_drawItems);
     m_world->Meshes().Draw(m_drawItems);
     m_chunksDrawn = m_drawItems.size();
 
@@ -165,6 +160,13 @@ void GameApp::OnRender(double alpha, double frameDt) {
     ++m_frameCount;
     m_statsTimer += frameDt;
     if (m_statsTimer >= 1.0) {
+        m_chunksWithMesh = 0;
+        m_trianglesLoaded = 0;
+        m_world->ForEachRenderableChunk(
+            [&](const glm::ivec3&, vox::MeshPool::MeshHandle, uint32_t indexCount) {
+                ++m_chunksWithMesh;
+                m_trianglesLoaded += indexCount / 3;
+            });
         const auto pos = m_camera.Position();
         GetWindow().SetTitle(std::format(
             "Voxcraft | {} fps | {} tps | ({:.0f}, {:.0f}, {:.0f}) | {} | hand: {} | chunks: {} "

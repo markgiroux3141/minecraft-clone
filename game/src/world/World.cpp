@@ -461,12 +461,114 @@ void World::DrainCompletedJobs() {
         if (meshed.version == entry.dataVersion) {
             UploadMesh(entry, meshed.mesh);
             entry.meshedVersion = meshed.version;
+            entry.visibility = meshed.mesh.visibility;
         }
         // Stale results (version mismatch after an edit or light change)
         // are dropped; the old mesh keeps rendering until the rebuilt one
         // lands. Either way the job is resolved, so allow resubmit.
         if (entry.meshingVersion == meshed.version) {
             entry.meshingVersion = 0;
+        }
+    }
+}
+
+void World::CollectVisibleChunks(const glm::vec3& eye, const vox::Frustum& frustum,
+                                 bool occlusion, std::vector<vox::MeshPool::DrawItem>& out) {
+    out.clear();
+
+    if (!occlusion) {
+        for (const auto& [coord, entry] : m_chunks) {
+            if (entry.mesh == vox::MeshPool::kInvalidMesh) {
+                continue;
+            }
+            const glm::vec3 min = glm::vec3(coord * Chunk::kSize);
+            if (frustum.IntersectsAABB(min, min + glm::vec3(Chunk::kSize))) {
+                out.push_back({entry.mesh, glm::vec4(min, 0.0f)});
+            }
+        }
+        return;
+    }
+
+    const int centerX = FloorDivChunk(eye.x);
+    const int centerZ = FloorDivChunk(eye.z);
+    const int eyeY = FloorDivChunk(eye.y);
+    constexpr int kSpan = 2 * kViewRadius + 1;
+    constexpr uint8_t kSeedFace = 6;
+
+    if (m_visitGrid.size() != size_t{kSpan} * kSpan * kHeightChunks) {
+        m_visitGrid.assign(size_t{kSpan} * kSpan * kHeightChunks, 0);
+    }
+    ++m_visitStamp;
+    m_bfsQueue.clear();
+
+    // Enqueues + draws a chunk the walk reached. Traversal is bounded by
+    // the view square; the frustum gates only the draw-list insert.
+    const auto visit = [&](const glm::ivec3& coord, uint8_t enterFace, uint8_t dirMask) {
+        if (coord.y < 0 || coord.y >= kHeightChunks ||
+            std::abs(coord.x - centerX) > kViewRadius ||
+            std::abs(coord.z - centerZ) > kViewRadius) {
+            return;
+        }
+        uint32_t& stamp =
+            m_visitGrid[(static_cast<size_t>(coord.y) * kSpan + (coord.z - centerZ + kViewRadius)) *
+                            kSpan +
+                        (coord.x - centerX + kViewRadius)];
+        if (stamp == m_visitStamp) {
+            return;
+        }
+        stamp = m_visitStamp;
+        m_bfsQueue.push_back({coord, enterFace, dirMask});
+
+        const auto it = m_chunks.find(coord);
+        if (it != m_chunks.end() && it->second.mesh != vox::MeshPool::kInvalidMesh) {
+            const glm::vec3 min = glm::vec3(coord * Chunk::kSize);
+            if (frustum.IntersectsAABB(min, min + glm::vec3(Chunk::kSize))) {
+                out.push_back({it->second.mesh, glm::vec4(min, 0.0f)});
+            }
+        }
+    };
+
+    if (eyeY >= kHeightChunks) {
+        // Above the world everything is open sky: every column's top chunk
+        // is a seed, entered through its top face.
+        for (int dz = -kViewRadius; dz <= kViewRadius; ++dz) {
+            for (int dx = -kViewRadius; dx <= kViewRadius; ++dx) {
+                visit({centerX + dx, kHeightChunks - 1, centerZ + dz},
+                      static_cast<uint8_t>(BlockFace::PosY), 0);
+            }
+        }
+    } else if (eyeY < 0) {
+        for (int dz = -kViewRadius; dz <= kViewRadius; ++dz) {
+            for (int dx = -kViewRadius; dx <= kViewRadius; ++dx) {
+                visit({centerX + dx, 0, centerZ + dz}, static_cast<uint8_t>(BlockFace::NegY), 0);
+            }
+        }
+    } else {
+        visit({centerX, eyeY, centerZ}, kSeedFace, 0);
+    }
+
+    // BlockFace order: +X, -X, +Y, -Y, +Z, -Z.
+    constexpr glm::ivec3 kFaceDirs[6] = {
+        {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1},
+    };
+    for (size_t head = 0; head < m_bfsQueue.size(); ++head) {
+        const VisitNode node = m_bfsQueue[head]; // copy: visit() reallocates the queue
+        const auto it = m_chunks.find(node.coord);
+        // Unknown interiors (not yet meshed) traverse permissively: brief
+        // over-draw at stream edges instead of chunks blinking in late.
+        const VisibilityBits vis = (it != m_chunks.end() && it->second.meshedVersion != 0)
+                                       ? it->second.visibility
+                                       : kAllFacesConnected;
+        for (int d = 0; d < 6; ++d) {
+            if ((node.dirMask >> OppositeFace(d)) & 1) {
+                continue; // never step back toward the camera
+            }
+            if (node.enterFace != kSeedFace && node.enterFace != d &&
+                !FacesConnected(vis, node.enterFace, d)) {
+                continue;
+            }
+            visit(node.coord + kFaceDirs[d], static_cast<uint8_t>(OppositeFace(d)),
+                  static_cast<uint8_t>(node.dirMask | (1u << d)));
         }
     }
 }

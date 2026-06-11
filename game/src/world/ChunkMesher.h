@@ -8,6 +8,7 @@
 
 #include "world/Chunk.h"
 #include "world/Light.h"
+#include "world/Visibility.h"
 
 namespace vc {
 
@@ -25,6 +26,7 @@ struct ChunkVertex {
 // {0,1,2, 2,3,0} via vox::MeshPool, so no per-chunk index data exists.
 struct ChunkMesh {
     std::vector<ChunkVertex> vertices;
+    VisibilityBits visibility = 0; // face connectivity for occlusion culling
 };
 
 // Immutable view of a chunk and its full 3x3x3 neighborhood (blocks and
