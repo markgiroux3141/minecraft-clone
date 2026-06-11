@@ -10,8 +10,10 @@ layout(location = 6) in float a_block;
 
 uniform mat4 u_viewProj;
 
-// Per-draw chunk origin, filled by vox::MeshPool::Draw (xyz = world-space
-// chunk min corner) and indexed by the multi-draw's gl_DrawID.
+// Per-draw chunk transform, filled by vox::MeshPool::Draw and indexed by
+// the multi-draw's gl_DrawID: xyz = world-space chunk min corner, w =
+// uniform scale (1 for full-detail chunks, 2 for half-res LOD chunks
+// whose vertices are in cell units).
 layout(std430, binding = 0) readonly buffer PerDraw {
     vec4 u_perDraw[];
 };
@@ -28,5 +30,6 @@ void main() {
     v_ao = a_ao;
     v_sky = a_sky;
     v_block = a_block;
-    gl_Position = u_viewProj * vec4(a_position + u_perDraw[gl_DrawID].xyz, 1.0);
+    gl_Position =
+        u_viewProj * vec4(a_position * u_perDraw[gl_DrawID].w + u_perDraw[gl_DrawID].xyz, 1.0);
 }

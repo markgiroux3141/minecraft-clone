@@ -68,7 +68,14 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
 - **M8 — Persistence** ✅: region-file saves of edited chunks (RLE blobs,
   atomic rewrites, seed manifest), loaded on stream-in before falling back
   to the generator; save on unload + 30 s autosave + quit flush.
-- **M9 — Scale**: occlusion culling, multi-draw indirect, LOD for far chunks.
+- **M9 — Scale** ✅: one multi-draw-indirect call for all chunk meshes
+  (`vox::MeshPool` + gl_DrawID SSBO), Minecraft-style cave-culling
+  occlusion (face-connectivity BFS from the eye), half-res LOD shell out
+  to ~512 blocks (downsampled real terrain, same mesher/pool, 2x scale).
+- **M10 — TBD**: candidates: UI/menus (crosshair, hotbar HUD, pause,
+  world select), gameplay depth (trees, water + transparency pass, more
+  blocks, day/night), or perf polish (vertex compression, per-frame
+  upload budget).
 
 Each milestone lands as a vertical slice that runs; no big-bang integration.
 

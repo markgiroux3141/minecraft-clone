@@ -40,6 +40,49 @@ int FloorDivChunk(float worldCoord) {
     return static_cast<int>(std::floor(worldCoord / static_cast<float>(Chunk::kSize)));
 }
 
+// Chebyshev distances from the center column to a LOD column, which covers
+// regular columns [2c, 2c+1] on each axis: "near" to its closest regular
+// column (outer ring bounds), "far" to its farthest (inner bounds — any
+// part outside the detail radius means the column must be drawn).
+int LodAxisDist(int lodC, int center, bool far) {
+    const int lo = 2 * lodC;
+    const int hi = lo + 1;
+    const int dLo = std::abs(lo - center);
+    const int dHi = std::abs(hi - center);
+    if (far) {
+        return std::max(dLo, dHi);
+    }
+    return center >= lo && center <= hi ? 0 : std::min(dLo, dHi);
+}
+
+int LodNearDist(const glm::ivec2& lodColumn, int centerX, int centerZ) {
+    return std::max(LodAxisDist(lodColumn.x, centerX, false),
+                    LodAxisDist(lodColumn.y, centerZ, false));
+}
+
+int LodFarDist(const glm::ivec2& lodColumn, int centerX, int centerZ) {
+    return std::max(LodAxisDist(lodColumn.x, centerX, true),
+                    LodAxisDist(lodColumn.y, centerZ, true));
+}
+
+// LOD chunks are meshed as if fully sky-lit: at LOD distances everything
+// visible is outdoor surface, and the real lighting pipeline only covers
+// loaded full-detail columns.
+const std::shared_ptr<const ChunkLight>& FullBrightLight() {
+    static const std::shared_ptr<const ChunkLight> light = [] {
+        auto l = std::make_shared<ChunkLight>();
+        for (int y = 0; y < Chunk::kSize; ++y) {
+            for (int z = 0; z < Chunk::kSize; ++z) {
+                for (int x = 0; x < Chunk::kSize; ++x) {
+                    l->Set(x, y, z, ChunkLight::Pack(15, 0));
+                }
+            }
+        }
+        return l;
+    }();
+    return light;
+}
+
 // Does the border slab of light values facing (axis, side) differ between
 // the two sections? Used to bump only the neighbor meshes that can
 // actually see a light change — neighbors sample at most one cell across
@@ -354,31 +397,157 @@ void World::SubmitMesh(const glm::ivec3& coord) {
     });
 }
 
-void World::UploadMesh(ChunkEntry& entry, const ChunkMesh& mesh) {
-    if (entry.mesh != vox::MeshPool::kInvalidMesh) {
-        m_meshPool.Free(entry.mesh);
-        entry.mesh = vox::MeshPool::kInvalidMesh;
-        entry.indexCount = 0;
+void World::UploadMesh(vox::MeshPool::MeshHandle& handle, uint32_t& indexCount,
+                       const ChunkMesh& mesh) {
+    if (handle != vox::MeshPool::kInvalidMesh) {
+        m_meshPool.Free(handle);
+        handle = vox::MeshPool::kInvalidMesh;
+        indexCount = 0;
     }
     if (mesh.vertices.empty()) {
         return;
     }
-    entry.mesh =
-        m_meshPool.Allocate(mesh.vertices.data(), static_cast<uint32_t>(mesh.vertices.size()));
-    entry.indexCount = m_meshPool.IndexCount(entry.mesh);
+    handle = m_meshPool.Allocate(mesh.vertices.data(),
+                                 static_cast<uint32_t>(mesh.vertices.size()));
+    indexCount = m_meshPool.IndexCount(handle);
+}
+
+bool World::LodNeighborsReady(const glm::ivec2& lodColumn) const {
+    for (int dz = -1; dz <= 1; ++dz) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            const auto it = m_lodColumns.find(lodColumn + glm::ivec2{dx, dz});
+            if (it == m_lodColumns.end() || !it->second.cells[0]) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+void World::SubmitLodGenerate(const glm::ivec2& lodColumn) {
+    m_lodColumns.emplace(lodColumn, LodColumnEntry{});
+    ++m_jobsInFlight;
+    m_pool.Submit([this, lodColumn] {
+        // Generate the 2x2 real columns under this LOD column, then
+        // downsample 2x2x2 blocks -> 1 cell. The cell id is the most
+        // common non-air block (ties to the topmost), so any solid source
+        // block makes the cell solid: LOD terrain is a superset of the
+        // real terrain, which keeps the detail/LOD seam free of holes.
+        auto src = std::make_unique<std::array<Chunk, 4 * size_t{kHeightChunks}>>();
+        const auto srcAt = [&](int cx, int cz, int cy) -> Chunk& {
+            return (*src)[static_cast<size_t>((cz * 2 + cx) * kHeightChunks + cy)];
+        };
+        for (int cz = 0; cz < 2; ++cz) {
+            for (int cx = 0; cx < 2; ++cx) {
+                for (int cy = 0; cy < kHeightChunks; ++cy) {
+                    m_generator.Generate(
+                        srcAt(cx, cz, cy),
+                        {lodColumn.x * 2 + cx, cy, lodColumn.y * 2 + cz});
+                }
+            }
+        }
+
+        LodGenResult result{lodColumn, {}};
+        for (int ly = 0; ly < kLodHeightChunks; ++ly) {
+            auto lod = std::make_shared<Chunk>();
+            for (int y = 0; y < Chunk::kSize; ++y) {
+                for (int z = 0; z < Chunk::kSize; ++z) {
+                    for (int x = 0; x < Chunk::kSize; ++x) {
+                        BlockId ids[8];
+                        int count = 0;
+                        // Top-down so the tie-break favors surface blocks
+                        // (grass over the dirt underneath it).
+                        for (int dy = 1; dy >= 0; --dy) {
+                            const int by = (ly * Chunk::kSize + y) * 2 + dy;
+                            for (int dz = 0; dz < 2; ++dz) {
+                                for (int dx = 0; dx < 2; ++dx) {
+                                    const BlockId id = srcAt(x >> 3, z >> 3, by >> 4)
+                                                           .Get((x * 2 + dx) & 15, by & 15,
+                                                                (z * 2 + dz) & 15);
+                                    if (id != blocks::Air) {
+                                        ids[count++] = id;
+                                    }
+                                }
+                            }
+                        }
+                        BlockId best = blocks::Air;
+                        int bestCount = 0;
+                        for (int i = 0; i < count; ++i) {
+                            int n = 0;
+                            for (int j = 0; j < count; ++j) {
+                                n += ids[j] == ids[i];
+                            }
+                            if (n > bestCount) {
+                                bestCount = n;
+                                best = ids[i];
+                            }
+                        }
+                        lod->Set(x, y, z, best);
+                    }
+                }
+            }
+            result.cells[ly] = std::move(lod);
+        }
+        std::lock_guard lock(m_completedMutex);
+        m_completedLodGen.push_back(std::move(result));
+    });
+}
+
+void World::SubmitLodMesh(const glm::ivec2& lodColumn) {
+    LodColumnEntry& entry = m_lodColumns.at(lodColumn);
+    entry.meshInFlight = true;
+
+    // Snapshots are pointer copies, captured on the main thread like
+    // regular mesh jobs. Missing vertical neighbors read as air.
+    std::array<ChunkSnapshot, kLodHeightChunks> snapshots;
+    for (int ly = 0; ly < kLodHeightChunks; ++ly) {
+        ChunkSnapshot& snapshot = snapshots[ly];
+        snapshot.skyAbove = ly == kLodHeightChunks - 1;
+        for (int dy = -1; dy <= 1; ++dy) {
+            const int ny = ly + dy;
+            if (ny < 0 || ny >= kLodHeightChunks) {
+                continue;
+            }
+            for (int dz = -1; dz <= 1; ++dz) {
+                for (int dx = -1; dx <= 1; ++dx) {
+                    const auto it = m_lodColumns.find(lodColumn + glm::ivec2{dx, dz});
+                    if (it != m_lodColumns.end()) {
+                        snapshot.chunks[ChunkSnapshot::Index(dx + 1, dy + 1, dz + 1)] =
+                            it->second.cells[ny];
+                    }
+                }
+            }
+        }
+        snapshot.light.fill(FullBrightLight());
+    }
+
+    ++m_jobsInFlight;
+    m_pool.Submit([this, lodColumn, snapshots = std::move(snapshots)] {
+        LodMeshResult result{lodColumn, {}};
+        for (int ly = 0; ly < kLodHeightChunks; ++ly) {
+            result.meshes[ly] = ChunkMesher::Build(snapshots[ly]);
+        }
+        std::lock_guard lock(m_completedMutex);
+        m_completedLodMesh.push_back(std::move(result));
+    });
 }
 
 void World::DrainCompletedJobs() {
     std::vector<GenResult> gens;
     std::vector<LightResult> lights;
     std::vector<MeshResult> meshes;
+    std::vector<LodGenResult> lodGens;
+    std::vector<LodMeshResult> lodMeshes;
     {
         std::lock_guard lock(m_completedMutex);
         gens.swap(m_completedGen);
         lights.swap(m_completedLight);
         meshes.swap(m_completedMesh);
+        lodGens.swap(m_completedLodGen);
+        lodMeshes.swap(m_completedLodMesh);
     }
-    m_jobsInFlight -= gens.size() + lights.size() + meshes.size();
+    m_jobsInFlight -=
+        gens.size() + lights.size() + meshes.size() + lodGens.size() + lodMeshes.size();
 
     for (auto& gen : gens) {
         const auto it = m_chunks.find(gen.coord);
@@ -459,7 +628,7 @@ void World::DrainCompletedJobs() {
         }
         ChunkEntry& entry = it->second;
         if (meshed.version == entry.dataVersion) {
-            UploadMesh(entry, meshed.mesh);
+            UploadMesh(entry.mesh, entry.indexCount, meshed.mesh);
             entry.meshedVersion = meshed.version;
             entry.visibility = meshed.mesh.visibility;
         }
@@ -470,11 +639,37 @@ void World::DrainCompletedJobs() {
             entry.meshingVersion = 0;
         }
     }
+
+    for (auto& lodGen : lodGens) {
+        const auto it = m_lodColumns.find(lodGen.column);
+        if (it == m_lodColumns.end() || it->second.cells[0]) {
+            continue; // unloaded mid-job, or a duplicate after unload+reload
+        }
+        it->second.cells = std::move(lodGen.cells);
+    }
+
+    for (auto& lodMeshed : lodMeshes) {
+        const auto it = m_lodColumns.find(lodMeshed.column);
+        if (it == m_lodColumns.end()) {
+            continue; // unloaded mid-job; meshes were never uploaded
+        }
+        LodColumnEntry& entry = it->second;
+        entry.meshInFlight = false;
+        if (!entry.cells[0] || entry.meshed) {
+            continue; // recreated mid-job (let the rescan remesh) or duplicate
+        }
+        for (int ly = 0; ly < kLodHeightChunks; ++ly) {
+            UploadMesh(entry.mesh[ly], entry.indexCount[ly], lodMeshed.meshes[ly]);
+        }
+        entry.meshed = true;
+    }
 }
 
 void World::CollectVisibleChunks(const glm::vec3& eye, const vox::Frustum& frustum,
                                  bool occlusion, std::vector<vox::MeshPool::DrawItem>& out) {
     out.clear();
+    const int centerX = FloorDivChunk(eye.x);
+    const int centerZ = FloorDivChunk(eye.z);
 
     if (!occlusion) {
         for (const auto& [coord, entry] : m_chunks) {
@@ -483,14 +678,13 @@ void World::CollectVisibleChunks(const glm::vec3& eye, const vox::Frustum& frust
             }
             const glm::vec3 min = glm::vec3(coord * Chunk::kSize);
             if (frustum.IntersectsAABB(min, min + glm::vec3(Chunk::kSize))) {
-                out.push_back({entry.mesh, glm::vec4(min, 0.0f)});
+                out.push_back({entry.mesh, glm::vec4(min, 1.0f)});
             }
         }
+        AppendLodDraws(centerX, centerZ, frustum, out);
         return;
     }
 
-    const int centerX = FloorDivChunk(eye.x);
-    const int centerZ = FloorDivChunk(eye.z);
     const int eyeY = FloorDivChunk(eye.y);
     constexpr int kSpan = 2 * kViewRadius + 1;
     constexpr uint8_t kSeedFace = 6;
@@ -523,7 +717,7 @@ void World::CollectVisibleChunks(const glm::vec3& eye, const vox::Frustum& frust
         if (it != m_chunks.end() && it->second.mesh != vox::MeshPool::kInvalidMesh) {
             const glm::vec3 min = glm::vec3(coord * Chunk::kSize);
             if (frustum.IntersectsAABB(min, min + glm::vec3(Chunk::kSize))) {
-                out.push_back({it->second.mesh, glm::vec4(min, 0.0f)});
+                out.push_back({it->second.mesh, glm::vec4(min, 1.0f)});
             }
         }
     };
@@ -569,6 +763,50 @@ void World::CollectVisibleChunks(const glm::vec3& eye, const vox::Frustum& frust
             }
             visit(node.coord + kFaceDirs[d], static_cast<uint8_t>(OppositeFace(d)),
                   static_cast<uint8_t>(node.dirMask | (1u << d)));
+        }
+    }
+
+    AppendLodDraws(centerX, centerZ, frustum, out);
+}
+
+bool World::DetailMeshedUnder(const glm::ivec2& lodColumn) const {
+    for (int dz = 0; dz < kLodScale; ++dz) {
+        for (int dx = 0; dx < kLodScale; ++dx) {
+            for (int cy = 0; cy < kHeightChunks; ++cy) {
+                const auto it = m_chunks.find(
+                    glm::ivec3{lodColumn.x * kLodScale + dx, cy, lodColumn.y * kLodScale + dz});
+                if (it == m_chunks.end() || it->second.meshedVersion == 0) {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+void World::AppendLodDraws(int centerX, int centerZ, const vox::Frustum& frustum,
+                           std::vector<vox::MeshPool::DrawItem>& out) const {
+    constexpr float kLodChunkSize = static_cast<float>(Chunk::kSize * kLodScale);
+    for (const auto& [lodColumn, entry] : m_lodColumns) {
+        if (!entry.meshed) {
+            continue;
+        }
+        // Columns inside the detail radius keep drawing until the real
+        // terrain under them has meshed — no hole ring chasing a fast
+        // player. The reverse handover (detail still meshed while LOD
+        // appears) can't show holes thanks to the solid-biased downsample.
+        if (LodFarDist(lodColumn, centerX, centerZ) <= kViewRadius &&
+            DetailMeshedUnder(lodColumn)) {
+            continue;
+        }
+        for (int ly = 0; ly < kLodHeightChunks; ++ly) {
+            if (entry.mesh[ly] == vox::MeshPool::kInvalidMesh) {
+                continue;
+            }
+            const glm::vec3 min = glm::vec3(lodColumn.x, ly, lodColumn.y) * kLodChunkSize;
+            if (frustum.IntersectsAABB(min, min + glm::vec3(kLodChunkSize))) {
+                out.push_back({entry.mesh[ly], glm::vec4(min, static_cast<float>(kLodScale))});
+            }
         }
     }
 }
@@ -617,6 +855,23 @@ void World::Update(const glm::vec3& cameraPos) {
         m_columns.erase(column);
     }
 
+    std::vector<glm::ivec2> lodToErase;
+    for (const auto& [lodColumn, entry] : m_lodColumns) {
+        if (LodNearDist(lodColumn, centerX, centerZ) > kLodDataOuter ||
+            LodFarDist(lodColumn, centerX, centerZ) <= kLodDataInner) {
+            lodToErase.push_back(lodColumn);
+        }
+    }
+    for (const auto& lodColumn : lodToErase) {
+        const auto it = m_lodColumns.find(lodColumn);
+        for (int ly = 0; ly < kLodHeightChunks; ++ly) {
+            if (it->second.mesh[ly] != vox::MeshPool::kInvalidMesh) {
+                m_meshPool.Free(it->second.mesh[ly]);
+            }
+        }
+        m_lodColumns.erase(it);
+    }
+
     // Collect missing work, nearest column first.
     std::vector<std::pair<int, glm::ivec3>> toGenerate;
     std::vector<std::pair<int, glm::ivec2>> toLight;
@@ -663,10 +918,42 @@ void World::Update(const glm::vec3& cameraPos) {
         }
     }
 
+    // LOD work, lowest priority: meshes need 3x3 data, so the data ring is
+    // a LOD column wider than the draw ring on each side (see the erase
+    // pass). The scan is in LOD-grid units around the center's LOD column.
+    std::vector<std::pair<int, glm::ivec2>> lodToGenerate;
+    std::vector<std::pair<int, glm::ivec2>> lodToMesh;
+    {
+        const glm::ivec2 lodCenter{centerX >> 1, centerZ >> 1};
+        constexpr int kLodScan = kLodDataOuter / kLodScale + 1;
+        for (int dz = -kLodScan; dz <= kLodScan; ++dz) {
+            for (int dx = -kLodScan; dx <= kLodScan; ++dx) {
+                const glm::ivec2 lodColumn = lodCenter + glm::ivec2{dx, dz};
+                const int nearDist = LodNearDist(lodColumn, centerX, centerZ);
+                if (nearDist > kLodDataOuter ||
+                    LodFarDist(lodColumn, centerX, centerZ) <= kLodDataInner) {
+                    continue;
+                }
+                const auto it = m_lodColumns.find(lodColumn);
+                if (it == m_lodColumns.end()) {
+                    lodToGenerate.emplace_back(nearDist, lodColumn);
+                    continue;
+                }
+                const LodColumnEntry& entry = it->second;
+                if (nearDist <= kLodRadius && entry.cells[0] && !entry.meshed &&
+                    !entry.meshInFlight && LodNeighborsReady(lodColumn)) {
+                    lodToMesh.emplace_back(nearDist, lodColumn);
+                }
+            }
+        }
+    }
+
     auto byDistance = [](const auto& a, const auto& b) { return a.first < b.first; };
     std::sort(toGenerate.begin(), toGenerate.end(), byDistance);
     std::sort(toLight.begin(), toLight.end(), byDistance);
     std::sort(toMesh.begin(), toMesh.end(), byDistance);
+    std::sort(lodToGenerate.begin(), lodToGenerate.end(), byDistance);
+    std::sort(lodToMesh.begin(), lodToMesh.end(), byDistance);
 
     // Meshes first (visible geometry), then light (feeds meshes), then
     // generation (feeds everything).
@@ -688,6 +975,18 @@ void World::Update(const glm::vec3& cameraPos) {
             break;
         }
         SubmitGenerate(coord);
+    }
+    for (const auto& [dist, lodColumn] : lodToMesh) {
+        if (m_jobsInFlight >= maxInFlight) {
+            break;
+        }
+        SubmitLodMesh(lodColumn);
+    }
+    for (const auto& [dist, lodColumn] : lodToGenerate) {
+        if (m_jobsInFlight >= maxInFlight) {
+            break;
+        }
+        SubmitLodGenerate(lodColumn);
     }
 
     // Persistence: unload already Put()s edited chunks as they leave the

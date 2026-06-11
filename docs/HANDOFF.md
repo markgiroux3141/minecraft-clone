@@ -1,12 +1,14 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-11, end of M8 (user-verified in-game: edits survive
-quit/relaunch and unload/reload). Read alongside `ARCHITECTURE.md`
-(layering rules, roadmap) and `CLAUDE.md` (build commands, conventions).
+Updated: 2026-06-11, end of M9 (user-verified in-game: MDI renders
+identically at 60 fps, cave culling collapses drawn counts underground,
+LOD horizon to ~512 blocks with clean seams). Read alongside
+`ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md` (build
+commands, conventions).
 
 ## Where the project stands
 
-M0–M8 are done and verified:
+M0–M9 are done and verified:
 - Engine (`engine/src/vox/`, namespace `vox`): fixed-timestep app loop
   (20 TPS + interpolated render), GLFW window/input (incl. cursor capture),
   GL 4.6 renderer facade with DSA abstractions (Shader, Buffer/VertexArray,
@@ -28,8 +30,9 @@ M0–M8 are done and verified:
 
 Cursor is always captured. WASD move, mouse look, Space jump (walk) or
 rise (fly), LeftShift sink (fly), LeftControl sprint/boost, F toggles
-walk/fly, LMB break, RMB place, 1/2/3/4 hotbar (stone/dirt/grass/
-glowstone), Esc quits. Spawn at (8.5, 48, 8.5), falls to the terrain.
+walk/fly, O toggles occlusion culling (debug), LMB break, RMB place,
+1/2/3/4 hotbar (stone/dirt/grass/glowstone), Esc quits. Spawn at
+(8.5, 48, 8.5), falls to the terrain.
 
 ## M4 threaded pipeline + M6 versioned edits (how it works)
 
@@ -111,7 +114,11 @@ M6 break/place/fly. Exercise clean shutdown (`CloseMainWindow()`, expect
 - One-time NVIDIA warning at startup: "Vertex shader in program 3 is being
   recompiled based on GL state" — harmless, not yet investigated.
 - GPU uploads are not budgeted per frame; bursts are bounded by the
-  in-flight job cap (~60 on a 16-thread machine). Fine so far.
+  in-flight job cap (~60 on a 16-thread machine). Causes brief fps dips
+  when crossing chunk borders in debug builds; minor in release (user
+  confirmed). Fix when it matters: cap uploaded bytes/frame, carry over.
+- Mesh pool sits at ~96 MB with the LOD shell (ChunkVertex is a lazy
+  48 B of floats — vertex compression to ~12 B is the known fix).
 - Block outline is near-black and low-contrast on dirt; revisit when HUD
   work happens (crosshair is also still missing).
 - Remote: https://github.com/markgiroux3141/minecraft-clone.git (branch
@@ -195,13 +202,68 @@ M6 break/place/fly. Exercise clean shutdown (`CloseMainWindow()`, expect
   saved blob in RAM (tiny while edits are sparse — revisit if saves get
   huge); single hardcoded world ("saves/world"), no save UI.
 
-## Next: M9 — scale
+## M9 rendering at scale (how it works)
 
-Occlusion culling, multi-draw indirect, LOD for far chunks (see
-ARCHITECTURE.md roadmap). Save-system UX (world select menu, multiple
-saves, player-position persistence) is deferred until a UI/menu
-milestone exists — the on-disk layout already supports multiple worlds
-(each is just a directory passed to World's ctor).
+Stage 1 — multi-draw indirect (`vox::MeshPool`, engine/renderer):
+- All chunk meshes live in ONE growable GL vertex buffer (first-fit free
+  list, coalescing on Free, grows by copy — watch the "MeshPool: growing"
+  log line). Each frame, World hands the pool a list of
+  {handle, vec4(originXYZ, scale)} items and the pool issues a single
+  glMultiDrawElementsIndirect; the shader reads the vec4 from an SSBO
+  (binding 0) indexed by gl_DrawID. chunk.vert has no u_model anymore.
+- Chunk meshes carry NO index data: the mesher emits quads under one
+  shared pattern {0,1,2,2,3,0} (the pool repeats it with per-group
+  offsets). The AO diagonal flip is a cyclic rotation of the vertex
+  emission order in EmitQuad — same triangles, winding preserved.
+- ChunkEntry holds a MeshHandle; World::UploadMesh(handle, indexCount,
+  mesh) frees-then-allocates. Unload paths must Free handles (Update's
+  erase loops do; the pool dies with World otherwise).
+
+Stage 2 — occlusion culling (cave culling):
+- Mesh jobs flood-fill the chunk's non-opaque cells and record which face
+  pairs connect: 15 bits (world/Visibility.h) on ChunkMesh/ChunkEntry.
+- World::CollectVisibleChunks BFS-walks the chunk grid from the eye
+  (visit-stamped grid, queue scratch reused), descending only through
+  connected face pairs and never stepping back toward the camera
+  (dirMask). Frustum gates draw-list inserts, NOT traversal (frustum
+  pruning of traversal would false-cull chunks reachable only through
+  off-screen neighbors). Unmeshed chunks traverse permissively. Above/
+  below-world cameras seed every column's top/bottom chunk. BFS order is
+  ~front-to-back (early-z friendly). O key toggles for comparison.
+
+Stage 3 — LOD shell:
+- LOD chunk = 16^3 cells of 2^3 blocks (32^3 world blocks; 2 LOD chunks
+  of world height). LOD gen jobs run the REAL generator over the 16
+  underlying chunks and downsample 2x2x2 -> cell: most common non-air id,
+  ties to the topmost (keeps grass tops); any solid source block makes
+  the cell solid, so LOD is a strict SUPERSET of real terrain — that
+  superset rule is what keeps the detail/LOD seam hole-free (LOD bulges
+  <= 1 block instead of gapping).
+- LOD meshing reuses ChunkMesher with a shared full-bright skylight,
+  gated on the 3x3 LOD-column neighborhood; meshes go in the same pool,
+  drawn with scale 2 in the per-draw vec4. Built once — no edits, no
+  relight at LOD (saved-chunk edits are NOT visible at LOD distance).
+- Rings (World.h constants): draw/mesh where far-corner > kViewRadius
+  and near-corner <= kLodRadius (32); data ring one LOD column wider both
+  ways. LOD work is lowest priority, nearest first, same in-flight cap.
+- Handover: a LOD column inside the detail radius keeps drawing until
+  every real chunk under it is meshed (DetailMeshedUnder) — no hole ring
+  chasing a fast player.
+
+## Next: M10 — TBD (decide with the user)
+
+Candidates, roughly in discussed order of interest:
+- UI/menus milestone: crosshair + hotbar HUD, pause menu, world select
+  (WorldSave already supports multiple worlds — one directory each),
+  player-position persistence. Needs text/2D rendering + uncaptured-
+  cursor input + a game-state notion. Would also fix the low-contrast
+  block outline.
+- Gameplay depth: trees/structures, water + a transparent mesh pass,
+  more block types, day/night cycle (sun direction + sky gradient).
+- Perf polish (opportunistic, not urgent at 60 fps): vertex compression
+  (ChunkVertex 48 B -> ~12 B packed; halves the 96 MB pool and upload
+  bursts), per-frame GPU upload budget (smooths the walk-streaming
+  jitter the user noticed; release build already made it minor).
 
 ## How to verify (UPDATED working agreement)
 

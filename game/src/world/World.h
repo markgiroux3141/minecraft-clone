@@ -41,6 +41,20 @@ struct ChunkEntry {
     bool edited = false; // diverges from the save store — persist before unload
 };
 
+// One LOD column: two stacked half-res chunks (world height 4 chunks /
+// LOD scale 2) covering 32x32 world blocks. Generated once from real
+// terrain (no edits, no relighting), so plain flags replace the version
+// counters of full-detail chunks.
+inline constexpr int kLodHeightChunks = 2;
+struct LodColumnEntry {
+    std::array<std::shared_ptr<const Chunk>, kLodHeightChunks> cells; // null until gen lands
+    std::array<vox::MeshPool::MeshHandle, kLodHeightChunks> mesh = {
+        vox::MeshPool::kInvalidMesh, vox::MeshPool::kInvalidMesh};
+    std::array<uint32_t, kLodHeightChunks> indexCount{};
+    bool meshInFlight = false;
+    bool meshed = false;
+};
+
 // Per-column light bookkeeping (light is computed column-at-a-time because
 // sky light depends on the whole column above). Same versioning pattern as
 // chunk meshes; the resulting ChunkLight sections live on the ChunkEntries.
@@ -62,7 +76,23 @@ class World {
 public:
     static constexpr int kHeightChunks = kWorldHeightChunks; // world height: 64 blocks
     static constexpr int kHeightBlocks = kWorldHeightBlocks;
-    static constexpr int kViewRadius = 12; // horizontal mesh radius, in chunks
+    static constexpr int kViewRadius = 12; // horizontal full-detail mesh radius, in chunks
+
+    // Half-res LOD shell past the detail radius: one LOD chunk is 16^3
+    // cells of 2^3 blocks (32^3 world blocks, world height = 2 LOD
+    // chunks), downsampled from real generator output and drawn at 2x
+    // scale out to kLodRadius regular columns. A LOD column is drawn when
+    // its far corner is outside the detail radius, so depending on grid
+    // parity it may overlap the outermost detail ring by one column — the
+    // solid-biased downsample makes that a <= 1 block bulge 200+ blocks
+    // away, which beats a one-column gap on the other side.
+    static constexpr int kLodScale = 2;
+    static_assert(kLodHeightChunks == kHeightChunks / kLodScale);
+    static constexpr int kLodRadius = 32; // outer draw bound, near-corner distance
+    // Data ring: one LOD column (2 regular) past the draw bounds on each
+    // side, so boundary LOD meshes have their 3x3 neighborhood.
+    static constexpr int kLodDataOuter = kLodRadius + 2 * kLodScale;
+    static constexpr int kLodDataInner = kViewRadius - 2 * kLodScale;
 
     // defaultSeed only applies to a brand-new save; an existing save's
     // manifest seed wins so its untouched chunks regenerate identically.
@@ -136,6 +166,7 @@ private:
     };
     using ChunkMap = std::unordered_map<glm::ivec3, ChunkEntry, IVec3Hash>;
     using ColumnMap = std::unordered_map<glm::ivec2, ColumnEntry, IVec2Hash>;
+    using LodColumnMap = std::unordered_map<glm::ivec2, LodColumnEntry, IVec2Hash>;
 
     struct GenResult {
         glm::ivec3 coord;
@@ -151,6 +182,14 @@ private:
         uint32_t version; // dataVersion the snapshot was taken at
         ChunkMesh mesh;
     };
+    struct LodGenResult {
+        glm::ivec2 column; // LOD-grid units
+        std::array<std::shared_ptr<const Chunk>, kLodHeightChunks> cells;
+    };
+    struct LodMeshResult {
+        glm::ivec2 column;
+        std::array<ChunkMesh, kLodHeightChunks> meshes;
+    };
 
     void DrainCompletedJobs();
     // Packed light at a world position (sky 15 above the world, 0 when
@@ -159,7 +198,22 @@ private:
     void SubmitGenerate(const glm::ivec3& coord);
     void SubmitLight(const glm::ivec2& column);
     void SubmitMesh(const glm::ivec3& coord);
-    void UploadMesh(ChunkEntry& entry, const ChunkMesh& mesh);
+    // LOD jobs: generate downsamples the 16 real chunks under the LOD
+    // column; mesh greedy-meshes its two LOD chunks from the 3x3 LOD
+    // neighborhood (gated on LodNeighborsReady) with full-bright light.
+    void SubmitLodGenerate(const glm::ivec2& lodColumn);
+    void SubmitLodMesh(const glm::ivec2& lodColumn);
+    bool LodNeighborsReady(const glm::ivec2& lodColumn) const;
+    // Frustum-culled LOD shell draws (scale kLodScale), skipping columns
+    // fully covered by full-detail terrain. Used by both culling modes.
+    void AppendLodDraws(int centerX, int centerZ, const vox::Frustum& frustum,
+                        std::vector<vox::MeshPool::DrawItem>& out) const;
+    // Are all full-detail chunks under this LOD column meshed? (Drives the
+    // detail/LOD handover when the player moves into a LOD area.)
+    bool DetailMeshedUnder(const glm::ivec2& lodColumn) const;
+    // (Re)allocates the pool slot for a mesh; frees the old one first.
+    void UploadMesh(vox::MeshPool::MeshHandle& handle, uint32_t& indexCount,
+                    const ChunkMesh& mesh);
     ChunkSnapshot SnapshotFor(const glm::ivec3& coord) const;
     // Mesh gating: all 26 neighbors have blocks, and the whole 3x3x3
     // neighborhood (center included) has light.
@@ -174,6 +228,7 @@ private:
     vox::MeshPool m_meshPool;     // main-thread-only, like all GL
     ChunkMap m_chunks;
     ColumnMap m_columns;
+    LodColumnMap m_lodColumns; // entry exists = gen submitted; cells null until it lands
     size_t m_pendingMeshes = 0; // chunks in radius without an up-to-date mesh
     size_t m_jobsInFlight = 0;  // main-thread counter: ++submit, --drain
     std::chrono::steady_clock::time_point m_lastAutosave;
@@ -194,6 +249,8 @@ private:
     std::vector<GenResult> m_completedGen;
     std::vector<LightResult> m_completedLight;
     std::vector<MeshResult> m_completedMesh;
+    std::vector<LodGenResult> m_completedLodGen;
+    std::vector<LodMeshResult> m_completedLodMesh;
 
     // Declared last so it is destroyed first: joining the workers before
     // the queues/maps/generator they reference go away.
