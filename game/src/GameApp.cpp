@@ -4,6 +4,7 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
+#include "vox/core/Assets.h"
 #include "vox/core/Log.h"
 #include "vox/platform/Input.h"
 #include "vox/renderer/Frustum.h"
@@ -56,7 +57,9 @@ void GameApp::OnInit() {
     m_outlineCube->SetIndexBuffer(std::make_shared<vox::IndexBuffer>(
         edges, static_cast<uint32_t>(std::size(edges))));
 
-    m_world = std::make_unique<vc::World>(kWorldSeed);
+    // Saves live next to assets/ so every way of launching shares a world.
+    m_world = std::make_unique<vc::World>(kWorldSeed,
+                                          vox::assets::Root().parent_path() / "saves" / "world");
 
     m_camera.SetPerspective(70.0f, 0.1f, 1000.0f);
     m_camera.SetViewportSize(GetWindow().Width(), GetWindow().Height());

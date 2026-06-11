@@ -65,7 +65,9 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
 - **M7 — Lighting** ✅: BFS flood-fill sky + block light computed per column
   on workers (3x3 column input), smooth per-vertex light baked next to AO,
   emissive blocks (glowstone), light-aware streaming radii.
-- **M8 — Persistence**: region-file world saves.
+- **M8 — Persistence** ✅: region-file saves of edited chunks (RLE blobs,
+  atomic rewrites, seed manifest), loaded on stream-in before falling back
+  to the generator; save on unload + 30 s autosave + quit flush.
 - **M9 — Scale**: occlusion culling, multi-draw indirect, LOD for far chunks.
 
 Each milestone lands as a vertical slice that runs; no big-bang integration.

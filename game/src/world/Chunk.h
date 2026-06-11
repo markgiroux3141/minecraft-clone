@@ -23,6 +23,9 @@ public:
     BlockId Get(int x, int y, int z) const { return m_blocks[Index(x, y, z)]; }
     void Set(int x, int y, int z, BlockId id) { m_blocks[Index(x, y, z)] = id; }
 
+    const std::array<BlockId, kVolume>& Raw() const { return m_blocks; }
+    std::array<BlockId, kVolume>& Raw() { return m_blocks; }
+
 private:
     std::array<BlockId, kVolume> m_blocks{}; // zero-initialized: all air
 };

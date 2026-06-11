@@ -43,7 +43,25 @@ bool FaceSlabDiffers(const ChunkLight& a, const ChunkLight& b, int axis, int sid
 
 } // namespace
 
-World::World(int seed) : m_generator(seed) {}
+World::World(int defaultSeed, std::filesystem::path saveDir)
+    : m_save(std::move(saveDir), defaultSeed), m_generator(m_save.Seed()),
+      m_lastAutosave(std::chrono::steady_clock::now()) {}
+
+World::~World() {
+    // Workers may still be running (the pool joins after this body), but
+    // they never touch the chunk map or the save store.
+    SaveEditedChunks();
+    m_save.Flush(true);
+}
+
+void World::SaveEditedChunks() {
+    for (auto& [coord, entry] : m_chunks) {
+        if (entry.edited && entry.blocks) {
+            m_save.Put(coord, *entry.blocks);
+            entry.edited = false;
+        }
+    }
+}
 
 BlockId World::GetBlock(int wx, int wy, int wz) const {
     // Arithmetic shift floors negative coordinates correctly for power-of-two sizes.
@@ -79,6 +97,7 @@ void World::SetBlock(const glm::ivec3& worldPos, BlockId id) {
     edited->Set(local.x, local.y, local.z, id);
     entry.blocks = std::move(edited);
     ++entry.dataVersion;
+    entry.edited = true;
 
     // Immediate single-cell light estimate, so the remesh this edit just
     // triggered doesn't render newly exposed faces pitch black while the
@@ -256,6 +275,22 @@ ChunkSnapshot World::SnapshotFor(const glm::ivec3& coord) const {
 void World::SubmitGenerate(const glm::ivec3& coord) {
     m_chunks.emplace(coord, ChunkEntry{}); // blocks stays null until the job lands
     ++m_jobsInFlight;
+    // Saved chunks load instead of generating. The blob is copied into the
+    // job on the main thread, so later Puts can't invalidate it.
+    const std::vector<uint8_t>* blob = m_save.FindBlob(coord);
+    if (blob != nullptr) {
+        m_pool.Submit([this, coord, blob = *blob] {
+            auto chunk = std::make_shared<Chunk>();
+            if (!WorldSave::Decode(blob, *chunk)) {
+                GAME_ERROR("Save: corrupt chunk ({}, {}, {}); regenerated", coord.x, coord.y,
+                           coord.z);
+                m_generator.Generate(*chunk, coord);
+            }
+            std::lock_guard lock(m_completedMutex);
+            m_completedGen.push_back({coord, std::move(chunk)});
+        });
+        return;
+    }
     m_pool.Submit([this, coord] {
         auto chunk = std::make_shared<Chunk>();
         m_generator.Generate(*chunk, coord);
@@ -454,7 +489,11 @@ void World::Update(const glm::vec3& cameraPos) {
         }
     }
     for (const auto& coord : chunksToErase) {
-        m_chunks.erase(coord);
+        const auto it = m_chunks.find(coord);
+        if (it->second.edited && it->second.blocks) {
+            m_save.Put(coord, *it->second.blocks);
+        }
+        m_chunks.erase(it);
     }
     std::vector<glm::ivec2> columnsToErase;
     for (const auto& [column, entry] : m_columns) {
@@ -539,6 +578,17 @@ void World::Update(const glm::vec3& cameraPos) {
         }
         SubmitGenerate(coord);
     }
+
+    // Persistence: unload already Put()s edited chunks as they leave the
+    // ring; the periodic sweep covers chunks that stay loaded (so a crash
+    // loses at most kAutosaveInterval of edits). Flush debounces itself.
+    constexpr auto kAutosaveInterval = std::chrono::seconds(30);
+    const auto now = std::chrono::steady_clock::now();
+    if (now - m_lastAutosave >= kAutosaveInterval) {
+        m_lastAutosave = now;
+        SaveEditedChunks();
+    }
+    m_save.Flush(false);
 }
 
 } // namespace vc

@@ -1,6 +1,8 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
+#include <filesystem>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -17,6 +19,7 @@
 #include "world/Light.h"
 #include "world/LightEngine.h"
 #include "world/TerrainGen.h"
+#include "world/WorldSave.h"
 
 namespace vc {
 
@@ -32,6 +35,7 @@ struct ChunkEntry {
     uint32_t meshingVersion = 0; // dataVersion the in-flight mesh job targets (0 = none)
     std::shared_ptr<vox::VertexArray> mesh; // null until uploaded, or if empty
     uint32_t indexCount = 0;
+    bool edited = false; // diverges from the save store — persist before unload
 };
 
 // Per-column light bookkeeping (light is computed column-at-a-time because
@@ -57,7 +61,10 @@ public:
     static constexpr int kHeightBlocks = kWorldHeightBlocks;
     static constexpr int kViewRadius = 12; // horizontal mesh radius, in chunks
 
-    explicit World(int seed);
+    // defaultSeed only applies to a brand-new save; an existing save's
+    // manifest seed wins so its untouched chunks regenerate identically.
+    World(int defaultSeed, std::filesystem::path saveDir);
+    ~World(); // saves all edited chunks and force-flushes the store
 
     void Update(const glm::vec3& cameraPos);
 
@@ -142,12 +149,16 @@ private:
     bool NeighborsReady(const glm::ivec3& coord) const;
     // Light gating: the 3x3 column neighborhood is fully generated.
     bool ColumnHasData(const glm::ivec2& column) const;
+    // Put()s every loaded edited chunk into the save store (autosave/quit).
+    void SaveEditedChunks();
 
+    WorldSave m_save; // declared before m_generator: its manifest provides the seed
     TerrainGenerator m_generator; // stateless — shared by all workers
     ChunkMap m_chunks;
     ColumnMap m_columns;
     size_t m_pendingMeshes = 0; // chunks in radius without an up-to-date mesh
     size_t m_jobsInFlight = 0;  // main-thread counter: ++submit, --drain
+    std::chrono::steady_clock::time_point m_lastAutosave;
 
     std::mutex m_completedMutex; // guards the result queues
     std::vector<GenResult> m_completedGen;

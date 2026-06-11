@@ -16,9 +16,20 @@ add_executable(game
     src/world/TerrainGen.h
     src/world/World.cpp
     src/world/World.h
+    src/world/WorldSave.cpp
+    src/world/WorldSave.h
 )
 
 set_target_properties(game PROPERTIES OUTPUT_NAME "Voxcraft")
 target_include_directories(game PRIVATE src)
 target_link_libraries(game PRIVATE vox::engine fastnoise)
 vox_set_target_defaults(game)
+
+# Round-trip regression test for the save format (run manually).
+add_executable(savetest
+    tests/SaveTest.cpp
+    src/world/WorldSave.cpp
+)
+target_include_directories(savetest PRIVATE src)
+target_link_libraries(savetest PRIVATE vox::engine)
+vox_set_target_defaults(savetest)

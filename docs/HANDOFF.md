@@ -1,13 +1,12 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-11, end of M7 (user-verified in-game: darkness in
-tunnels, glowstone, no flicker, 60 fps idle). Read alongside
-`ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md` (build
-commands, conventions).
+Updated: 2026-06-11, end of M8 (user-verified in-game: edits survive
+quit/relaunch and unload/reload). Read alongside `ARCHITECTURE.md`
+(layering rules, roadmap) and `CLAUDE.md` (build commands, conventions).
 
 ## Where the project stands
 
-M0–M7 are done and verified:
+M0–M8 are done and verified:
 - Engine (`engine/src/vox/`, namespace `vox`): fixed-timestep app loop
   (20 TPS + interpolated render), GLFW window/input (incl. cursor capture),
   GL 4.6 renderer facade with DSA abstractions (Shader, Buffer/VertexArray,
@@ -167,17 +166,42 @@ M6 break/place/fly. Exercise clean shutdown (`CloseMainWindow()`, expect
   matters; it recovers to 60 once pending hits 0 and the user is fine
   with it).
 
-## Next: M8 — persistence
+## M8 persistence (how it works)
 
-Region-file world saves: serialize edited chunks (only ones that diverge
-from the generator — track an "edited" flag on ChunkEntry, set in
-SetBlock), load on chunk stream-in before falling back to
-TerrainGenerator. Decide format (simple per-region binary with chunk
-offsets) and save triggers (on unload + on quit). File I/O fits the
-worker-pool model (load jobs instead of gen jobs for saved chunks; async
-writes), but keep the save index/manifest main-thread-owned like the
-chunk map. After that M9: occlusion culling, multi-draw indirect, LOD
-for far chunks.
+- `WorldSave` (world/WorldSave.h/.cpp): main-thread-only store of
+  RLE-compressed blobs for EDITED chunks only (everything else
+  regenerates from the seed). The whole store loads into memory at
+  construction and files are never read again, so flushes can't race
+  reads. Format doc is at the top of WorldSave.h: `saves/world/level.dat`
+  (text: format version + seed — manifest seed wins over the compiled-in
+  default) and `r.<rx>.<rz>.vxr` region files (32x32 chunk columns,
+  header + coord/size index + blobs, rewritten atomically via temp +
+  rename). Save dir is `assets/`'s sibling `saves/world/` (gitignored),
+  resolved in GameApp::OnInit.
+- World integration: `ChunkEntry::edited` set by SetBlock;
+  `SubmitGenerate` decodes a blob copy on a worker instead of generating
+  when the store has the chunk (corrupt blob → log + regenerate). Edited
+  chunks are Put on unload, by a 30 s autosave sweep in Update, and in
+  ~World (runs before the pool member's destructor joins workers, which
+  is fine — workers never touch the map or the store). `Flush(false)`
+  runs every Update but debounces disk writes to one pass per 3 s;
+  ~World forces it.
+- `savetest` target (game/tests/SaveTest.cpp): standalone round-trip
+  regression test for the format — run `build/<config>/bin/savetest.exe`
+  after touching serialization (it covers negative/multi-region coords,
+  manifest seed precedence, overwrite, corrupt-blob rejection).
+- Known limits (fine for now): a chunk edited back to exactly its
+  generated contents stays in the save forever; the store keeps every
+  saved blob in RAM (tiny while edits are sparse — revisit if saves get
+  huge); single hardcoded world ("saves/world"), no save UI.
+
+## Next: M9 — scale
+
+Occlusion culling, multi-draw indirect, LOD for far chunks (see
+ARCHITECTURE.md roadmap). Save-system UX (world select menu, multiple
+saves, player-position persistence) is deferred until a UI/menu
+milestone exists — the on-disk layout already supports multiple worlds
+(each is just a directory passed to World's ctor).
 
 ## How to verify (UPDATED working agreement)
 
