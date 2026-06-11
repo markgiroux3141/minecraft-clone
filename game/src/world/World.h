@@ -129,6 +129,9 @@ private:
     };
 
     void DrainCompletedJobs();
+    // Packed light at a world position (sky 15 above the world, 0 when
+    // unloaded/below).
+    uint8_t PackedLightAt(const glm::ivec3& worldPos) const;
     void SubmitGenerate(const glm::ivec3& coord);
     void SubmitLight(const glm::ivec2& column);
     void SubmitMesh(const glm::ivec3& coord);

@@ -21,6 +21,26 @@ int FloorDivChunk(float worldCoord) {
     return static_cast<int>(std::floor(worldCoord / static_cast<float>(Chunk::kSize)));
 }
 
+// Does the border slab of light values facing (axis, side) differ between
+// the two sections? Used to bump only the neighbor meshes that can
+// actually see a light change — neighbors sample at most one cell across
+// the seam.
+bool FaceSlabDiffers(const ChunkLight& a, const ChunkLight& b, int axis, int side) {
+    const int fixed = side > 0 ? Chunk::kSize - 1 : 0;
+    for (int i = 0; i < Chunk::kSize; ++i) {
+        for (int j = 0; j < Chunk::kSize; ++j) {
+            int c[3];
+            c[axis] = fixed;
+            c[(axis + 1) % 3] = i;
+            c[(axis + 2) % 3] = j;
+            if (a.Get(c[0], c[1], c[2]) != b.Get(c[0], c[1], c[2])) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
 } // namespace
 
 World::World(int seed) : m_generator(seed) {}
@@ -60,6 +80,33 @@ void World::SetBlock(const glm::ivec3& worldPos, BlockId id) {
     entry.blocks = std::move(edited);
     ++entry.dataVersion;
 
+    // Immediate single-cell light estimate, so the remesh this edit just
+    // triggered doesn't render newly exposed faces pitch black while the
+    // proper flood fill recomputes a few frames later.
+    if (entry.light) {
+        const BlockDef& def = BlockRegistry::Get().Def(id);
+        int sky = 0;
+        int block = def.emission;
+        if (!def.opaque) {
+            constexpr glm::ivec3 kDirs[6] = {
+                {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1},
+            };
+            for (const auto& dir : kDirs) {
+                const uint8_t neighbor = PackedLightAt(worldPos + dir);
+                sky = std::max(sky, ChunkLight::Sky(neighbor) - 1);
+                block = std::max(block, ChunkLight::Block(neighbor) - 1);
+            }
+            // Straight-down skylight doesn't attenuate.
+            if (ChunkLight::Sky(PackedLightAt(worldPos + glm::ivec3{0, 1, 0})) == 15) {
+                sky = 15;
+            }
+        }
+        auto patched = std::make_shared<ChunkLight>(*entry.light);
+        patched->Set(local.x, local.y, local.z,
+                     ChunkLight::Pack(std::max(sky, 0), std::max(block, 0)));
+        entry.light = std::move(patched);
+    }
+
     // Border edits change neighbor meshes too — face culling and AO both
     // reach one block across the seam.
     const glm::ivec3 off{
@@ -79,11 +126,17 @@ void World::SetBlock(const glm::ivec3& worldPos, BlockId id) {
         }
     }
 
-    // Light can travel 15 blocks, so an edit can affect this column and
-    // its neighbors. Dirty all 3x3 — recomputes that change nothing are
-    // detected at landing time and don't cascade into remeshes.
+    // Light travels at most 15 blocks (path distance), so only dirty the
+    // neighbor columns the edit can actually reach. A center-of-chunk edit
+    // skips all four diagonals; recomputes that change nothing are caught
+    // at landing time, but not running them at all is cheaper still.
     for (int dz = -1; dz <= 1; ++dz) {
         for (int dx = -1; dx <= 1; ++dx) {
+            const int reachX = dx == 0 ? 0 : (dx > 0 ? Chunk::kSize - local.x : local.x + 1);
+            const int reachZ = dz == 0 ? 0 : (dz > 0 ? Chunk::kSize - local.z : local.z + 1);
+            if (reachX + reachZ > 15) {
+                continue;
+            }
             const auto colIt = m_columns.find(glm::ivec2{cc.x + dx, cc.z + dz});
             if (colIt != m_columns.end()) {
                 ++colIt->second.dirtySeq;
@@ -129,6 +182,20 @@ std::optional<World::RaycastHit> World::RaycastBlocks(const glm::vec3& origin,
             return RaycastHit{cell, normal};
         }
     }
+}
+
+uint8_t World::PackedLightAt(const glm::ivec3& worldPos) const {
+    if (worldPos.y >= kHeightBlocks) {
+        return ChunkLight::Pack(15, 0);
+    }
+    if (worldPos.y < 0) {
+        return 0;
+    }
+    const auto it = m_chunks.find(glm::ivec3{worldPos.x >> 4, worldPos.y >> 4, worldPos.z >> 4});
+    if (it == m_chunks.end() || !it->second.light) {
+        return 0;
+    }
+    return it->second.light->Get(worldPos.x & 15, worldPos.y & 15, worldPos.z & 15);
 }
 
 const Chunk* World::GetChunk(const glm::ivec3& chunkCoord) const {
@@ -294,17 +361,41 @@ void World::DrainCompletedJobs() {
                     continue;
                 }
                 ChunkEntry& entry = it->second;
-                if (entry.light && entry.light->Raw() == lit.light[cy]->Raw()) {
+                const ChunkLight* oldLight = entry.light.get();
+                const ChunkLight* newLight = lit.light[cy].get();
+                if (oldLight && oldLight->Raw() == newLight->Raw()) {
                     continue; // light unchanged — no remesh cascade
                 }
+                // Neighbor meshes sample at most one cell across the seam,
+                // so only the ones behind a changed border slab are stale.
+                // Index pairs match BlockFace: axis*2 = +side, axis*2+1 = -side.
+                bool faceChanged[6];
+                for (int axis = 0; axis < 3; ++axis) {
+                    faceChanged[axis * 2] =
+                        !oldLight || FaceSlabDiffers(*oldLight, *newLight, axis, +1);
+                    faceChanged[axis * 2 + 1] =
+                        !oldLight || FaceSlabDiffers(*oldLight, *newLight, axis, -1);
+                }
                 entry.light = lit.light[cy];
-                // Every mesh that sampled this chunk's light is stale.
+                ++entry.dataVersion; // own mesh always resamples
+
+                const auto seesChange = [&](const glm::ivec3& d) {
+                    // A diagonal neighbor only reads the shared edge/corner
+                    // cells, which sit in every involved face slab.
+                    if (d.x != 0 && !faceChanged[d.x > 0 ? 0 : 1]) return false;
+                    if (d.y != 0 && !faceChanged[d.y > 0 ? 2 : 3]) return false;
+                    if (d.z != 0 && !faceChanged[d.z > 0 ? 4 : 5]) return false;
+                    return true;
+                };
                 for (int dy = -1; dy <= 1; ++dy) {
                     for (int dz = -1; dz <= 1; ++dz) {
                         for (int dx = -1; dx <= 1; ++dx) {
-                            const auto nIt =
-                                m_chunks.find(glm::ivec3{lit.column.x + dx, cy + dy,
-                                                         lit.column.y + dz});
+                            const glm::ivec3 d{dx, dy, dz};
+                            if (d == glm::ivec3{0} || !seesChange(d)) {
+                                continue;
+                            }
+                            const auto nIt = m_chunks.find(
+                                glm::ivec3{lit.column.x + dx, cy + dy, lit.column.y + dz});
                             if (nIt != m_chunks.end()) {
                                 ++nIt->second.dataVersion;
                             }
