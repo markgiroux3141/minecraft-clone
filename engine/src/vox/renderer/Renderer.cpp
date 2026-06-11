@@ -73,6 +73,12 @@ void Renderer::DrawIndexed(const VertexArray& vertexArray, uint32_t indexCount) 
     glDrawElements(GL_TRIANGLES, static_cast<GLsizei>(count), GL_UNSIGNED_INT, nullptr);
 }
 
+void Renderer::DrawLines(const VertexArray& vertexArray, uint32_t indexCount) {
+    vertexArray.Bind();
+    const uint32_t count = indexCount ? indexCount : vertexArray.GetIndexBuffer()->Count();
+    glDrawElements(GL_LINES, static_cast<GLsizei>(count), GL_UNSIGNED_INT, nullptr);
+}
+
 void Renderer::SetViewport(uint32_t width, uint32_t height) {
     if (width == 0 || height == 0) {
         return; // minimized

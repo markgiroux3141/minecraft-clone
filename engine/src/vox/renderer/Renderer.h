@@ -21,6 +21,9 @@ public:
     // Draws indexCount indices from the bound-on-demand vertex array;
     // 0 means "the whole index buffer".
     static void DrawIndexed(const VertexArray& vertexArray, uint32_t indexCount = 0);
+
+    // Same, but as line segments (index pairs) — debug/UI overlays.
+    static void DrawLines(const VertexArray& vertexArray, uint32_t indexCount = 0);
 };
 
 } // namespace vox

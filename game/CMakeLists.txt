@@ -1,9 +1,9 @@
 add_executable(game
-    src/FlyCamera.cpp
-    src/FlyCamera.h
     src/GameApp.cpp
     src/GameApp.h
     src/Main.cpp
+    src/Player.cpp
+    src/Player.h
     src/world/Block.cpp
     src/world/Block.h
     src/world/Chunk.h

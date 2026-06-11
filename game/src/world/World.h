@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <unordered_map>
 #include <vector>
 
@@ -17,22 +18,15 @@
 
 namespace vc {
 
-// Lifecycle of a streamed chunk. Generation and meshing run on worker
-// threads; every state transition (and the GPU upload) happens on the main
-// thread inside World::Update().
-enum class ChunkState : uint8_t {
-    Generating, // gen job in flight; blocks is still null
-    NeedsMesh,  // has block data, waiting on neighbors or the job budget
-    Meshing,    // mesh job in flight
-    Ready,      // mesh uploaded (mesh stays null for all-air chunks)
-};
-
+// Per-chunk record. Block data is copy-on-write: `blocks` is replaced (never
+// mutated) on edit, so worker-thread snapshots stay valid without locks.
+// Mesh freshness is tracked with versions instead of a state machine —
+// in-flight results are matched against dataVersion and dropped when stale.
 struct ChunkEntry {
-    // Immutable once set: M4 has no block edits, so meshing jobs can share
-    // ownership instead of copying. M6 (block break/place) will need
-    // copy-on-write or remesh versioning here.
-    std::shared_ptr<const Chunk> blocks;
-    ChunkState state = ChunkState::Generating;
+    std::shared_ptr<const Chunk> blocks; // null while the gen job is in flight
+    uint32_t dataVersion = 0;            // 0 = no data yet; bumped on every edit
+    uint32_t meshedVersion = 0;          // dataVersion the uploaded mesh was built from
+    uint32_t meshingVersion = 0;         // dataVersion the in-flight mesh job targets (0 = none)
     std::shared_ptr<vox::VertexArray> mesh; // null until uploaded, or if empty
     uint32_t indexCount = 0;
 };
@@ -44,7 +38,8 @@ struct ChunkEntry {
 class World {
 public:
     static constexpr int kHeightChunks = 4; // world height: 64 blocks
-    static constexpr int kViewRadius = 12;  // horizontal streaming radius, in chunks
+    static constexpr int kHeightBlocks = kHeightChunks * Chunk::kSize;
+    static constexpr int kViewRadius = 12; // horizontal streaming radius, in chunks
 
     explicit World(int seed);
 
@@ -52,6 +47,23 @@ public:
 
     // World-space block query; air for unloaded chunks or outside the world.
     BlockId GetBlock(int wx, int wy, int wz) const;
+
+    bool IsSolid(int wx, int wy, int wz) const;
+
+    // Copy-on-write block edit. Marks the chunk (and, for border blocks,
+    // the affected neighbors — face culling and AO reach across the seam)
+    // for remeshing. No-op outside the world or in ungenerated chunks.
+    void SetBlock(const glm::ivec3& worldPos, BlockId id);
+
+    struct RaycastHit {
+        glm::ivec3 block;
+        glm::ivec3 normal; // unit axis vector of the face that was hit
+    };
+
+    // Amanatides & Woo voxel walk to the first solid block. Returns nothing
+    // if the ray starts inside a solid block or exhausts maxDistance.
+    std::optional<RaycastHit> RaycastBlocks(const glm::vec3& origin, const glm::vec3& dir,
+                                            float maxDistance) const;
 
     const Chunk* GetChunk(const glm::ivec3& chunkCoord) const;
 
@@ -84,6 +96,7 @@ private:
     };
     struct MeshResult {
         glm::ivec3 coord;
+        uint32_t version; // dataVersion the snapshot was taken at
         ChunkMesh mesh;
     };
 
@@ -96,7 +109,7 @@ private:
 
     TerrainGenerator m_generator; // stateless — shared by all workers
     ChunkMap m_chunks;
-    size_t m_pendingMeshes = 0; // chunks in radius not yet Ready
+    size_t m_pendingMeshes = 0; // chunks in radius without an up-to-date mesh
     size_t m_jobsInFlight = 0;  // main-thread counter: ++submit, --drain
 
     std::mutex m_completedMutex; // guards the two result queues

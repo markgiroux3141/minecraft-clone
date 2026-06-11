@@ -59,7 +59,9 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
 - **M5 — Meshing quality** ✅: greedy meshing (faces merge on texture layer +
   AO key, UVs tile via the texture array), classic corner AO baked per
   vertex with AO-aware quad diagonals. ~10x triangle reduction.
-- **M6 — Player**: AABB physics, collision, raycast block break/place.
+- **M6 — Player** ✅: tick-simulated AABB walk physics (render-interpolated)
+  + noclip fly mode (F toggles), DDA raycast break/place with versioned
+  copy-on-write chunk edits and targeted-block outline.
 - **M7 — Lighting**: BFS flood-fill block light + sky light, per-vertex light
   in mesh data.
 - **M8 — Persistence**: region-file world saves.
