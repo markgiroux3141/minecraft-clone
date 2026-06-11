@@ -9,6 +9,9 @@ add_executable(game
     src/world/Chunk.h
     src/world/ChunkMesher.cpp
     src/world/ChunkMesher.h
+    src/world/Light.h
+    src/world/LightEngine.cpp
+    src/world/LightEngine.h
     src/world/TerrainGen.cpp
     src/world/TerrainGen.h
     src/world/World.cpp

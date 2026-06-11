@@ -14,32 +14,48 @@
 
 #include "world/Chunk.h"
 #include "world/ChunkMesher.h"
+#include "world/Light.h"
+#include "world/LightEngine.h"
 #include "world/TerrainGen.h"
 
 namespace vc {
 
-// Per-chunk record. Block data is copy-on-write: `blocks` is replaced (never
-// mutated) on edit, so worker-thread snapshots stay valid without locks.
-// Mesh freshness is tracked with versions instead of a state machine —
-// in-flight results are matched against dataVersion and dropped when stale.
+// Per-chunk record. Block and light data are copy-on-write: the pointers
+// are replaced (never mutated), so worker-thread snapshots stay valid
+// without locks. Mesh freshness is tracked with versions — in-flight
+// results are matched against dataVersion and dropped when stale.
 struct ChunkEntry {
-    std::shared_ptr<const Chunk> blocks; // null while the gen job is in flight
-    uint32_t dataVersion = 0;            // 0 = no data yet; bumped on every edit
-    uint32_t meshedVersion = 0;          // dataVersion the uploaded mesh was built from
-    uint32_t meshingVersion = 0;         // dataVersion the in-flight mesh job targets (0 = none)
+    std::shared_ptr<const Chunk> blocks;     // null while the gen job is in flight
+    std::shared_ptr<const ChunkLight> light; // null until the column is first lit
+    uint32_t dataVersion = 0;   // mesh-input version: bumped by edits AND light changes
+    uint32_t meshedVersion = 0; // dataVersion the uploaded mesh was built from
+    uint32_t meshingVersion = 0; // dataVersion the in-flight mesh job targets (0 = none)
     std::shared_ptr<vox::VertexArray> mesh; // null until uploaded, or if empty
     uint32_t indexCount = 0;
 };
 
+// Per-column light bookkeeping (light is computed column-at-a-time because
+// sky light depends on the whole column above). Same versioning pattern as
+// chunk meshes; the resulting ChunkLight sections live on the ChunkEntries.
+struct ColumnEntry {
+    uint32_t dirtySeq = 1;    // bumped when blocks change within light range
+    uint32_t litSeq = 0;      // dirtySeq the stored light was computed at
+    uint32_t lightingSeq = 0; // dirtySeq the in-flight light job targets (0 = none)
+};
+
 // Owns all loaded chunks and streams them around the camera. Workers
-// produce CPU-side data (generated chunks, chunk meshes) and push it to
-// completion queues; Update() drains those queues, mutates the chunk map,
-// and uploads meshes to the GPU — the map and GL are main-thread-only.
+// produce CPU-side data (generated chunks, column light, chunk meshes) and
+// push it to completion queues; Update() drains those queues, mutates the
+// maps, and uploads meshes to the GPU — the maps and GL are
+// main-thread-only.
+//
+// Radius layering (each stage needs a 3x3 neighborhood of the previous):
+// generate at kViewRadius+2, light at kViewRadius+1, mesh at kViewRadius.
 class World {
 public:
-    static constexpr int kHeightChunks = 4; // world height: 64 blocks
-    static constexpr int kHeightBlocks = kHeightChunks * Chunk::kSize;
-    static constexpr int kViewRadius = 12; // horizontal streaming radius, in chunks
+    static constexpr int kHeightChunks = kWorldHeightChunks; // world height: 64 blocks
+    static constexpr int kHeightBlocks = kWorldHeightBlocks;
+    static constexpr int kViewRadius = 12; // horizontal mesh radius, in chunks
 
     explicit World(int seed);
 
@@ -51,8 +67,9 @@ public:
     bool IsSolid(int wx, int wy, int wz) const;
 
     // Copy-on-write block edit. Marks the chunk (and, for border blocks,
-    // the affected neighbors — face culling and AO reach across the seam)
-    // for remeshing. No-op outside the world or in ungenerated chunks.
+    // the affected neighbors) for remeshing and dirties every column whose
+    // light the edit can reach. No-op outside the world or in ungenerated
+    // chunks.
     void SetBlock(const glm::ivec3& worldPos, BlockId id);
 
     struct RaycastHit {
@@ -88,11 +105,22 @@ private:
                    static_cast<size_t>(v.z) * 83492791u;
         }
     };
+    struct IVec2Hash {
+        size_t operator()(const glm::ivec2& v) const {
+            return static_cast<size_t>(v.x) * 73856093u ^ static_cast<size_t>(v.y) * 83492791u;
+        }
+    };
     using ChunkMap = std::unordered_map<glm::ivec3, ChunkEntry, IVec3Hash>;
+    using ColumnMap = std::unordered_map<glm::ivec2, ColumnEntry, IVec2Hash>;
 
     struct GenResult {
         glm::ivec3 coord;
         std::shared_ptr<const Chunk> blocks;
+    };
+    struct LightResult {
+        glm::ivec2 column;
+        uint32_t version; // ColumnEntry::dirtySeq the input was captured at
+        std::array<std::shared_ptr<const ChunkLight>, kWorldHeightChunks> light;
     };
     struct MeshResult {
         glm::ivec3 coord;
@@ -102,22 +130,29 @@ private:
 
     void DrainCompletedJobs();
     void SubmitGenerate(const glm::ivec3& coord);
+    void SubmitLight(const glm::ivec2& column);
     void SubmitMesh(const glm::ivec3& coord);
     void UploadMesh(ChunkEntry& entry, const ChunkMesh& mesh);
     ChunkSnapshot SnapshotFor(const glm::ivec3& coord) const;
-    bool NeighborsHaveData(const glm::ivec3& coord) const;
+    // Mesh gating: all 26 neighbors have blocks, and the whole 3x3x3
+    // neighborhood (center included) has light.
+    bool NeighborsReady(const glm::ivec3& coord) const;
+    // Light gating: the 3x3 column neighborhood is fully generated.
+    bool ColumnHasData(const glm::ivec2& column) const;
 
     TerrainGenerator m_generator; // stateless — shared by all workers
     ChunkMap m_chunks;
+    ColumnMap m_columns;
     size_t m_pendingMeshes = 0; // chunks in radius without an up-to-date mesh
     size_t m_jobsInFlight = 0;  // main-thread counter: ++submit, --drain
 
-    std::mutex m_completedMutex; // guards the two result queues
+    std::mutex m_completedMutex; // guards the result queues
     std::vector<GenResult> m_completedGen;
+    std::vector<LightResult> m_completedLight;
     std::vector<MeshResult> m_completedMesh;
 
     // Declared last so it is destroyed first: joining the workers before
-    // the queues/map/generator they reference go away.
+    // the queues/maps/generator they reference go away.
     vox::ThreadPool m_pool;
 };
 

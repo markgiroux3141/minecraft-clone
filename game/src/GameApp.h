@@ -41,7 +41,7 @@ private:
     std::optional<vc::World::RaycastHit> m_target;
 
     // Hotbar: keys 1..N select into this list (filled after block registration).
-    std::array<vc::BlockId, 3> m_hotbar{};
+    std::array<vc::BlockId, 4> m_hotbar{};
     size_t m_hotbarSlot = 0;
 
     // Edge/repeat tracking for per-frame input.

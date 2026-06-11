@@ -46,8 +46,18 @@ def grass_top(x, y):
     return speckle(GRASS, x, y, 3, 12)
 
 
+GLOWSTONE = (228, 188, 102)
+
+
+def glowstone(x, y):
+    # Bright mottled tile with hot spots, like packed glowing dust.
+    if hash01(x // 2, y // 2, 5) > 0.72:
+        return speckle((255, 236, 170), x, y, 4, 10)
+    return speckle(GLOWSTONE, x, y, 4, 18)
+
+
 # Layer index in the texture array == position in this list.
-TILES = [stone, dirt, grass_side, grass_top]
+TILES = [stone, dirt, grass_side, grass_top, glowstone]
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:

@@ -28,6 +28,7 @@ namespace blocks {
 BlockId Stone = 0;
 BlockId Dirt = 0;
 BlockId Grass = 0;
+BlockId Glowstone = 0;
 
 void RegisterDefaults() {
     auto& registry = BlockRegistry::Get();
@@ -36,7 +37,7 @@ void RegisterDefaults() {
     }
 
     // Tile indices match the layer order in scripts/gen_textures.py:
-    // 0 stone, 1 dirt, 2 grass side, 3 grass top.
+    // 0 stone, 1 dirt, 2 grass side, 3 grass top, 4 glowstone.
     Stone = registry.Register(BlockDef::Uniform("stone", 0));
     Dirt = registry.Register(BlockDef::Uniform("dirt", 1));
 
@@ -44,6 +45,10 @@ void RegisterDefaults() {
     grass.faceTiles[static_cast<size_t>(BlockFace::PosY)] = 3;
     grass.faceTiles[static_cast<size_t>(BlockFace::NegY)] = 1;
     Grass = registry.Register(std::move(grass));
+
+    BlockDef glowstone = BlockDef::Uniform("glowstone", 4);
+    glowstone.emission = 15;
+    Glowstone = registry.Register(std::move(glowstone));
 
     GAME_INFO("Registered {} block types", registry.Count());
 }

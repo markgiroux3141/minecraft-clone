@@ -16,8 +16,9 @@ enum class BlockFace : uint8_t { PosX = 0, NegX, PosY, NegY, PosZ, NegZ };
 
 struct BlockDef {
     std::string name;
-    bool opaque = true; // hides adjacent faces
-    bool solid = true;  // collision (used from M6)
+    bool opaque = true;   // hides adjacent faces
+    bool solid = true;    // collision (used from M6)
+    uint8_t emission = 0; // block light emitted, 0..15
     std::array<uint16_t, 6> faceTiles{}; // texture-array layer per face
 
     static BlockDef Uniform(std::string name, uint16_t tile) {
@@ -48,6 +49,7 @@ inline constexpr BlockId Air = 0;
 extern BlockId Stone;
 extern BlockId Dirt;
 extern BlockId Grass;
+extern BlockId Glowstone;
 
 void RegisterDefaults();
 

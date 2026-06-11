@@ -62,8 +62,9 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
 - **M6 — Player** ✅: tick-simulated AABB walk physics (render-interpolated)
   + noclip fly mode (F toggles), DDA raycast break/place with versioned
   copy-on-write chunk edits and targeted-block outline.
-- **M7 — Lighting**: BFS flood-fill block light + sky light, per-vertex light
-  in mesh data.
+- **M7 — Lighting** ✅: BFS flood-fill sky + block light computed per column
+  on workers (3x3 column input), smooth per-vertex light baked next to AO,
+  emissive blocks (glowstone), light-aware streaming radii.
 - **M8 — Persistence**: region-file world saves.
 - **M9 — Scale**: occlusion culling, multi-draw indirect, LOD for far chunks.
 

@@ -11,10 +11,10 @@ namespace vc {
 
 namespace {
 
-// Cap on generation + meshing jobs in flight, as a multiple of the worker
-// count. Keeps the queue short so streaming stays responsive to camera
-// movement (work is re-prioritized nearest-first every Update), while
-// leaving enough queued that workers never starve between frames.
+// Cap on generation + lighting + meshing jobs in flight, as a multiple of
+// the worker count. Keeps the queue short so streaming stays responsive to
+// camera movement (work is re-prioritized nearest-first every Update),
+// while leaving enough queued that workers never starve between frames.
 constexpr size_t kInFlightPerWorker = 4;
 
 int FloorDivChunk(float worldCoord) {
@@ -61,8 +61,7 @@ void World::SetBlock(const glm::ivec3& worldPos, BlockId id) {
     ++entry.dataVersion;
 
     // Border edits change neighbor meshes too — face culling and AO both
-    // reach one block across the seam. Their data didn't change, but
-    // bumping dataVersion is exactly "this chunk needs a fresh mesh".
+    // reach one block across the seam.
     const glm::ivec3 off{
         local.x == 0 ? -1 : (local.x == Chunk::kSize - 1 ? 1 : 0),
         local.y == 0 ? -1 : (local.y == Chunk::kSize - 1 ? 1 : 0),
@@ -77,6 +76,18 @@ void World::SetBlock(const glm::ivec3& worldPos, BlockId id) {
         const auto neighborIt = m_chunks.find(cc + d);
         if (neighborIt != m_chunks.end() && neighborIt->second.blocks) {
             ++neighborIt->second.dataVersion;
+        }
+    }
+
+    // Light can travel 15 blocks, so an edit can affect this column and
+    // its neighbors. Dirty all 3x3 — recomputes that change nothing are
+    // detected at landing time and don't cascade into remeshes.
+    for (int dz = -1; dz <= 1; ++dz) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            const auto colIt = m_columns.find(glm::ivec2{cc.x + dx, cc.z + dz});
+            if (colIt != m_columns.end()) {
+                ++colIt->second.dirtySeq;
+            }
         }
     }
 }
@@ -125,20 +136,29 @@ const Chunk* World::GetChunk(const glm::ivec3& chunkCoord) const {
     return it != m_chunks.end() ? it->second.blocks.get() : nullptr;
 }
 
-// AO samples diagonal blocks, so meshing waits on all 26 neighbors (the
-// streaming data ring is radius+1, so they always arrive eventually).
-bool World::NeighborsHaveData(const glm::ivec3& coord) const {
+bool World::NeighborsReady(const glm::ivec3& coord) const {
     for (int dy = -1; dy <= 1; ++dy) {
         const int ny = coord.y + dy;
         if (ny < 0 || ny >= kHeightChunks) {
-            continue; // outside the world counts as air, no data needed
+            continue; // outside the world counts as air / sky
         }
         for (int dz = -1; dz <= 1; ++dz) {
             for (int dx = -1; dx <= 1; ++dx) {
-                if (dx == 0 && dy == 0 && dz == 0) {
-                    continue;
-                }
                 const auto it = m_chunks.find(coord + glm::ivec3{dx, dy, dz});
+                if (it == m_chunks.end() || !it->second.blocks || !it->second.light) {
+                    return false;
+                }
+            }
+        }
+    }
+    return true;
+}
+
+bool World::ColumnHasData(const glm::ivec2& column) const {
+    for (int dz = -1; dz <= 1; ++dz) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            for (int cy = 0; cy < kHeightChunks; ++cy) {
+                const auto it = m_chunks.find(glm::ivec3{column.x + dx, cy, column.y + dz});
                 if (it == m_chunks.end() || !it->second.blocks) {
                     return false;
                 }
@@ -150,13 +170,15 @@ bool World::NeighborsHaveData(const glm::ivec3& coord) const {
 
 ChunkSnapshot World::SnapshotFor(const glm::ivec3& coord) const {
     ChunkSnapshot snapshot;
+    snapshot.skyAbove = coord.y == kHeightChunks - 1;
     for (int dy = -1; dy <= 1; ++dy) {
         for (int dz = -1; dz <= 1; ++dz) {
             for (int dx = -1; dx <= 1; ++dx) {
                 const auto it = m_chunks.find(coord + glm::ivec3{dx, dy, dz});
                 if (it != m_chunks.end()) {
-                    snapshot.chunks[ChunkSnapshot::Index(dx + 1, dy + 1, dz + 1)] =
-                        it->second.blocks;
+                    const int slot = ChunkSnapshot::Index(dx + 1, dy + 1, dz + 1);
+                    snapshot.chunks[slot] = it->second.blocks;
+                    snapshot.light[slot] = it->second.light;
                 }
             }
         }
@@ -172,6 +194,30 @@ void World::SubmitGenerate(const glm::ivec3& coord) {
         m_generator.Generate(*chunk, coord);
         std::lock_guard lock(m_completedMutex);
         m_completedGen.push_back({coord, std::move(chunk)});
+    });
+}
+
+void World::SubmitLight(const glm::ivec2& column) {
+    ColumnEntry& entry = m_columns.at(column);
+    entry.lightingSeq = entry.dirtySeq;
+
+    ColumnLightInput input;
+    for (int dz = -1; dz <= 1; ++dz) {
+        for (int dx = -1; dx <= 1; ++dx) {
+            for (int cy = 0; cy < kHeightChunks; ++cy) {
+                const auto it = m_chunks.find(glm::ivec3{column.x + dx, cy, column.y + dz});
+                if (it != m_chunks.end()) {
+                    input.chunks[(dz + 1) * 3 + (dx + 1)][cy] = it->second.blocks;
+                }
+            }
+        }
+    }
+
+    ++m_jobsInFlight;
+    m_pool.Submit([this, column, version = entry.dirtySeq, input = std::move(input)] {
+        LightResult result{column, version, LightEngine::ComputeColumn(input)};
+        std::lock_guard lock(m_completedMutex);
+        m_completedLight.push_back(std::move(result));
     });
 }
 
@@ -202,6 +248,8 @@ void World::UploadMesh(ChunkEntry& entry, const ChunkMesh& mesh) {
         {vox::ShaderDataType::Float2, "a_uv"},
         {vox::ShaderDataType::Float, "a_layer"},
         {vox::ShaderDataType::Float, "a_ao"},
+        {vox::ShaderDataType::Float, "a_sky"},
+        {vox::ShaderDataType::Float, "a_block"},
     });
     auto indexBuffer = std::make_shared<vox::IndexBuffer>(
         mesh.indices.data(), static_cast<uint32_t>(mesh.indices.size()));
@@ -214,13 +262,15 @@ void World::UploadMesh(ChunkEntry& entry, const ChunkMesh& mesh) {
 
 void World::DrainCompletedJobs() {
     std::vector<GenResult> gens;
+    std::vector<LightResult> lights;
     std::vector<MeshResult> meshes;
     {
         std::lock_guard lock(m_completedMutex);
         gens.swap(m_completedGen);
+        lights.swap(m_completedLight);
         meshes.swap(m_completedMesh);
     }
-    m_jobsInFlight -= gens.size() + meshes.size();
+    m_jobsInFlight -= gens.size() + lights.size() + meshes.size();
 
     for (auto& gen : gens) {
         const auto it = m_chunks.find(gen.coord);
@@ -230,6 +280,46 @@ void World::DrainCompletedJobs() {
         it->second.blocks = std::move(gen.blocks);
         it->second.dataVersion = 1;
     }
+
+    for (auto& lit : lights) {
+        const auto colIt = m_columns.find(lit.column);
+        if (colIt == m_columns.end()) {
+            continue; // column unloaded mid-job
+        }
+        ColumnEntry& column = colIt->second;
+        if (lit.version == column.dirtySeq) {
+            for (int cy = 0; cy < kHeightChunks; ++cy) {
+                const auto it = m_chunks.find(glm::ivec3{lit.column.x, cy, lit.column.y});
+                if (it == m_chunks.end()) {
+                    continue;
+                }
+                ChunkEntry& entry = it->second;
+                if (entry.light && entry.light->Raw() == lit.light[cy]->Raw()) {
+                    continue; // light unchanged — no remesh cascade
+                }
+                entry.light = lit.light[cy];
+                // Every mesh that sampled this chunk's light is stale.
+                for (int dy = -1; dy <= 1; ++dy) {
+                    for (int dz = -1; dz <= 1; ++dz) {
+                        for (int dx = -1; dx <= 1; ++dx) {
+                            const auto nIt =
+                                m_chunks.find(glm::ivec3{lit.column.x + dx, cy + dy,
+                                                         lit.column.y + dz});
+                            if (nIt != m_chunks.end()) {
+                                ++nIt->second.dataVersion;
+                            }
+                        }
+                    }
+                }
+            }
+            column.litSeq = lit.version;
+        }
+        // Stale or accepted, the job is resolved — allow resubmission.
+        if (column.lightingSeq == lit.version) {
+            column.lightingSeq = 0;
+        }
+    }
+
     for (auto& meshed : meshes) {
         const auto it = m_chunks.find(meshed.coord);
         if (it == m_chunks.end()) {
@@ -240,9 +330,9 @@ void World::DrainCompletedJobs() {
             UploadMesh(entry, meshed.mesh);
             entry.meshedVersion = meshed.version;
         }
-        // Stale results (version mismatch after an edit) are dropped; the
-        // old mesh keeps rendering until the rebuilt one lands. Either way
-        // the job is resolved, so clear meshingVersion to allow resubmit.
+        // Stale results (version mismatch after an edit or light change)
+        // are dropped; the old mesh keeps rendering until the rebuilt one
+        // lands. Either way the job is resolved, so allow resubmit.
         if (entry.meshingVersion == meshed.version) {
             entry.meshingVersion = 0;
         }
@@ -255,30 +345,48 @@ void World::Update(const glm::vec3& cameraPos) {
     const int centerX = FloorDivChunk(cameraPos.x);
     const int centerZ = FloorDivChunk(cameraPos.z);
 
-    // Unload chunks outside the data radius (view + 1 ring of neighbor
-    // data). In-flight jobs for erased coords resolve harmlessly: their
-    // results are dropped in DrainCompletedJobs, and snapshots keep the
-    // block data itself alive until the job finishes.
-    std::vector<glm::ivec3> toErase;
+    // Radius layering: meshes need light for their 3x3 columns, light
+    // needs blocks for ITS 3x3 columns — so blocks extend two rings past
+    // the mesh radius and light one.
+    constexpr int kLightRadius = kViewRadius + 1;
+    constexpr int kDataRadius = kViewRadius + 2;
+
+    // Unload everything outside its ring. In-flight jobs for erased
+    // coords resolve harmlessly: their results are dropped in
+    // DrainCompletedJobs, and snapshots keep the data alive until the job
+    // finishes.
+    std::vector<glm::ivec3> chunksToErase;
     for (const auto& [coord, entry] : m_chunks) {
         const int dist = std::max(std::abs(coord.x - centerX), std::abs(coord.z - centerZ));
-        if (dist > kViewRadius + 1) {
-            toErase.push_back(coord);
+        if (dist > kDataRadius) {
+            chunksToErase.push_back(coord);
         }
     }
-    for (const auto& coord : toErase) {
+    for (const auto& coord : chunksToErase) {
         m_chunks.erase(coord);
+    }
+    std::vector<glm::ivec2> columnsToErase;
+    for (const auto& [column, entry] : m_columns) {
+        const int dist = std::max(std::abs(column.x - centerX), std::abs(column.y - centerZ));
+        if (dist > kLightRadius) {
+            columnsToErase.push_back(column);
+        }
+    }
+    for (const auto& column : columnsToErase) {
+        m_columns.erase(column);
     }
 
     // Collect missing work, nearest column first.
     std::vector<std::pair<int, glm::ivec3>> toGenerate;
+    std::vector<std::pair<int, glm::ivec2>> toLight;
     std::vector<std::pair<int, glm::ivec3>> toMesh;
     m_pendingMeshes = 0;
-    for (int dz = -kViewRadius - 1; dz <= kViewRadius + 1; ++dz) {
-        for (int dx = -kViewRadius - 1; dx <= kViewRadius + 1; ++dx) {
+    for (int dz = -kDataRadius; dz <= kDataRadius; ++dz) {
+        for (int dx = -kDataRadius; dx <= kDataRadius; ++dx) {
             const int dist2 = dx * dx + dz * dz;
-            const bool inViewRadius =
-                std::max(std::abs(dx), std::abs(dz)) <= kViewRadius;
+            const int dist = std::max(std::abs(dx), std::abs(dz));
+            const bool inViewRadius = dist <= kViewRadius;
+
             for (int cy = 0; cy < kHeightChunks; ++cy) {
                 const glm::ivec3 coord{centerX + dx, cy, centerZ + dz};
                 const auto it = m_chunks.find(coord);
@@ -294,12 +402,21 @@ void World::Update(const glm::vec3& cameraPos) {
                 }
                 const ChunkEntry& entry = it->second;
                 const bool needsMesh = entry.blocks && entry.meshedVersion != entry.dataVersion;
-                if (!entry.blocks || needsMesh) {
+                if (!entry.blocks || !entry.light || needsMesh) {
                     ++m_pendingMeshes;
                 }
                 if (needsMesh && entry.meshingVersion != entry.dataVersion &&
-                    NeighborsHaveData(coord)) {
+                    NeighborsReady(coord)) {
                     toMesh.emplace_back(dist2, coord);
+                }
+            }
+
+            if (dist <= kLightRadius) {
+                const glm::ivec2 column{centerX + dx, centerZ + dz};
+                ColumnEntry& colEntry = m_columns.try_emplace(column).first->second;
+                if (colEntry.litSeq != colEntry.dirtySeq &&
+                    colEntry.lightingSeq != colEntry.dirtySeq && ColumnHasData(column)) {
+                    toLight.emplace_back(dist2, column);
                 }
             }
         }
@@ -307,16 +424,23 @@ void World::Update(const glm::vec3& cameraPos) {
 
     auto byDistance = [](const auto& a, const auto& b) { return a.first < b.first; };
     std::sort(toGenerate.begin(), toGenerate.end(), byDistance);
+    std::sort(toLight.begin(), toLight.end(), byDistance);
     std::sort(toMesh.begin(), toMesh.end(), byDistance);
 
-    // Meshes first: they turn into visible geometry immediately, while
-    // generation only feeds future meshes.
+    // Meshes first (visible geometry), then light (feeds meshes), then
+    // generation (feeds everything).
     const size_t maxInFlight = m_pool.ThreadCount() * kInFlightPerWorker;
     for (const auto& [dist2, coord] : toMesh) {
         if (m_jobsInFlight >= maxInFlight) {
             break;
         }
         SubmitMesh(coord);
+    }
+    for (const auto& [dist2, column] : toLight) {
+        if (m_jobsInFlight >= maxInFlight) {
+            break;
+        }
+        SubmitLight(column);
     }
     for (const auto& [dist2, coord] : toGenerate) {
         if (m_jobsInFlight >= maxInFlight) {

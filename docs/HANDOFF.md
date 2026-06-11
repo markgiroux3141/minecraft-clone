@@ -1,11 +1,13 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-11, end of M6. Read alongside `ARCHITECTURE.md` (layering
-rules, roadmap) and `CLAUDE.md` (build commands, conventions).
+Updated: 2026-06-11, end of M7 (pending user gameplay test). Read alongside
+`ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md` (build
+commands, conventions).
 
 ## Where the project stands
 
-M0–M6 are done and verified (built, run, screenshot-checked):
+M0–M7 are done (M7 sanity-checked by screenshot; user gameplay test of
+lighting in progress):
 - Engine (`engine/src/vox/`, namespace `vox`): fixed-timestep app loop
   (20 TPS + interpolated render), GLFW window/input (incl. cursor capture),
   GL 4.6 renderer facade with DSA abstractions (Shader, Buffer/VertexArray,
@@ -27,8 +29,8 @@ M0–M6 are done and verified (built, run, screenshot-checked):
 
 Cursor is always captured. WASD move, mouse look, Space jump (walk) or
 rise (fly), LeftShift sink (fly), LeftControl sprint/boost, F toggles
-walk/fly, LMB break, RMB place, 1/2/3 hotbar (stone/dirt/grass),
-Esc quits. Spawn at (8.5, 48, 8.5), falls to the terrain.
+walk/fly, LMB break, RMB place, 1/2/3/4 hotbar (stone/dirt/grass/
+glowstone), Esc quits. Spawn at (8.5, 48, 8.5), falls to the terrain.
 
 ## M4 threaded pipeline + M6 versioned edits (how it works)
 
@@ -116,15 +118,52 @@ M6 break/place/fly. Exercise clean shutdown (`CloseMainWindow()`, expect
 - Remote: https://github.com/markgiroux3141/minecraft-clone.git (branch
   `main`). Commit + push at milestone boundaries.
 
-## Next: M7 — lighting
+## M7 lighting (how it works)
 
-BFS flood-fill block light + sky light, per-vertex light in mesh data.
-Natural fit with the existing pipeline: light is per-block data computed
-from the padded volume's neighborhood (may need a wider snapshot or a
-separate light-propagation pass that runs before meshing and stores light
-per chunk). Skylight changes when blocks are edited → reuse the
-dataVersion remesh path. Plan the light storage (per-chunk arrays vs
-baked into Chunk) before coding.
+- `ChunkLight` (world/Light.h): one byte per block, sky<<4 | block, both
+  0..15. COW shared_ptr on ChunkEntry, exactly like blocks. World height
+  constant moved to Light.h (`kWorldHeightChunks`) so the light engine and
+  mesher don't depend on World.
+- `LightEngine::ComputeColumn` (worker job): takes the 3x3 column
+  neighborhood of block data, builds a 48x64x48 volume, column-scans
+  direct sky (15 straight down until opaque), then FIFO BFS spreads
+  sky and block light, attenuating 1/step through transparent cells.
+  BFS range is 15, so 3x3 columns provably covers everything that can
+  influence the center column; only the center column is extracted.
+  Emissive opaque blocks (glowstone, emission=15 in BlockDef) seed block
+  light but don't conduct.
+- Per-column versioning in `ColumnEntry` (dirtySeq/litSeq/lightingSeq)
+  mirrors mesh versioning. SetBlock dirties the 3x3 columns around the
+  edit; when a light job lands, sections that actually changed (memcmp)
+  replace the chunk's light and bump dataVersion of the 3x3x3 chunks
+  around it (their meshes sampled that light). Unchanged sections don't
+  cascade — that's what keeps edit-driven remeshing bounded.
+- Radius layering: generate at view+2, light at view+1, mesh at view —
+  each stage needs a 3x3 neighborhood of the previous, and this is what
+  prevents gating deadlock at the stream edge. Mesh gating
+  (`NeighborsReady`) now requires blocks AND light across the 3x3x3.
+- Mesher: padded volume carries light; per-vertex smooth light averages
+  the same 4 corner cells as AO (transparent cells only — opaque cells
+  would double-darken corners on top of AO). Greedy merge key grew to
+  uint64 (layer + 4xAO + 4xsky + 4xblock). Emissive blocks' own faces take
+  max(sampled, emission). Above-world cells read sky 15 via
+  `ChunkSnapshot::skyAbove`.
+- `chunk.frag`: skylight carries the directional sun term, block light is
+  warm (1.0, 0.85, 0.62) and omnidirectional, `max()` combine, AO on top,
+  0.03 ambient floor.
+- Known tuning points: light is linear in level (Minecraft uses an
+  exponential-ish curve — revisit if mid-levels look too dark); a single
+  edit triggers 9 column recomputes (~3-5 ms each on workers) — fine now,
+  optimize to incremental BFS only if edit latency ever shows.
+
+## Next: M8 — persistence
+
+Region-file world saves: serialize edited chunks (only ones that diverge
+from the generator — track an "edited" flag or compare on save), load on
+chunk stream-in before falling back to TerrainGenerator. Decide format
+(simple per-region binary with chunk offsets) and save triggers (on
+unload + on quit). After that M9: occlusion culling, multi-draw indirect,
+LOD for far chunks.
 
 ## Working agreements (see memory too)
 

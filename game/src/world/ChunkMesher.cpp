@@ -1,5 +1,6 @@
 #include "world/ChunkMesher.h"
 
+#include <algorithm>
 #include <cstdint>
 
 #include "vox/core/Assert.h"
@@ -9,7 +10,7 @@ namespace vc {
 namespace {
 
 // The chunk plus a one-block shell of its neighbors, flattened for O(1)
-// lookups during meshing. ~18 KB, lives on the worker's stack.
+// lookups during meshing. ~24 KB, lives on the worker's stack.
 constexpr int kPad = Chunk::kSize + 2;
 constexpr int kPadVolume = kPad * kPad * kPad;
 
@@ -20,6 +21,7 @@ constexpr int PadIndex(int x, int y, int z) {
 struct PaddedVolume {
     std::array<BlockId, kPadVolume> id;
     std::array<uint8_t, kPadVolume> opaque;
+    std::array<uint8_t, kPadVolume> light; // packed sky<<4 | block
 };
 
 void FillPadded(const ChunkSnapshot& snapshot, PaddedVolume& out) {
@@ -28,13 +30,23 @@ void FillPadded(const ChunkSnapshot& snapshot, PaddedVolume& out) {
         for (int z = -1; z <= Chunk::kSize; ++z) {
             for (int x = -1; x <= Chunk::kSize; ++x) {
                 // Arithmetic shift maps -1 -> slot 0, 0..15 -> 1, 16 -> 2.
-                const int slot =
-                    ChunkSnapshot::Index((x >> 4) + 1, (y >> 4) + 1, (z >> 4) + 1);
+                const int dy = (y >> 4) + 1;
+                const int slot = ChunkSnapshot::Index((x >> 4) + 1, dy, (z >> 4) + 1);
                 const Chunk* chunk = snapshot.chunks[slot].get();
                 const BlockId id = chunk ? chunk->Get(x & 15, y & 15, z & 15) : blocks::Air;
                 const int p = PadIndex(x, y, z);
                 out.id[p] = id;
                 out.opaque[p] = registry.Def(id).opaque ? 1 : 0;
+
+                const ChunkLight* light = snapshot.light[slot].get();
+                if (light) {
+                    out.light[p] = light->Get(x & 15, y & 15, z & 15);
+                } else {
+                    // Only above/below the world (horizontal neighbors are
+                    // gated): above the top chunk is full sky, below is dark.
+                    out.light[p] =
+                        (dy == 2 && snapshot.skyAbove) ? ChunkLight::Pack(15, 0) : 0;
+                }
             }
         }
     }
@@ -62,47 +74,89 @@ constexpr FaceBasis kFaces[6] = {
     {2, -1, 1, 0, true},  // -Z
 };
 
-// Classic corner AO: the three blocks touching this vertex in the plane
-// one step out along the face normal. 0 = darkest, 3 = open.
-int CornerAo(const PaddedVolume& vol, const int cell[3], const FaceBasis& fb, int offU,
-             int offV) {
+// Per-corner shading sampled from the four cells touching the vertex in
+// the plane one step out along the face normal: the classic AO term plus
+// smooth (averaged) sky/block light over the transparent cells.
+struct CornerSample {
+    int ao;    // 0..3
+    int sky;   // 0..15
+    int block; // 0..15
+};
+
+CornerSample SampleCorner(const PaddedVolume& vol, const int cell[3], const FaceBasis& fb,
+                          int offU, int offV) {
     int above[3] = {cell[0], cell[1], cell[2]};
     above[fb.n] += fb.s;
-    const auto opaqueAt = [&](int du, int dv) {
+    const auto cellAt = [&](int du, int dv) {
         int p[3] = {above[0], above[1], above[2]};
         p[fb.uAxis] += du;
         p[fb.vAxis] += dv;
-        return vol.opaque[PadIndex(p[0], p[1], p[2])] != 0;
+        return PadIndex(p[0], p[1], p[2]);
     };
-    const bool side1 = opaqueAt(offU, 0);
-    const bool side2 = opaqueAt(0, offV);
-    if (side1 && side2) {
-        return 0;
+
+    const int center = cellAt(0, 0);
+    const int side1 = cellAt(offU, 0);
+    const int side2 = cellAt(0, offV);
+    const int corner = cellAt(offU, offV);
+
+    const bool s1 = vol.opaque[side1] != 0;
+    const bool s2 = vol.opaque[side2] != 0;
+    const bool c = vol.opaque[corner] != 0;
+
+    CornerSample sample{};
+    sample.ao = (s1 && s2) ? 0
+                           : 3 - (static_cast<int>(s1) + static_cast<int>(s2) +
+                                  static_cast<int>(c));
+
+    // Smooth light: average over the transparent cells only — opaque
+    // neighbors don't drag the average down (AO already darkens corners).
+    int skySum = 0;
+    int blockSum = 0;
+    int count = 0;
+    const int cells[4] = {center, side1, side2, corner};
+    for (const int p : cells) {
+        if (vol.opaque[p]) {
+            continue;
+        }
+        skySum += ChunkLight::Sky(vol.light[p]);
+        blockSum += ChunkLight::Block(vol.light[p]);
+        ++count;
     }
-    const bool corner = opaqueAt(offU, offV);
-    return 3 - (static_cast<int>(side1) + static_cast<int>(side2) + static_cast<int>(corner));
+    if (count > 0) {
+        sample.sky = (skySum + count / 2) / count;
+        sample.block = (blockSum + count / 2) / count;
+    }
+    return sample;
 }
 
-// Mask cell key: bit 31 = face present, bits 8..23 = texture layer,
-// bits 0..7 = the four corner AO values (2 bits each, in emitted corner
-// order). Cells merge only on exact key match, which keeps AO gradients
-// continuous across merged quads.
-uint32_t MaskKey(uint32_t layer, int ao00, int ao10, int ao11, int ao01) {
-    return 0x80000000u | (layer << 8) | static_cast<uint32_t>(ao00 << 6) |
-           static_cast<uint32_t>(ao10 << 4) | static_cast<uint32_t>(ao11 << 2) |
-           static_cast<uint32_t>(ao01);
+// Mask cell key (uint64): bit 56 = face present, bits 40..55 = corner
+// block light (4x4), bits 24..39 = corner sky light (4x4), bits 8..23 =
+// texture layer, bits 0..7 = corner AO (4x2). Corners are stored in
+// emitted order. Cells merge only on exact key match, which keeps both AO
+// and light gradients continuous across merged quads.
+uint64_t MaskKey(uint32_t layer, const CornerSample corners[4]) {
+    uint64_t key = uint64_t{1} << 56;
+    key |= uint64_t{layer} << 8;
+    for (int k = 0; k < 4; ++k) {
+        key |= static_cast<uint64_t>(corners[k].ao) << (6 - k * 2);
+        key |= static_cast<uint64_t>(corners[k].sky) << (24 + k * 4);
+        key |= static_cast<uint64_t>(corners[k].block) << (40 + k * 4);
+    }
+    return key;
 }
 
 void EmitQuad(ChunkMesh& mesh, const FaceBasis& fb, int slice, int u0, int v0, int w, int h,
-              uint32_t key) {
+              uint64_t key) {
     const int plane = slice + (fb.s > 0 ? 1 : 0);
     const auto layer = static_cast<float>((key >> 8) & 0xFFFFu);
-    const int ao[4] = {
-        static_cast<int>(key >> 6) & 3,
-        static_cast<int>(key >> 4) & 3,
-        static_cast<int>(key >> 2) & 3,
-        static_cast<int>(key) & 3,
-    };
+    int ao[4];
+    float sky[4];
+    float block[4];
+    for (int k = 0; k < 4; ++k) {
+        ao[k] = static_cast<int>(key >> (6 - k * 2)) & 3;
+        sky[k] = static_cast<float>((key >> (24 + k * 4)) & 15) / 15.0f;
+        block[k] = static_cast<float>((key >> (40 + k * 4)) & 15) / 15.0f;
+    }
     const int cu[4] = {0, w, w, 0};
     const int cv[4] = {0, 0, h, h};
 
@@ -124,6 +178,8 @@ void EmitQuad(ChunkMesh& mesh, const FaceBasis& fb, int slice, int u0, int v0, i
             uv,
             layer,
             static_cast<float>(ao[k]) / 3.0f,
+            sky[k],
+            block[k],
         });
     }
     // Split along the brighter diagonal so AO interpolates without the
@@ -148,7 +204,7 @@ ChunkMesh ChunkMesher::Build(const ChunkSnapshot& snapshot) {
     const auto& registry = BlockRegistry::Get();
 
     ChunkMesh mesh;
-    uint32_t mask[Chunk::kSize * Chunk::kSize];
+    uint64_t mask[Chunk::kSize * Chunk::kSize];
 
     for (int face = 0; face < 6; ++face) {
         const FaceBasis& fb = kFaces[face];
@@ -164,17 +220,27 @@ ChunkMesh ChunkMesher::Build(const ChunkSnapshot& snapshot) {
                     cell[fb.vAxis] = v;
                     const int p = PadIndex(cell[0], cell[1], cell[2]);
 
-                    uint32_t key = 0;
+                    uint64_t key = 0;
                     if (vol.opaque[p]) {
                         int nb[3] = {cell[0], cell[1], cell[2]};
                         nb[fb.n] += fb.s;
                         if (!vol.opaque[PadIndex(nb[0], nb[1], nb[2])]) {
-                            const uint32_t layer = registry.Def(vol.id[p]).faceTiles[face];
-                            key = MaskKey(layer,
-                                          CornerAo(vol, cell, fb, -1, -1),
-                                          CornerAo(vol, cell, fb, +1, -1),
-                                          CornerAo(vol, cell, fb, +1, +1),
-                                          CornerAo(vol, cell, fb, -1, +1));
+                            const BlockDef& def = registry.Def(vol.id[p]);
+                            CornerSample corners[4] = {
+                                SampleCorner(vol, cell, fb, -1, -1),
+                                SampleCorner(vol, cell, fb, +1, -1),
+                                SampleCorner(vol, cell, fb, +1, +1),
+                                SampleCorner(vol, cell, fb, -1, +1),
+                            };
+                            // Emissive blocks light their own faces even
+                            // when neighbor cells read dimmer.
+                            if (def.emission > 0) {
+                                for (auto& corner : corners) {
+                                    corner.block = std::max(corner.block,
+                                                            static_cast<int>(def.emission));
+                                }
+                            }
+                            key = MaskKey(def.faceTiles[face], corners);
                         }
                     }
                     mask[v * Chunk::kSize + u] = key;
@@ -184,7 +250,7 @@ ChunkMesh ChunkMesher::Build(const ChunkSnapshot& snapshot) {
             // Greedy merge: widest run first, then grow rows downward.
             for (int v = 0; v < Chunk::kSize; ++v) {
                 for (int u = 0; u < Chunk::kSize;) {
-                    const uint32_t key = mask[v * Chunk::kSize + u];
+                    const uint64_t key = mask[v * Chunk::kSize + u];
                     if (key == 0) {
                         ++u;
                         continue;

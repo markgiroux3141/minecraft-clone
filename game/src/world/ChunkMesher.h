@@ -7,6 +7,7 @@
 #include <glm/glm.hpp>
 
 #include "world/Chunk.h"
+#include "world/Light.h"
 
 namespace vc {
 
@@ -16,6 +17,8 @@ struct ChunkVertex {
     glm::vec2 uv;       // tiles across merged quads (sampler wraps)
     float layer;        // texture-array layer
     float ao;           // ambient occlusion, 0 (fully occluded) .. 1 (open)
+    float skyLight;     // 0..1 (level / 15)
+    float blockLight;   // 0..1 (level / 15)
 };
 
 struct ChunkMesh {
@@ -23,13 +26,16 @@ struct ChunkMesh {
     std::vector<uint32_t> indices;
 };
 
-// Immutable view of a chunk and its full 3x3x3 neighborhood, captured on
-// the main thread so meshing jobs never touch the (mutable) chunk map.
-// AO needs edge and corner neighbors, not just face neighbors. Chunks are
-// immutable after generation, so shared ownership is all the snapshotting
-// we need; a null slot means air (world border or above/below).
+// Immutable view of a chunk and its full 3x3x3 neighborhood (blocks and
+// light), captured on the main thread so meshing jobs never touch the
+// (mutable) chunk map. AO and smooth light need edge and corner
+// neighbors, not just face neighbors. Chunk/light data is copy-on-write,
+// so shared ownership is all the snapshotting we need; a null slot means
+// air (only ever above/below the world — horizontal neighbors are gated).
 struct ChunkSnapshot {
     std::array<std::shared_ptr<const Chunk>, 27> chunks;
+    std::array<std::shared_ptr<const ChunkLight>, 27> light;
+    bool skyAbove = false; // center is a top-of-world chunk: above = full sky
 
     // d* in [0,2]; the center chunk lives at Index(1,1,1).
     static constexpr int Index(int dx, int dy, int dz) { return (dy * 3 + dz) * 3 + dx; }

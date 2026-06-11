@@ -36,7 +36,7 @@ void GameApp::OnInit() {
     vox::Renderer::SetClearColor(0.45f, 0.70f, 1.00f); // placeholder sky
 
     vc::blocks::RegisterDefaults();
-    m_hotbar = {vc::blocks::Stone, vc::blocks::Dirt, vc::blocks::Grass};
+    m_hotbar = {vc::blocks::Stone, vc::blocks::Dirt, vc::blocks::Grass, vc::blocks::Glowstone};
 
     m_chunkShader = vox::Shader::FromFiles("shaders/chunk.vert", "shaders/chunk.frag");
     m_blockTextures = vox::Texture2DArray::FromFileStrip("textures/atlas.png", 16);
