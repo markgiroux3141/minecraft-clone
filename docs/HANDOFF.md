@@ -68,7 +68,8 @@ it covers the ThreadPool join path.
 - GPU uploads are not budgeted per frame; bursts are bounded by the
   in-flight job cap (~60 on a 16-thread machine). Fine so far; budget
   uploads if frame spikes show up at higher radii.
-- Git repo initialized but NO commits yet — user hasn't asked.
+- Remote: https://github.com/markgiroux3141/minecraft-clone.git (branch
+  `main`). Commit + push at milestone boundaries.
 
 ## Next: M5 — meshing quality
 
