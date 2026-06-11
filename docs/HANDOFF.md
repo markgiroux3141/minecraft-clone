@@ -1,13 +1,13 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-11, end of M7 (pending user gameplay test). Read alongside
+Updated: 2026-06-11, end of M7 (user-verified in-game: darkness in
+tunnels, glowstone, no flicker, 60 fps idle). Read alongside
 `ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md` (build
 commands, conventions).
 
 ## Where the project stands
 
-M0–M7 are done (M7 sanity-checked by screenshot; user gameplay test of
-lighting in progress):
+M0–M7 are done and verified:
 - Engine (`engine/src/vox/`, namespace `vox`): fixed-timestep app loop
   (20 TPS + interpolated render), GLFW window/input (incl. cursor capture),
   GL 4.6 renderer facade with DSA abstractions (Shader, Buffer/VertexArray,
@@ -151,19 +151,42 @@ M6 break/place/fly. Exercise clean shutdown (`CloseMainWindow()`, expect
 - `chunk.frag`: skylight carries the directional sun term, block light is
   warm (1.0, 0.85, 0.62) and omnidirectional, `max()` combine, AO on top,
   0.03 ambient floor.
+- Edit-pipeline optimizations (commit dd73744, after user found a dark
+  flash on break + fps drops while digging): (a) SetBlock patches the
+  edited cell's light immediately (max of 6 neighbors - 1, sky 15 if the
+  cell above has it, emission for placed emitters) so the instant remesh
+  isn't pitch black while the flood fill catches up; (b) column dirtying
+  is range-checked (Manhattan reach <= 15 — center-of-chunk edits skip
+  diagonal columns); (c) light results compare BORDER SLABS old-vs-new
+  and only bump neighbor meshes that can see a changed cell (neighbors
+  sample at most one cell across the seam). All three live in World.cpp.
 - Known tuning points: light is linear in level (Minecraft uses an
-  exponential-ish curve — revisit if mid-levels look too dark); a single
-  edit triggers 9 column recomputes (~3-5 ms each on workers) — fine now,
-  optimize to incremental BFS only if edit latency ever shows.
+  exponential-ish curve — revisit if mid-levels look too dark); fps dips
+  to ~12 during the initial streaming burst in debug builds (GPU upload
+  bursts on the main thread — budget uploads per frame if it ever
+  matters; it recovers to 60 once pending hits 0 and the user is fine
+  with it).
 
 ## Next: M8 — persistence
 
 Region-file world saves: serialize edited chunks (only ones that diverge
-from the generator — track an "edited" flag or compare on save), load on
-chunk stream-in before falling back to TerrainGenerator. Decide format
-(simple per-region binary with chunk offsets) and save triggers (on
-unload + on quit). After that M9: occlusion culling, multi-draw indirect,
-LOD for far chunks.
+from the generator — track an "edited" flag on ChunkEntry, set in
+SetBlock), load on chunk stream-in before falling back to
+TerrainGenerator. Decide format (simple per-region binary with chunk
+offsets) and save triggers (on unload + on quit). File I/O fits the
+worker-pool model (load jobs instead of gen jobs for saved chunks; async
+writes), but keep the save index/manifest main-thread-owned like the
+chunk map. After that M9: occlusion culling, multi-draw indirect, LOD
+for far chunks.
+
+## How to verify (UPDATED working agreement)
+
+Do NOT launch the game and inject input from the agent — the user runs
+the game themselves. Build it, do at most a quick launch + screenshot
+sanity check if needed, then tell the user exactly what to test; they
+report back with screenshots and observations. (The user is often in
+calls/recordings — popping windows + capturing the cursor is
+disruptive.)
 
 ## Working agreements (see memory too)
 
