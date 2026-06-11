@@ -143,11 +143,11 @@ void GameApp::OnRender(double alpha, double frameDt) {
     m_blockTextures->Bind(0);
 
     const auto frustum = vox::Frustum::FromViewProjection(m_camera.ViewProjection());
-    m_chunksDrawn = 0;
     m_chunksWithMesh = 0;
     m_trianglesLoaded = 0;
+    m_drawItems.clear();
     m_world->ForEachRenderableChunk(
-        [&](const glm::ivec3& coord, const vox::VertexArray& mesh, uint32_t indexCount) {
+        [&](const glm::ivec3& coord, vox::MeshPool::MeshHandle mesh, uint32_t indexCount) {
             ++m_chunksWithMesh;
             m_trianglesLoaded += indexCount / 3;
             const glm::vec3 min = glm::vec3(coord * vc::Chunk::kSize);
@@ -155,10 +155,10 @@ void GameApp::OnRender(double alpha, double frameDt) {
             if (!frustum.IntersectsAABB(min, max)) {
                 return;
             }
-            m_chunkShader->SetMat4("u_model", glm::translate(glm::mat4(1.0f), min));
-            vox::Renderer::DrawIndexed(mesh, indexCount);
-            ++m_chunksDrawn;
+            m_drawItems.push_back({mesh, glm::vec4(min, 0.0f)});
         });
+    m_world->Meshes().Draw(m_drawItems);
+    m_chunksDrawn = m_drawItems.size();
 
     DrawTargetOutline();
 
@@ -168,13 +168,15 @@ void GameApp::OnRender(double alpha, double frameDt) {
         const auto pos = m_camera.Position();
         GetWindow().SetTitle(std::format(
             "Voxcraft | {} fps | {} tps | ({:.0f}, {:.0f}, {:.0f}) | {} | hand: {} | chunks: {} "
-            "loaded, {}/{} drawn, {} pending | {} jobs | {:.2f}M tris",
+            "loaded, {}/{} drawn, {} pending | {} jobs | {:.2f}M tris | pool {}/{} MB",
             m_frameCount, m_tickCount, pos.x, pos.y, pos.z,
             m_player.GetMode() == Player::Mode::Fly ? "fly" : "walk",
             vc::BlockRegistry::Get().Def(m_hotbar[m_hotbarSlot]).name,
             m_world->LoadedChunkCount(), m_chunksDrawn, m_chunksWithMesh,
             m_world->PendingMeshCount(), m_world->JobsInFlight(),
-            static_cast<double>(m_trianglesLoaded) / 1e6));
+            static_cast<double>(m_trianglesLoaded) / 1e6,
+            m_world->Meshes().UsedVertices() * sizeof(vc::ChunkVertex) / (1024 * 1024),
+            m_world->Meshes().CapacityVertices() * sizeof(vc::ChunkVertex) / (1024 * 1024)));
         m_statsTimer -= 1.0;
         m_frameCount = 0;
         m_tickCount = 0;

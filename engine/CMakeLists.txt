@@ -18,6 +18,8 @@ add_library(vox_engine STATIC
     src/vox/renderer/Camera.cpp
     src/vox/renderer/Camera.h
     src/vox/renderer/Frustum.h
+    src/vox/renderer/MeshPool.cpp
+    src/vox/renderer/MeshPool.h
     src/vox/renderer/Renderer.cpp
     src/vox/renderer/Renderer.h
     src/vox/renderer/Shader.cpp

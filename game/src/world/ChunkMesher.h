@@ -21,9 +21,10 @@ struct ChunkVertex {
     float blockLight;   // 0..1 (level / 15)
 };
 
+// Quads only — 4 vertices each, drawn with the shared index pattern
+// {0,1,2, 2,3,0} via vox::MeshPool, so no per-chunk index data exists.
 struct ChunkMesh {
     std::vector<ChunkVertex> vertices;
-    std::vector<uint32_t> indices;
 };
 
 // Immutable view of a chunk and its full 3x3x3 neighborhood (blocks and

@@ -17,6 +17,25 @@ namespace {
 // while leaving enough queued that workers never starve between frames.
 constexpr size_t kInFlightPerWorker = 4;
 
+// Chunk meshes are quads sharing one index pattern (the mesher rotates
+// vertex order for the AO diagonal flip, see EmitQuad), so the pool needs
+// no per-chunk index data. The initial capacity comfortably fits a radius
+// 12 view (~0.8M vertices, 48 B each); the pool grows if exceeded.
+constexpr uint32_t kQuadPattern[] = {0, 1, 2, 2, 3, 0};
+constexpr uint32_t kInitialPoolVertices = 1u << 20;
+
+vox::BufferLayout ChunkVertexLayout() {
+    return {
+        {vox::ShaderDataType::Float3, "a_position"},
+        {vox::ShaderDataType::Float3, "a_normal"},
+        {vox::ShaderDataType::Float2, "a_uv"},
+        {vox::ShaderDataType::Float, "a_layer"},
+        {vox::ShaderDataType::Float, "a_ao"},
+        {vox::ShaderDataType::Float, "a_sky"},
+        {vox::ShaderDataType::Float, "a_block"},
+    };
+}
+
 int FloorDivChunk(float worldCoord) {
     return static_cast<int>(std::floor(worldCoord / static_cast<float>(Chunk::kSize)));
 }
@@ -45,6 +64,7 @@ bool FaceSlabDiffers(const ChunkLight& a, const ChunkLight& b, int axis, int sid
 
 World::World(int defaultSeed, std::filesystem::path saveDir)
     : m_save(std::move(saveDir), defaultSeed), m_generator(m_save.Seed()),
+      m_meshPool(ChunkVertexLayout(), kQuadPattern, 4, kInitialPoolVertices),
       m_lastAutosave(std::chrono::steady_clock::now()) {}
 
 World::~World() {
@@ -335,31 +355,17 @@ void World::SubmitMesh(const glm::ivec3& coord) {
 }
 
 void World::UploadMesh(ChunkEntry& entry, const ChunkMesh& mesh) {
-    if (mesh.vertices.empty()) {
-        entry.mesh = nullptr;
+    if (entry.mesh != vox::MeshPool::kInvalidMesh) {
+        m_meshPool.Free(entry.mesh);
+        entry.mesh = vox::MeshPool::kInvalidMesh;
         entry.indexCount = 0;
+    }
+    if (mesh.vertices.empty()) {
         return;
     }
-
-    auto vertexBuffer = std::make_shared<vox::VertexBuffer>(
-        mesh.vertices.data(),
-        static_cast<uint32_t>(mesh.vertices.size() * sizeof(ChunkVertex)));
-    vertexBuffer->SetLayout({
-        {vox::ShaderDataType::Float3, "a_position"},
-        {vox::ShaderDataType::Float3, "a_normal"},
-        {vox::ShaderDataType::Float2, "a_uv"},
-        {vox::ShaderDataType::Float, "a_layer"},
-        {vox::ShaderDataType::Float, "a_ao"},
-        {vox::ShaderDataType::Float, "a_sky"},
-        {vox::ShaderDataType::Float, "a_block"},
-    });
-    auto indexBuffer = std::make_shared<vox::IndexBuffer>(
-        mesh.indices.data(), static_cast<uint32_t>(mesh.indices.size()));
-
-    entry.mesh = std::make_shared<vox::VertexArray>();
-    entry.mesh->AddVertexBuffer(std::move(vertexBuffer));
-    entry.mesh->SetIndexBuffer(std::move(indexBuffer));
-    entry.indexCount = static_cast<uint32_t>(mesh.indices.size());
+    entry.mesh =
+        m_meshPool.Allocate(mesh.vertices.data(), static_cast<uint32_t>(mesh.vertices.size()));
+    entry.indexCount = m_meshPool.IndexCount(entry.mesh);
 }
 
 void World::DrainCompletedJobs() {
@@ -492,6 +498,9 @@ void World::Update(const glm::vec3& cameraPos) {
         const auto it = m_chunks.find(coord);
         if (it->second.edited && it->second.blocks) {
             m_save.Put(coord, *it->second.blocks);
+        }
+        if (it->second.mesh != vox::MeshPool::kInvalidMesh) {
+            m_meshPool.Free(it->second.mesh);
         }
         m_chunks.erase(it);
     }

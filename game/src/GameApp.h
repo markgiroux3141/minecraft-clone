@@ -3,6 +3,7 @@
 #include <array>
 #include <memory>
 #include <optional>
+#include <vector>
 
 #include "vox/core/Application.h"
 #include "vox/renderer/Camera.h"
@@ -39,6 +40,9 @@ private:
     std::shared_ptr<vox::Shader> m_outlineShader;
     std::shared_ptr<vox::VertexArray> m_outlineCube;
     std::optional<vc::World::RaycastHit> m_target;
+
+    // Frustum-surviving chunks for the frame's one multi-draw (reused scratch).
+    std::vector<vox::MeshPool::DrawItem> m_drawItems;
 
     // Hotbar: keys 1..N select into this list (filled after block registration).
     std::array<vc::BlockId, 4> m_hotbar{};

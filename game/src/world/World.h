@@ -12,7 +12,7 @@
 #include <glm/glm.hpp>
 
 #include "vox/core/ThreadPool.h"
-#include "vox/renderer/VertexArray.h"
+#include "vox/renderer/MeshPool.h"
 
 #include "world/Chunk.h"
 #include "world/ChunkMesher.h"
@@ -33,7 +33,8 @@ struct ChunkEntry {
     uint32_t dataVersion = 0;   // mesh-input version: bumped by edits AND light changes
     uint32_t meshedVersion = 0; // dataVersion the uploaded mesh was built from
     uint32_t meshingVersion = 0; // dataVersion the in-flight mesh job targets (0 = none)
-    std::shared_ptr<vox::VertexArray> mesh; // null until uploaded, or if empty
+    // Allocation in World's MeshPool; invalid until uploaded, or if empty.
+    vox::MeshPool::MeshHandle mesh = vox::MeshPool::kInvalidMesh;
     uint32_t indexCount = 0;
     bool edited = false; // diverges from the save store — persist before unload
 };
@@ -91,14 +92,18 @@ public:
 
     const Chunk* GetChunk(const glm::ivec3& chunkCoord) const;
 
-    template <typename Fn> // fn(chunkCoord, vertexArray, indexCount)
+    template <typename Fn> // fn(chunkCoord, meshHandle, indexCount)
     void ForEachRenderableChunk(Fn&& fn) const {
         for (const auto& [coord, entry] : m_chunks) {
-            if (entry.mesh) {
-                fn(coord, *entry.mesh, entry.indexCount);
+            if (entry.mesh != vox::MeshPool::kInvalidMesh) {
+                fn(coord, entry.mesh, entry.indexCount);
             }
         }
     }
+
+    // All chunk meshes live here; the renderer draws them in one
+    // glMultiDrawElementsIndirect via Meshes().Draw(items).
+    vox::MeshPool& Meshes() { return m_meshPool; }
 
     size_t LoadedChunkCount() const { return m_chunks.size(); }
     size_t PendingMeshCount() const { return m_pendingMeshes; }
@@ -154,6 +159,7 @@ private:
 
     WorldSave m_save; // declared before m_generator: its manifest provides the seed
     TerrainGenerator m_generator; // stateless — shared by all workers
+    vox::MeshPool m_meshPool;     // main-thread-only, like all GL
     ChunkMap m_chunks;
     ColumnMap m_columns;
     size_t m_pendingMeshes = 0; // chunks in radius without an up-to-date mesh

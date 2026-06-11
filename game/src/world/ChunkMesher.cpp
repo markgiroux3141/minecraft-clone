@@ -163,8 +163,14 @@ void EmitQuad(ChunkMesh& mesh, const FaceBasis& fb, int slice, int u0, int v0, i
     glm::vec3 normal(0.0f);
     normal[fb.n] = static_cast<float>(fb.s);
 
-    const auto base = static_cast<uint32_t>(mesh.vertices.size());
-    for (int k = 0; k < 4; ++k) {
+    // Every quad uses the implicit index pattern {0,1,2, 2,3,0} (see
+    // World's MeshPool). Splitting along the brighter AO diagonal (no
+    // dark-cross anisotropy artifact) is done by rotating the emission
+    // order one step — a cyclic rotation yields exactly the triangles of
+    // the flipped diagonal with the winding preserved.
+    const int rotate = ao[0] + ao[2] >= ao[1] + ao[3] ? 0 : 1;
+    for (int j = 0; j < 4; ++j) {
+        const int k = (j + rotate) & 3;
         glm::vec3 pos;
         pos[fb.n] = static_cast<float>(plane);
         pos[fb.uAxis] = static_cast<float>(u0 + cu[k]);
@@ -181,15 +187,6 @@ void EmitQuad(ChunkMesh& mesh, const FaceBasis& fb, int slice, int u0, int v0, i
             sky[k],
             block[k],
         });
-    }
-    // Split along the brighter diagonal so AO interpolates without the
-    // dark-cross anisotropy artifact.
-    if (ao[0] + ao[2] >= ao[1] + ao[3]) {
-        mesh.indices.insert(mesh.indices.end(),
-                            {base, base + 1, base + 2, base + 2, base + 3, base});
-    } else {
-        mesh.indices.insert(mesh.indices.end(),
-                            {base, base + 1, base + 3, base + 1, base + 2, base + 3});
     }
 }
 
