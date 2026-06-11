@@ -36,4 +36,5 @@ private:
     uint64_t m_totalTicks = 0;
     size_t m_chunksDrawn = 0;
     size_t m_chunksWithMesh = 0;
+    uint64_t m_trianglesLoaded = 0;
 };

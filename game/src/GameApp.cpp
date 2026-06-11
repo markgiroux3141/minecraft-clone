@@ -69,9 +69,11 @@ void GameApp::OnRender(double /*alpha*/, double frameDt) {
     const auto frustum = vox::Frustum::FromViewProjection(m_camera.ViewProjection());
     m_chunksDrawn = 0;
     m_chunksWithMesh = 0;
+    m_trianglesLoaded = 0;
     m_world->ForEachRenderableChunk(
         [&](const glm::ivec3& coord, const vox::VertexArray& mesh, uint32_t indexCount) {
             ++m_chunksWithMesh;
+            m_trianglesLoaded += indexCount / 3;
             const glm::vec3 min = glm::vec3(coord * vc::Chunk::kSize);
             const glm::vec3 max = min + glm::vec3(static_cast<float>(vc::Chunk::kSize));
             if (!frustum.IntersectsAABB(min, max)) {
@@ -88,10 +90,10 @@ void GameApp::OnRender(double /*alpha*/, double frameDt) {
         const auto pos = m_camera.Position();
         GetWindow().SetTitle(std::format(
             "Voxcraft | {} fps | {} tps | ({:.0f}, {:.0f}, {:.0f}) | chunks: {} loaded, "
-            "{}/{} drawn, {} pending | {} jobs",
+            "{}/{} drawn, {} pending | {} jobs | {:.2f}M tris",
             m_frameCount, m_tickCount, pos.x, pos.y, pos.z, m_world->LoadedChunkCount(),
             m_chunksDrawn, m_chunksWithMesh, m_world->PendingMeshCount(),
-            m_world->JobsInFlight()));
+            m_world->JobsInFlight(), static_cast<double>(m_trianglesLoaded) / 1e6));
         m_statsTimer -= 1.0;
         m_frameCount = 0;
         m_tickCount = 0;

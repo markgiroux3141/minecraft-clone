@@ -56,7 +56,9 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   generation + meshing jobs against immutable chunk snapshots; the main
   thread drains completion queues and only uploads buffers. View radius
   raised to 12.
-- **M5 — Meshing quality**: greedy meshing, ambient occlusion in vertex data.
+- **M5 — Meshing quality** ✅: greedy meshing (faces merge on texture layer +
+  AO key, UVs tile via the texture array), classic corner AO baked per
+  vertex with AO-aware quad diagonals. ~10x triangle reduction.
 - **M6 — Player**: AABB physics, collision, raycast block break/place.
 - **M7 — Lighting**: BFS flood-fill block light + sky light, per-vertex light
   in mesh data.

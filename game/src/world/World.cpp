@@ -10,10 +10,6 @@ namespace vc {
 
 namespace {
 
-constexpr glm::ivec3 kNeighborOffsets[6] = {
-    {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1},
-};
-
 // Cap on generation + meshing jobs in flight, as a multiple of the worker
 // count. Keeps the queue short so streaming stays responsive to camera
 // movement (work is re-prioritized nearest-first every Update), while
@@ -43,15 +39,24 @@ const Chunk* World::GetChunk(const glm::ivec3& chunkCoord) const {
     return it != m_chunks.end() ? it->second.blocks.get() : nullptr;
 }
 
+// AO samples diagonal blocks, so meshing waits on all 26 neighbors (the
+// streaming data ring is radius+1, so they always arrive eventually).
 bool World::NeighborsHaveData(const glm::ivec3& coord) const {
-    for (const auto& offset : kNeighborOffsets) {
-        const glm::ivec3 n = coord + offset;
-        if (n.y < 0 || n.y >= kHeightChunks) {
+    for (int dy = -1; dy <= 1; ++dy) {
+        const int ny = coord.y + dy;
+        if (ny < 0 || ny >= kHeightChunks) {
             continue; // outside the world counts as air, no data needed
         }
-        const auto it = m_chunks.find(n);
-        if (it == m_chunks.end() || !it->second.blocks) {
-            return false;
+        for (int dz = -1; dz <= 1; ++dz) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                if (dx == 0 && dy == 0 && dz == 0) {
+                    continue;
+                }
+                const auto it = m_chunks.find(coord + glm::ivec3{dx, dy, dz});
+                if (it == m_chunks.end() || !it->second.blocks) {
+                    return false;
+                }
+            }
         }
     }
     return true;
@@ -59,11 +64,15 @@ bool World::NeighborsHaveData(const glm::ivec3& coord) const {
 
 ChunkSnapshot World::SnapshotFor(const glm::ivec3& coord) const {
     ChunkSnapshot snapshot;
-    snapshot.center = m_chunks.at(coord).blocks;
-    for (int face = 0; face < 6; ++face) {
-        const auto it = m_chunks.find(coord + kNeighborOffsets[face]);
-        if (it != m_chunks.end()) {
-            snapshot.neighbors[face] = it->second.blocks;
+    for (int dy = -1; dy <= 1; ++dy) {
+        for (int dz = -1; dz <= 1; ++dz) {
+            for (int dx = -1; dx <= 1; ++dx) {
+                const auto it = m_chunks.find(coord + glm::ivec3{dx, dy, dz});
+                if (it != m_chunks.end()) {
+                    snapshot.chunks[ChunkSnapshot::Index(dx + 1, dy + 1, dz + 1)] =
+                        it->second.blocks;
+                }
+            }
         }
     }
     return snapshot;
@@ -108,6 +117,7 @@ void World::UploadMesh(ChunkEntry& entry, const ChunkMesh& mesh) {
         {vox::ShaderDataType::Float3, "a_normal"},
         {vox::ShaderDataType::Float2, "a_uv"},
         {vox::ShaderDataType::Float, "a_layer"},
+        {vox::ShaderDataType::Float, "a_ao"},
     });
     auto indexBuffer = std::make_shared<vox::IndexBuffer>(
         mesh.indices.data(), static_cast<uint32_t>(mesh.indices.size()));
