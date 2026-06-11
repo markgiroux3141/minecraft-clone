@@ -12,6 +12,7 @@
 #include "vox/renderer/Texture.h"
 
 #include "ui/Hud.h"
+#include "ui/PauseMenu.h"
 #include "world/Block.h"
 
 namespace {
@@ -75,9 +76,29 @@ void GameApp::OnInit() {
 }
 
 void GameApp::OnTick(double dt) {
-    m_player.Tick(*m_world, dt);
+    if (m_state == State::Playing) {
+        m_player.Tick(*m_world, dt);
+    }
     ++m_tickCount;
     ++m_totalTicks;
+}
+
+void GameApp::SetPaused(bool paused) {
+    if ((m_state == State::Paused) == paused) {
+        return;
+    }
+    m_state = paused ? State::Paused : State::Playing;
+    GetWindow().SetCursorCaptured(!paused);
+    if (paused) {
+        m_target.reset();
+    } else {
+        // Buttons held through the resume (e.g. the click that hit Resume)
+        // must be re-pressed before they break or place anything.
+        m_breakWasDown = true;
+        m_placeWasDown = true;
+        m_breakCooldown = kEditRepeatDelay;
+        m_placeCooldown = kEditRepeatDelay;
+    }
 }
 
 void GameApp::HandleInput(double frameDt) {
@@ -140,13 +161,40 @@ void GameApp::DrawTargetOutline() {
     vox::Renderer::DrawLines(*m_outlineCube);
 }
 
-void GameApp::OnRender(double alpha, double frameDt) {
-    if (vox::Input::IsKeyDown(vox::Key::Escape)) {
-        Close();
-    }
+void GameApp::DrawUi() {
+    const glm::vec2 screen{static_cast<float>(GetWindow().Width()),
+                           static_cast<float>(GetWindow().Height())};
+    const bool clickDown = vox::Input::IsMouseButtonDown(vox::MouseButton::Left);
+    const bool clicked = clickDown && !m_clickWasDown;
+    m_clickWasDown = clickDown;
 
-    m_player.OnRender(alpha);
-    HandleInput(frameDt);
+    m_ui->Begin(GetWindow().Width(), GetWindow().Height(), m_blockTextures.get());
+    vc::Hud::Draw(*m_ui, screen, m_hotbar, m_hotbarSlot);
+    if (m_state == State::Paused) {
+        const auto action =
+            vc::PauseMenu::Draw(*m_ui, screen, vox::Input::MousePosition(), clicked);
+        if (action == vc::PauseMenu::Action::Resume) {
+            SetPaused(false);
+        } else if (action == vc::PauseMenu::Action::SaveQuit) {
+            GAME_INFO("Save & Quit from the pause menu");
+            Close(); // ~World flushes edited chunks on the way out
+        }
+    }
+    m_ui->End();
+}
+
+void GameApp::OnRender(double alpha, double frameDt) {
+    const bool escapeDown = vox::Input::IsKeyDown(vox::Key::Escape);
+    if (escapeDown && !m_escapeWasDown) {
+        SetPaused(m_state == State::Playing);
+    }
+    m_escapeWasDown = escapeDown;
+
+    const bool playing = m_state == State::Playing;
+    m_player.OnRender(alpha, playing);
+    if (playing) {
+        HandleInput(frameDt);
+    }
     m_world->Update(m_camera.Position());
 
     vox::Renderer::Clear();
@@ -162,12 +210,7 @@ void GameApp::OnRender(double alpha, double frameDt) {
     m_chunksDrawn = m_drawItems.size();
 
     DrawTargetOutline();
-
-    const glm::vec2 screen{static_cast<float>(GetWindow().Width()),
-                           static_cast<float>(GetWindow().Height())};
-    m_ui->Begin(GetWindow().Width(), GetWindow().Height(), m_blockTextures.get());
-    vc::Hud::Draw(*m_ui, screen, m_hotbar, m_hotbarSlot);
-    m_ui->End();
+    DrawUi();
 
     ++m_frameCount;
     m_statsTimer += frameDt;

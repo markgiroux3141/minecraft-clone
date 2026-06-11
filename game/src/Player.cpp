@@ -161,15 +161,19 @@ void Player::MoveAxis(const vc::World& world, int axis, float delta) {
     }
 }
 
-void Player::OnRender(double alpha) {
-    const glm::vec2 mouse = vox::Input::MousePosition();
-    if (m_hasLastMouse) {
-        const glm::vec2 delta = mouse - m_lastMouse;
-        m_yaw += delta.x * kLookSensitivity;
-        m_pitch = std::clamp(m_pitch - delta.y * kLookSensitivity, -89.0f, 89.0f);
+void Player::OnRender(double alpha, bool mouseLook) {
+    if (mouseLook) {
+        const glm::vec2 mouse = vox::Input::MousePosition();
+        if (m_hasLastMouse) {
+            const glm::vec2 delta = mouse - m_lastMouse;
+            m_yaw += delta.x * kLookSensitivity;
+            m_pitch = std::clamp(m_pitch - delta.y * kLookSensitivity, -89.0f, 89.0f);
+        }
+        m_lastMouse = mouse;
+        m_hasLastMouse = true;
+    } else {
+        m_hasLastMouse = false;
     }
-    m_lastMouse = mouse;
-    m_hasLastMouse = true;
 
     const glm::vec3 feet = glm::mix(m_prevPosition, m_position, static_cast<float>(alpha));
     m_camera.SetPosition(feet + glm::vec3{0.0f, kEyeHeight, 0.0f});

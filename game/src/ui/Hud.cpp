@@ -66,12 +66,14 @@ void DrawHotbar(vox::UiRenderer& ui, glm::vec2 screen, float s,
 
 } // namespace
 
+float GuiScale(glm::vec2 screen) {
+    return std::max(1.0f,
+                    std::min(std::floor(screen.x / 320.0f), std::floor(screen.y / 240.0f)));
+}
+
 void Hud::Draw(vox::UiRenderer& ui, glm::vec2 screen, std::span<const BlockId> hotbar,
                size_t selectedSlot) {
-    // Minecraft's auto GUI scale: the largest integer scale that keeps a
-    // 320x240 layout on screen (3 at 1600x900, 4 at 4k).
-    const float s = std::max(1.0f, std::min(std::floor(screen.x / 320.0f),
-                                            std::floor(screen.y / 240.0f)));
+    const float s = GuiScale(screen);
     DrawCrosshair(ui, screen, s);
     if (!hotbar.empty()) {
         DrawHotbar(ui, screen, s, hotbar, selectedSlot);

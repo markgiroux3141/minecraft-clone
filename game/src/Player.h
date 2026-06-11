@@ -25,8 +25,10 @@ public:
 
     void Tick(const vc::World& world, double dt);
 
-    // Applies mouse look and moves the camera to the interpolated eye.
-    void OnRender(double alpha);
+    // Moves the camera to the interpolated eye; applies mouse look unless
+    // disabled (menus). While disabled the delta tracking resets, so the
+    // view doesn't jump when look is re-enabled.
+    void OnRender(double alpha, bool mouseLook = true);
 
     void ToggleMode();
     Mode GetMode() const { return m_mode; }

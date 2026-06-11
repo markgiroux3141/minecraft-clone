@@ -27,8 +27,13 @@ protected:
     void OnShutdown() override;
 
 private:
+    // Captured-cursor gameplay vs released-cursor pause menu.
+    enum class State : uint8_t { Playing, Paused };
+
+    void SetPaused(bool paused);
     void HandleInput(double frameDt);
     void DrawTargetOutline();
+    void DrawUi(); // HUD + pause menu; may change state (menu clicks)
 
     vox::PerspectiveCamera m_camera;
     Player m_player{m_camera};
@@ -56,9 +61,13 @@ private:
     // comparing drawn-chunk counts and spotting false culling.
     bool m_occlusionCulling = true;
 
+    State m_state = State::Playing;
+
     // Edge/repeat tracking for per-frame input.
     bool m_modeKeyWasDown = false;
     bool m_occlusionKeyWasDown = false;
+    bool m_escapeWasDown = false;
+    bool m_clickWasDown = false; // menu clicks (break/place track separately)
     bool m_breakWasDown = false;
     bool m_placeWasDown = false;
     double m_breakCooldown = 0.0;
