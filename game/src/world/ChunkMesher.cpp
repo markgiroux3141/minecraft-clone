@@ -42,21 +42,24 @@ void FillPadded(const ChunkSnapshot& snapshot, PaddedVolume& out) {
 
 // Per-face slicing basis. Order matches BlockFace. (uAxis, vAxis) are
 // chosen so cross(u, v) == outward normal, which makes the emitted corner
-// order (0,0) (w,0) (w,h) (0,h) wind CCW viewed from outside.
+// order (0,0) (w,0) (w,h) (0,h) wind CCW viewed from outside. That choice
+// puts world-up along the mask's u axis on +X/-Z, so those faces swap UV
+// components to keep texture "up" (grass band) aligned with world up.
 struct FaceBasis {
-    int n;     // axis the face is perpendicular to
-    int s;     // +1 or -1: which side of the block
-    int uAxis; // mask "u" direction (quad width)
-    int vAxis; // mask "v" direction (quad height)
+    int n;       // axis the face is perpendicular to
+    int s;       // +1 or -1: which side of the block
+    int uAxis;   // mask "u" direction (quad width)
+    int vAxis;   // mask "v" direction (quad height)
+    bool swapUv; // map mask (u,v) -> texture (t,s) instead of (s,t)
 };
 
 constexpr FaceBasis kFaces[6] = {
-    {0, +1, 1, 2}, // +X
-    {0, -1, 2, 1}, // -X
-    {1, +1, 2, 0}, // +Y
-    {1, -1, 0, 2}, // -Y
-    {2, +1, 0, 1}, // +Z
-    {2, -1, 1, 0}, // -Z
+    {0, +1, 1, 2, true},  // +X
+    {0, -1, 2, 1, false}, // -X
+    {1, +1, 2, 0, false}, // +Y
+    {1, -1, 0, 2, false}, // -Y
+    {2, +1, 0, 1, false}, // +Z
+    {2, -1, 1, 0, true},  // -Z
 };
 
 // Classic corner AO: the three blocks touching this vertex in the plane
@@ -112,10 +115,13 @@ void EmitQuad(ChunkMesh& mesh, const FaceBasis& fb, int slice, int u0, int v0, i
         pos[fb.n] = static_cast<float>(plane);
         pos[fb.uAxis] = static_cast<float>(u0 + cu[k]);
         pos[fb.vAxis] = static_cast<float>(v0 + cv[k]);
+        const glm::vec2 uv = fb.swapUv
+                                 ? glm::vec2{static_cast<float>(cv[k]), static_cast<float>(cu[k])}
+                                 : glm::vec2{static_cast<float>(cu[k]), static_cast<float>(cv[k])};
         mesh.vertices.push_back({
             pos,
             normal,
-            {static_cast<float>(cu[k]), static_cast<float>(cv[k])},
+            uv,
             layer,
             static_cast<float>(ao[k]) / 3.0f,
         });
