@@ -28,6 +28,8 @@ add_library(vox_engine STATIC
     src/vox/renderer/Texture.h
     src/vox/renderer/TextureArray.cpp
     src/vox/renderer/TextureArray.h
+    src/vox/renderer/UiRenderer.cpp
+    src/vox/renderer/UiRenderer.h
     src/vox/renderer/VertexArray.cpp
     src/vox/renderer/VertexArray.h
 )

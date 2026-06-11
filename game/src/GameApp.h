@@ -9,6 +9,7 @@
 #include "vox/renderer/Camera.h"
 #include "vox/renderer/Shader.h"
 #include "vox/renderer/TextureArray.h"
+#include "vox/renderer/UiRenderer.h"
 #include "vox/renderer/VertexArray.h"
 
 #include "Player.h"
@@ -43,6 +44,9 @@ private:
 
     // Frustum-surviving chunks for the frame's one multi-draw (reused scratch).
     std::vector<vox::MeshPool::DrawItem> m_drawItems;
+
+    // 2D overlay (crosshair, hotbar; menus from M10 stage 2).
+    std::unique_ptr<vox::UiRenderer> m_ui;
 
     // Hotbar: keys 1..N select into this list (filled after block registration).
     std::array<vc::BlockId, 4> m_hotbar{};

@@ -3,5 +3,6 @@
 out vec4 o_color;
 
 void main() {
-    o_color = vec4(0.05, 0.05, 0.05, 1.0);
+    // Light gray reads against dirt/stone shadow; near-black didn't.
+    o_color = vec4(0.92, 0.92, 0.92, 1.0);
 }

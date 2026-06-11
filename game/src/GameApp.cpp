@@ -9,7 +9,9 @@
 #include "vox/platform/Input.h"
 #include "vox/renderer/Frustum.h"
 #include "vox/renderer/Renderer.h"
+#include "vox/renderer/Texture.h"
 
+#include "ui/Hud.h"
 #include "world/Block.h"
 
 namespace {
@@ -41,6 +43,10 @@ void GameApp::OnInit() {
 
     m_chunkShader = vox::Shader::FromFiles("shaders/chunk.vert", "shaders/chunk.frag");
     m_blockTextures = vox::Texture2DArray::FromFileStrip("textures/atlas.png", 16);
+
+    m_ui = std::make_unique<vox::UiRenderer>();
+    // Grid layout matches scripts/gen_font.py: ASCII 32..127, 16 cols x 6 rows.
+    m_ui->SetFont(vox::Texture2D::FromFile("fonts/ascii.png"), 16, 6);
 
     m_outlineShader = vox::Shader::FromFiles("shaders/outline.vert", "shaders/outline.frag");
     constexpr float corners[] = {
@@ -156,6 +162,12 @@ void GameApp::OnRender(double alpha, double frameDt) {
     m_chunksDrawn = m_drawItems.size();
 
     DrawTargetOutline();
+
+    const glm::vec2 screen{static_cast<float>(GetWindow().Width()),
+                           static_cast<float>(GetWindow().Height())};
+    m_ui->Begin(GetWindow().Width(), GetWindow().Height(), m_blockTextures.get());
+    vc::Hud::Draw(*m_ui, screen, m_hotbar, m_hotbarSlot);
+    m_ui->End();
 
     ++m_frameCount;
     m_statsTimer += frameDt;
