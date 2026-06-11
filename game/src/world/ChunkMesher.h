@@ -24,8 +24,11 @@ struct ChunkVertex {
 
 // Quads only — 4 vertices each, drawn with the shared index pattern
 // {0,1,2, 2,3,0} via vox::MeshPool, so no per-chunk index data exists.
+// Liquids (water) land in the separate transparent stream, drawn blended
+// after all opaque geometry.
 struct ChunkMesh {
     std::vector<ChunkVertex> vertices;
+    std::vector<ChunkVertex> transparentVertices;
     VisibilityBits visibility = 0; // face connectivity for occlusion culling
 };
 

@@ -21,6 +21,7 @@ constexpr int PadIndex(int x, int y, int z) {
 struct PaddedVolume {
     std::array<BlockId, kPadVolume> id;
     std::array<uint8_t, kPadVolume> opaque;
+    std::array<uint8_t, kPadVolume> liquid;
     std::array<uint8_t, kPadVolume> light; // packed sky<<4 | block
 };
 
@@ -35,8 +36,10 @@ void FillPadded(const ChunkSnapshot& snapshot, PaddedVolume& out) {
                 const Chunk* chunk = snapshot.chunks[slot].get();
                 const BlockId id = chunk ? chunk->Get(x & 15, y & 15, z & 15) : blocks::Air;
                 const int p = PadIndex(x, y, z);
+                const BlockDef& def = registry.Def(id);
                 out.id[p] = id;
-                out.opaque[p] = registry.Def(id).opaque ? 1 : 0;
+                out.opaque[p] = def.opaque ? 1 : 0;
+                out.liquid[p] = def.liquid ? 1 : 0;
 
                 const ChunkLight* light = snapshot.light[slot].get();
                 if (light) {
@@ -129,11 +132,14 @@ CornerSample SampleCorner(const PaddedVolume& vol, const int cell[3], const Face
     return sample;
 }
 
-// Mask cell key (uint64): bit 56 = face present, bits 40..55 = corner
-// block light (4x4), bits 24..39 = corner sky light (4x4), bits 8..23 =
-// texture layer, bits 0..7 = corner AO (4x2). Corners are stored in
-// emitted order. Cells merge only on exact key match, which keeps both AO
-// and light gradients continuous across merged quads.
+// Mask cell key (uint64): bit 57 = transparent stream, bit 56 = face
+// present, bits 40..55 = corner block light (4x4), bits 24..39 = corner
+// sky light (4x4), bits 8..23 = texture layer, bits 0..7 = corner AO
+// (4x2). Corners are stored in emitted order. Cells merge only on exact
+// key match, which keeps both AO and light gradients continuous across
+// merged quads (and never merges liquid with solid faces).
+constexpr uint64_t kKeyTransparent = uint64_t{1} << 57;
+
 uint64_t MaskKey(uint32_t layer, const CornerSample corners[4]) {
     uint64_t key = uint64_t{1} << 56;
     key |= uint64_t{layer} << 8;
@@ -147,6 +153,7 @@ uint64_t MaskKey(uint32_t layer, const CornerSample corners[4]) {
 
 void EmitQuad(ChunkMesh& mesh, const FaceBasis& fb, int slice, int u0, int v0, int w, int h,
               uint64_t key) {
+    auto& vertices = (key & kKeyTransparent) ? mesh.transparentVertices : mesh.vertices;
     const int plane = slice + (fb.s > 0 ? 1 : 0);
     const auto layer = static_cast<float>((key >> 8) & 0xFFFFu);
     int ao[4];
@@ -178,7 +185,7 @@ void EmitQuad(ChunkMesh& mesh, const FaceBasis& fb, int slice, int u0, int v0, i
         const glm::vec2 uv = fb.swapUv
                                  ? glm::vec2{static_cast<float>(cv[k]), static_cast<float>(cu[k])}
                                  : glm::vec2{static_cast<float>(cu[k]), static_cast<float>(cv[k])};
-        mesh.vertices.push_back({
+        vertices.push_back({
             pos,
             normal,
             uv,
@@ -272,9 +279,10 @@ ChunkMesh ChunkMesher::Build(const ChunkSnapshot& snapshot) {
     for (int face = 0; face < 6; ++face) {
         const FaceBasis& fb = kFaces[face];
         for (int slice = 0; slice < Chunk::kSize; ++slice) {
-            // Build the visibility mask for this slice. Only opaque blocks
-            // mesh for now; transparent block types (water, leaves) will
-            // need their own pass when they exist.
+            // Build the visibility mask for this slice. Opaque faces show
+            // against any non-opaque neighbor; liquid faces only against
+            // non-opaque non-liquid neighbors (no internal water-water
+            // faces) and go to the transparent stream.
             for (int v = 0; v < Chunk::kSize; ++v) {
                 for (int u = 0; u < Chunk::kSize; ++u) {
                     int cell[3];
@@ -284,10 +292,14 @@ ChunkMesh ChunkMesher::Build(const ChunkSnapshot& snapshot) {
                     const int p = PadIndex(cell[0], cell[1], cell[2]);
 
                     uint64_t key = 0;
-                    if (vol.opaque[p]) {
+                    if (vol.opaque[p] || vol.liquid[p]) {
                         int nb[3] = {cell[0], cell[1], cell[2]};
                         nb[fb.n] += fb.s;
-                        if (!vol.opaque[PadIndex(nb[0], nb[1], nb[2])]) {
+                        const int np = PadIndex(nb[0], nb[1], nb[2]);
+                        const bool visible = vol.opaque[p]
+                                                 ? !vol.opaque[np]
+                                                 : !vol.opaque[np] && !vol.liquid[np];
+                        if (visible) {
                             const BlockDef& def = registry.Def(vol.id[p]);
                             CornerSample corners[4] = {
                                 SampleCorner(vol, cell, fb, -1, -1),
@@ -304,6 +316,9 @@ ChunkMesh ChunkMesher::Build(const ChunkSnapshot& snapshot) {
                                 }
                             }
                             key = MaskKey(def.faceTiles[face], corners);
+                            if (vol.liquid[p]) {
+                                key |= kKeyTransparent;
+                            }
                         }
                     }
                     mask[v * Chunk::kSize + u] = key;

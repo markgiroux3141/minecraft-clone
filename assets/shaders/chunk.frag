@@ -22,6 +22,8 @@ void main() {
     light = max(light, vec3(0.03)); // never fully black
 
     float ao = mix(0.4, 1.0, v_ao);
-    vec3 albedo = texture(u_atlas, v_uvw).rgb;
-    o_color = vec4(albedo * ao * light, 1.0);
+    vec4 albedo = texture(u_atlas, v_uvw);
+    // Alpha passes through: opaque pass draws with blending off, the water
+    // pass blends with the texture's alpha.
+    o_color = vec4(albedo.rgb * ao * light, albedo.a);
 }

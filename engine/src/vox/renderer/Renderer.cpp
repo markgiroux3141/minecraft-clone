@@ -79,6 +79,27 @@ void Renderer::DrawLines(const VertexArray& vertexArray, uint32_t indexCount) {
     glDrawElements(GL_LINES, static_cast<GLsizei>(count), GL_UNSIGNED_INT, nullptr);
 }
 
+void Renderer::SetBlend(bool enabled) {
+    if (enabled) {
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    } else {
+        glDisable(GL_BLEND);
+    }
+}
+
+void Renderer::SetDepthWrite(bool enabled) {
+    glDepthMask(enabled ? GL_TRUE : GL_FALSE);
+}
+
+void Renderer::SetCullFace(bool enabled) {
+    if (enabled) {
+        glEnable(GL_CULL_FACE);
+    } else {
+        glDisable(GL_CULL_FACE);
+    }
+}
+
 void Renderer::SetViewport(uint32_t width, uint32_t height) {
     if (width == 0 || height == 0) {
         return; // minimized

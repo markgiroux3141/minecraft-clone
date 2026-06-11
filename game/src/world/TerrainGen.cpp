@@ -120,7 +120,11 @@ void TerrainGenerator::Generate(Chunk& chunk, const glm::ivec3& chunkCoord) cons
             for (int y = 0; y < Chunk::kSize; ++y) {
                 const int wy = origin.y + y;
                 if (wy > height) {
-                    break; // air above the surface; chunk is air-initialized
+                    if (wy > kSeaLevel) {
+                        break; // air above surface and sea; chunk is air-initialized
+                    }
+                    chunk.Set(x, y, z, blocks::Water);
+                    continue;
                 }
                 BlockId id = blocks::Stone;
                 if (beach) {

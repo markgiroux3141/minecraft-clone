@@ -57,14 +57,16 @@ private:
     std::shared_ptr<vox::VertexArray> m_outlineCube;
     std::optional<vc::World::RaycastHit> m_target;
 
-    // Frustum-surviving chunks for the frame's one multi-draw (reused scratch).
+    // Frustum-surviving chunks for the frame's multi-draws (reused scratch):
+    // opaque front-to-back, then water back-to-front in the blended pass.
     std::vector<vox::MeshPool::DrawItem> m_drawItems;
+    std::vector<vox::MeshPool::DrawItem> m_drawItemsTransparent;
 
     // 2D overlay (crosshair, hotbar; menus from M10 stage 2).
     std::unique_ptr<vox::UiRenderer> m_ui;
 
     // Hotbar: keys 1..N select into this list (filled after block registration).
-    std::array<vc::BlockId, 7> m_hotbar{};
+    std::array<vc::BlockId, 8> m_hotbar{};
     size_t m_hotbarSlot = 0;
 
     // Occlusion culling (cave culling) is on by default; O toggles it for

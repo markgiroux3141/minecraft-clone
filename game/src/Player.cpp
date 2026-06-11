@@ -13,6 +13,15 @@ constexpr float kGravity = 32.0f;       // blocks/s^2
 constexpr float kTerminalSpeed = 60.0f; // max fall speed
 constexpr float kJumpSpeed = 9.0f;      // ~1.25 block jump apex
 constexpr float kWalkSpeed = 4.3f;
+// Simple swimming: in water gravity and sink rate drop, Space swims up,
+// and at the surface Space kicks hard enough to climb a 1-block shore.
+// The sink terminal is a gentle drift — fast enough to settle, slow
+// enough that it can't be mistaken for falling.
+constexpr float kWaterGravity = 10.0f;
+constexpr float kWaterSinkSpeed = 1.5f;
+constexpr float kSwimSpeed = 4.0f;
+constexpr float kBreachSpeed = 8.5f;
+constexpr float kWaterDrag = 0.55f; // horizontal speed factor in water
 constexpr float kSprintMultiplier = 1.6f; // LeftControl
 constexpr float kFlySpeed = 16.0f;
 constexpr float kFlyBoostMultiplier = 4.0f; // LeftControl
@@ -62,6 +71,29 @@ glm::vec3 Player::HorizontalWishDir() const {
     return wish == glm::vec3{0.0f} ? wish : glm::normalize(wish);
 }
 
+glm::vec3 Player::SwimWishDir() const {
+    const float yawRad = glm::radians(m_yaw);
+    const float pitchRad = glm::radians(m_pitch);
+    const glm::vec3 forward{std::cos(yawRad) * std::cos(pitchRad), std::sin(pitchRad),
+                            std::sin(yawRad) * std::cos(pitchRad)};
+    const glm::vec3 right{-std::sin(yawRad), 0.0f, std::cos(yawRad)};
+
+    glm::vec3 wish{0.0f};
+    if (vox::Input::IsKeyDown(vox::Key::W)) {
+        wish += forward;
+    }
+    if (vox::Input::IsKeyDown(vox::Key::S)) {
+        wish -= forward;
+    }
+    if (vox::Input::IsKeyDown(vox::Key::D)) {
+        wish += right;
+    }
+    if (vox::Input::IsKeyDown(vox::Key::A)) {
+        wish -= right;
+    }
+    return wish == glm::vec3{0.0f} ? wish : glm::normalize(wish);
+}
+
 void Player::Tick(const vc::World& world, double dt) {
     m_prevPosition = m_position;
     if (m_mode == Mode::Fly) {
@@ -84,16 +116,41 @@ void Player::TickWalk(const vc::World& world, float dt) {
         return;
     }
 
-    const glm::vec3 wish = HorizontalWishDir();
+    const auto waterAt = [&](float wx, float wy, float wz) {
+        return world.GetBlock(static_cast<int>(std::floor(wx)), static_cast<int>(std::floor(wy)),
+                              static_cast<int>(std::floor(wz))) == vc::blocks::Water;
+    };
+    const bool inWater = waterAt(m_position.x, m_position.y + 0.4f, m_position.z);
+    const bool headInWater = waterAt(m_position.x, m_position.y + kEyeHeight, m_position.z);
+
     float speed = kWalkSpeed;
     if (vox::Input::IsKeyDown(vox::Key::LeftControl)) {
         speed *= kSprintMultiplier;
     }
-    m_velocity.x = wish.x * speed;
-    m_velocity.z = wish.z * speed;
-    m_velocity.y = std::max(m_velocity.y - kGravity * dt, -kTerminalSpeed);
-    if (m_grounded && vox::Input::IsKeyDown(vox::Key::Space)) {
-        m_velocity.y = kJumpSpeed;
+
+    if (inWater) {
+        // Swimming steers where you aim (W toward the look direction);
+        // Space always swims straight up, with a breach kick at the
+        // surface so you can climb ashore.
+        speed *= kWaterDrag;
+        const glm::vec3 wish = SwimWishDir();
+        m_velocity.x = wish.x * speed;
+        m_velocity.z = wish.z * speed;
+        if (vox::Input::IsKeyDown(vox::Key::Space)) {
+            m_velocity.y = headInWater ? kSwimSpeed : kBreachSpeed;
+        } else if (wish.y != 0.0f) {
+            m_velocity.y = wish.y * speed;
+        } else {
+            m_velocity.y = std::max(m_velocity.y - kWaterGravity * dt, -kWaterSinkSpeed);
+        }
+    } else {
+        const glm::vec3 wish = HorizontalWishDir();
+        m_velocity.x = wish.x * speed;
+        m_velocity.z = wish.z * speed;
+        m_velocity.y = std::max(m_velocity.y - kGravity * dt, -kTerminalSpeed);
+        if (m_grounded && vox::Input::IsKeyDown(vox::Key::Space)) {
+            m_velocity.y = kJumpSpeed;
+        }
     }
 
     m_grounded = false;

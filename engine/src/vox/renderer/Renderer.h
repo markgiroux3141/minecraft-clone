@@ -18,6 +18,12 @@ public:
     static void Clear();
     static void SetViewport(uint32_t width, uint32_t height);
 
+    // Pass-level state for blended geometry (water). Baseline state is
+    // blend off, depth write on, culling on — restore after the pass.
+    static void SetBlend(bool enabled);
+    static void SetDepthWrite(bool enabled);
+    static void SetCullFace(bool enabled);
+
     // Draws indexCount indices from the bound-on-demand vertex array;
     // 0 means "the whole index buffer".
     static void DrawIndexed(const VertexArray& vertexArray, uint32_t indexCount = 0);

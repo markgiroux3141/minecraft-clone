@@ -18,6 +18,7 @@ struct BlockDef {
     std::string name;
     bool opaque = true;   // hides adjacent faces
     bool solid = true;    // collision (used from M6)
+    bool liquid = false;  // meshed into the blended pass; liquid-liquid faces cull
     uint8_t emission = 0; // block light emitted, 0..15
     std::array<uint16_t, 6> faceTiles{}; // texture-array layer per face
 
@@ -53,6 +54,7 @@ extern BlockId Glowstone;
 extern BlockId Sand;
 extern BlockId Log;
 extern BlockId Leaves;
+extern BlockId Water;
 
 void RegisterDefaults();
 

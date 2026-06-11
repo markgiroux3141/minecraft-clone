@@ -53,6 +53,9 @@ private:
     // AABB collision). Sets m_grounded when landing.
     void MoveAxis(const vc::World& world, int axis, float delta);
     glm::vec3 HorizontalWishDir() const;
+    // Like HorizontalWishDir but W/S follow the full look direction
+    // (pitch included) — swimming steers where you aim.
+    glm::vec3 SwimWishDir() const;
 
     vox::PerspectiveCamera& m_camera;
     glm::vec3 m_position{0.0f};     // feet center

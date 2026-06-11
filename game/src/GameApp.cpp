@@ -1,6 +1,7 @@
 #include "GameApp.h"
 
 #include <algorithm>
+#include <cmath>
 #include <format>
 #include <random>
 
@@ -47,8 +48,8 @@ void GameApp::OnInit() {
     vox::Renderer::SetClearColor(0.45f, 0.70f, 1.00f); // placeholder sky
 
     vc::blocks::RegisterDefaults();
-    m_hotbar = {vc::blocks::Stone, vc::blocks::Dirt,  vc::blocks::Grass, vc::blocks::Glowstone,
-                vc::blocks::Sand,  vc::blocks::Log,   vc::blocks::Leaves};
+    m_hotbar = {vc::blocks::Stone, vc::blocks::Dirt, vc::blocks::Grass, vc::blocks::Glowstone,
+                vc::blocks::Sand,  vc::blocks::Log,  vc::blocks::Leaves, vc::blocks::Water};
 
     m_chunkShader = vox::Shader::FromFiles("shaders/chunk.vert", "shaders/chunk.frag");
     m_blockTextures = vox::Texture2DArray::FromFileStrip("textures/atlas.png", 16);
@@ -239,6 +240,16 @@ void GameApp::DrawUi() {
     const glm::vec2 mouse = vox::Input::MousePosition();
 
     m_ui->Begin(GetWindow().Width(), GetWindow().Height(), m_blockTextures.get());
+    if (m_world) {
+        // Underwater tint: the eye is inside a water cell. (Real fog can
+        // come with the day/night shader work.)
+        const glm::vec3 eye = m_camera.Position();
+        if (m_world->GetBlock(static_cast<int>(std::floor(eye.x)),
+                              static_cast<int>(std::floor(eye.y)),
+                              static_cast<int>(std::floor(eye.z))) == vc::blocks::Water) {
+            m_ui->DrawRect({0.0f, 0.0f}, screen, {0.09f, 0.27f, 0.55f, 0.45f});
+        }
+    }
     if (m_state == State::Title) {
         const auto action = vc::TitleScreen::Draw(*m_ui, screen, mouse, clicked, m_worlds);
         switch (action.type) {
@@ -295,8 +306,19 @@ void GameApp::OnRender(double alpha, double frameDt) {
 
         const auto frustum = vox::Frustum::FromViewProjection(m_camera.ViewProjection());
         m_world->CollectVisibleChunks(m_camera.Position(), frustum, m_occlusionCulling,
-                                      m_drawItems);
+                                      m_drawItems, m_drawItemsTransparent);
         m_world->Meshes().Draw(m_drawItems);
+        if (!m_drawItemsTransparent.empty()) {
+            // Water: blended, depth-tested but not depth-written, double-
+            // sided so the surface shows from below too.
+            vox::Renderer::SetBlend(true);
+            vox::Renderer::SetDepthWrite(false);
+            vox::Renderer::SetCullFace(false);
+            m_world->Meshes().Draw(m_drawItemsTransparent);
+            vox::Renderer::SetBlend(false);
+            vox::Renderer::SetDepthWrite(true);
+            vox::Renderer::SetCullFace(true);
+        }
         m_chunksDrawn = m_drawItems.size();
 
         DrawTargetOutline();

@@ -34,9 +34,12 @@ struct ChunkEntry {
     uint32_t dataVersion = 0;   // mesh-input version: bumped by edits AND light changes
     uint32_t meshedVersion = 0; // dataVersion the uploaded mesh was built from
     uint32_t meshingVersion = 0; // dataVersion the in-flight mesh job targets (0 = none)
-    // Allocation in World's MeshPool; invalid until uploaded, or if empty.
+    // Allocations in World's MeshPool; invalid until uploaded, or if empty.
+    // meshT is the chunk's liquid faces, drawn in the blended pass.
     vox::MeshPool::MeshHandle mesh = vox::MeshPool::kInvalidMesh;
+    vox::MeshPool::MeshHandle meshT = vox::MeshPool::kInvalidMesh;
     uint32_t indexCount = 0;
+    uint32_t indexCountT = 0;
     VisibilityBits visibility = 0; // face connectivity, valid once meshedVersion != 0
     bool edited = false; // diverges from the save store — persist before unload
 };
@@ -50,7 +53,10 @@ struct LodColumnEntry {
     std::array<std::shared_ptr<const Chunk>, kLodHeightChunks> cells; // null until gen lands
     std::array<vox::MeshPool::MeshHandle, kLodHeightChunks> mesh = {
         vox::MeshPool::kInvalidMesh, vox::MeshPool::kInvalidMesh};
+    std::array<vox::MeshPool::MeshHandle, kLodHeightChunks> meshT = {
+        vox::MeshPool::kInvalidMesh, vox::MeshPool::kInvalidMesh};
     std::array<uint32_t, kLodHeightChunks> indexCount{};
+    std::array<uint32_t, kLodHeightChunks> indexCountT{};
     bool meshInFlight = false;
     bool meshed = false;
 };
@@ -124,15 +130,18 @@ public:
 
     const Chunk* GetChunk(const glm::ivec3& chunkCoord) const;
 
-    // Builds the frame's draw list. With occlusion on, BFS-walks the chunk
+    // Builds the frame's draw lists. With occlusion on, BFS-walks the chunk
     // grid from the eye through each chunk's face-connectivity bits
     // (Minecraft-style cave culling) so chunks sealed behind terrain are
     // skipped; chunks without visibility data yet are traversed
     // permissively (over-draw, never false culling). The frustum gates
     // drawing, not traversal. With occlusion off: plain frustum cull of
-    // everything. Draw order is the BFS order — roughly front-to-back.
+    // everything. Opaque draw order is the BFS order — roughly
+    // front-to-back; outTransparent (liquid meshes) comes back sorted
+    // back-to-front by chunk center for the blended pass.
     void CollectVisibleChunks(const glm::vec3& eye, const vox::Frustum& frustum, bool occlusion,
-                              std::vector<vox::MeshPool::DrawItem>& out);
+                              std::vector<vox::MeshPool::DrawItem>& out,
+                              std::vector<vox::MeshPool::DrawItem>& outTransparent);
 
     template <typename Fn> // fn(chunkCoord, meshHandle, indexCount)
     void ForEachRenderableChunk(Fn&& fn) const {
@@ -210,13 +219,15 @@ private:
     // Frustum-culled LOD shell draws (scale kLodScale), skipping columns
     // fully covered by full-detail terrain. Used by both culling modes.
     void AppendLodDraws(int centerX, int centerZ, const vox::Frustum& frustum,
-                        std::vector<vox::MeshPool::DrawItem>& out) const;
+                        std::vector<vox::MeshPool::DrawItem>& out,
+                        std::vector<vox::MeshPool::DrawItem>& outTransparent) const;
     // Are all full-detail chunks under this LOD column meshed? (Drives the
     // detail/LOD handover when the player moves into a LOD area.)
     bool DetailMeshedUnder(const glm::ivec2& lodColumn) const;
-    // (Re)allocates the pool slot for a mesh; frees the old one first.
+    // (Re)allocates the pool slot for one vertex stream; frees the old one
+    // first. Called per stream (opaque and transparent).
     void UploadMesh(vox::MeshPool::MeshHandle& handle, uint32_t& indexCount,
-                    const ChunkMesh& mesh);
+                    const std::vector<ChunkVertex>& vertices);
     ChunkSnapshot SnapshotFor(const glm::ivec3& coord) const;
     // Mesh gating: all 26 neighbors have blocks, and the whole 3x3x3
     // neighborhood (center included) has light.

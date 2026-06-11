@@ -398,17 +398,16 @@ void World::SubmitMesh(const glm::ivec3& coord) {
 }
 
 void World::UploadMesh(vox::MeshPool::MeshHandle& handle, uint32_t& indexCount,
-                       const ChunkMesh& mesh) {
+                       const std::vector<ChunkVertex>& vertices) {
     if (handle != vox::MeshPool::kInvalidMesh) {
         m_meshPool.Free(handle);
         handle = vox::MeshPool::kInvalidMesh;
         indexCount = 0;
     }
-    if (mesh.vertices.empty()) {
+    if (vertices.empty()) {
         return;
     }
-    handle = m_meshPool.Allocate(mesh.vertices.data(),
-                                 static_cast<uint32_t>(mesh.vertices.size()));
+    handle = m_meshPool.Allocate(vertices.data(), static_cast<uint32_t>(vertices.size()));
     indexCount = m_meshPool.IndexCount(handle);
 }
 
@@ -433,6 +432,8 @@ void World::SubmitLodGenerate(const glm::ivec2& lodColumn) {
         // common non-air block (ties to the topmost), so any solid source
         // block makes the cell solid: LOD terrain is a superset of the
         // real terrain, which keeps the detail/LOD seam free of holes.
+        // Liquids only win cells with no solid at all (open water), so the
+        // superset rule survives shorelines.
         auto src = std::make_unique<std::array<Chunk, 4 * size_t{kHeightChunks}>>();
         const auto srcAt = [&](int cx, int cz, int cy) -> Chunk& {
             return (*src)[static_cast<size_t>((cz * 2 + cx) * kHeightChunks + cy)];
@@ -453,8 +454,10 @@ void World::SubmitLodGenerate(const glm::ivec2& lodColumn) {
             for (int y = 0; y < Chunk::kSize; ++y) {
                 for (int z = 0; z < Chunk::kSize; ++z) {
                     for (int x = 0; x < Chunk::kSize; ++x) {
+                        const auto& registry = BlockRegistry::Get();
                         BlockId ids[8];
                         int count = 0;
+                        bool anySolid = false;
                         // Top-down so the tie-break favors surface blocks
                         // (grass over the dirt underneath it).
                         for (int dy = 1; dy >= 0; --dy) {
@@ -466,6 +469,7 @@ void World::SubmitLodGenerate(const glm::ivec2& lodColumn) {
                                                                 (z * 2 + dz) & 15);
                                     if (id != blocks::Air) {
                                         ids[count++] = id;
+                                        anySolid |= registry.Def(id).solid;
                                     }
                                 }
                             }
@@ -473,6 +477,9 @@ void World::SubmitLodGenerate(const glm::ivec2& lodColumn) {
                         BlockId best = blocks::Air;
                         int bestCount = 0;
                         for (int i = 0; i < count; ++i) {
+                            if (anySolid && !registry.Def(ids[i]).solid) {
+                                continue;
+                            }
                             int n = 0;
                             for (int j = 0; j < count; ++j) {
                                 n += ids[j] == ids[i];
@@ -628,7 +635,8 @@ void World::DrainCompletedJobs() {
         }
         ChunkEntry& entry = it->second;
         if (meshed.version == entry.dataVersion) {
-            UploadMesh(entry.mesh, entry.indexCount, meshed.mesh);
+            UploadMesh(entry.mesh, entry.indexCount, meshed.mesh.vertices);
+            UploadMesh(entry.meshT, entry.indexCountT, meshed.mesh.transparentVertices);
             entry.meshedVersion = meshed.version;
             entry.visibility = meshed.mesh.visibility;
         }
@@ -659,29 +667,58 @@ void World::DrainCompletedJobs() {
             continue; // recreated mid-job (let the rescan remesh) or duplicate
         }
         for (int ly = 0; ly < kLodHeightChunks; ++ly) {
-            UploadMesh(entry.mesh[ly], entry.indexCount[ly], lodMeshed.meshes[ly]);
+            UploadMesh(entry.mesh[ly], entry.indexCount[ly], lodMeshed.meshes[ly].vertices);
+            UploadMesh(entry.meshT[ly], entry.indexCountT[ly],
+                       lodMeshed.meshes[ly].transparentVertices);
         }
         entry.meshed = true;
     }
 }
 
+namespace {
+
+// Back-to-front by item center for the blended pass. Chunk-level ordering
+// is enough for axis-aligned water sheets; faces inside one chunk aren't
+// sorted.
+void SortBackToFront(const glm::vec3& eye, std::vector<vox::MeshPool::DrawItem>& items) {
+    std::sort(items.begin(), items.end(),
+              [&](const vox::MeshPool::DrawItem& a, const vox::MeshPool::DrawItem& b) {
+                  const float halfA = a.perDraw.w * Chunk::kSize * 0.5f;
+                  const float halfB = b.perDraw.w * Chunk::kSize * 0.5f;
+                  const glm::vec3 ca = glm::vec3(a.perDraw) + halfA;
+                  const glm::vec3 cb = glm::vec3(b.perDraw) + halfB;
+                  return glm::dot(ca - eye, ca - eye) > glm::dot(cb - eye, cb - eye);
+              });
+}
+
+} // namespace
+
 void World::CollectVisibleChunks(const glm::vec3& eye, const vox::Frustum& frustum,
-                                 bool occlusion, std::vector<vox::MeshPool::DrawItem>& out) {
+                                 bool occlusion, std::vector<vox::MeshPool::DrawItem>& out,
+                                 std::vector<vox::MeshPool::DrawItem>& outTransparent) {
     out.clear();
+    outTransparent.clear();
     const int centerX = FloorDivChunk(eye.x);
     const int centerZ = FloorDivChunk(eye.z);
 
     if (!occlusion) {
         for (const auto& [coord, entry] : m_chunks) {
-            if (entry.mesh == vox::MeshPool::kInvalidMesh) {
+            if (entry.mesh == vox::MeshPool::kInvalidMesh &&
+                entry.meshT == vox::MeshPool::kInvalidMesh) {
                 continue;
             }
             const glm::vec3 min = glm::vec3(coord * Chunk::kSize);
             if (frustum.IntersectsAABB(min, min + glm::vec3(Chunk::kSize))) {
-                out.push_back({entry.mesh, glm::vec4(min, 1.0f)});
+                if (entry.mesh != vox::MeshPool::kInvalidMesh) {
+                    out.push_back({entry.mesh, glm::vec4(min, 1.0f)});
+                }
+                if (entry.meshT != vox::MeshPool::kInvalidMesh) {
+                    outTransparent.push_back({entry.meshT, glm::vec4(min, 1.0f)});
+                }
             }
         }
-        AppendLodDraws(centerX, centerZ, frustum, out);
+        AppendLodDraws(centerX, centerZ, frustum, out, outTransparent);
+        SortBackToFront(eye, outTransparent);
         return;
     }
 
@@ -714,10 +751,17 @@ void World::CollectVisibleChunks(const glm::vec3& eye, const vox::Frustum& frust
         m_bfsQueue.push_back({coord, enterFace, dirMask});
 
         const auto it = m_chunks.find(coord);
-        if (it != m_chunks.end() && it->second.mesh != vox::MeshPool::kInvalidMesh) {
+        if (it != m_chunks.end()) {
             const glm::vec3 min = glm::vec3(coord * Chunk::kSize);
-            if (frustum.IntersectsAABB(min, min + glm::vec3(Chunk::kSize))) {
-                out.push_back({it->second.mesh, glm::vec4(min, 1.0f)});
+            if ((it->second.mesh != vox::MeshPool::kInvalidMesh ||
+                 it->second.meshT != vox::MeshPool::kInvalidMesh) &&
+                frustum.IntersectsAABB(min, min + glm::vec3(Chunk::kSize))) {
+                if (it->second.mesh != vox::MeshPool::kInvalidMesh) {
+                    out.push_back({it->second.mesh, glm::vec4(min, 1.0f)});
+                }
+                if (it->second.meshT != vox::MeshPool::kInvalidMesh) {
+                    outTransparent.push_back({it->second.meshT, glm::vec4(min, 1.0f)});
+                }
             }
         }
     };
@@ -766,7 +810,8 @@ void World::CollectVisibleChunks(const glm::vec3& eye, const vox::Frustum& frust
         }
     }
 
-    AppendLodDraws(centerX, centerZ, frustum, out);
+    AppendLodDraws(centerX, centerZ, frustum, out, outTransparent);
+    SortBackToFront(eye, outTransparent);
 }
 
 bool World::DetailMeshedUnder(const glm::ivec2& lodColumn) const {
@@ -785,7 +830,8 @@ bool World::DetailMeshedUnder(const glm::ivec2& lodColumn) const {
 }
 
 void World::AppendLodDraws(int centerX, int centerZ, const vox::Frustum& frustum,
-                           std::vector<vox::MeshPool::DrawItem>& out) const {
+                           std::vector<vox::MeshPool::DrawItem>& out,
+                           std::vector<vox::MeshPool::DrawItem>& outTransparent) const {
     constexpr float kLodChunkSize = static_cast<float>(Chunk::kSize * kLodScale);
     for (const auto& [lodColumn, entry] : m_lodColumns) {
         if (!entry.meshed) {
@@ -800,12 +846,20 @@ void World::AppendLodDraws(int centerX, int centerZ, const vox::Frustum& frustum
             continue;
         }
         for (int ly = 0; ly < kLodHeightChunks; ++ly) {
-            if (entry.mesh[ly] == vox::MeshPool::kInvalidMesh) {
+            if (entry.mesh[ly] == vox::MeshPool::kInvalidMesh &&
+                entry.meshT[ly] == vox::MeshPool::kInvalidMesh) {
                 continue;
             }
             const glm::vec3 min = glm::vec3(lodColumn.x, ly, lodColumn.y) * kLodChunkSize;
             if (frustum.IntersectsAABB(min, min + glm::vec3(kLodChunkSize))) {
-                out.push_back({entry.mesh[ly], glm::vec4(min, static_cast<float>(kLodScale))});
+                if (entry.mesh[ly] != vox::MeshPool::kInvalidMesh) {
+                    out.push_back(
+                        {entry.mesh[ly], glm::vec4(min, static_cast<float>(kLodScale))});
+                }
+                if (entry.meshT[ly] != vox::MeshPool::kInvalidMesh) {
+                    outTransparent.push_back(
+                        {entry.meshT[ly], glm::vec4(min, static_cast<float>(kLodScale))});
+                }
             }
         }
     }
@@ -842,6 +896,9 @@ void World::Update(const glm::vec3& cameraPos) {
         if (it->second.mesh != vox::MeshPool::kInvalidMesh) {
             m_meshPool.Free(it->second.mesh);
         }
+        if (it->second.meshT != vox::MeshPool::kInvalidMesh) {
+            m_meshPool.Free(it->second.meshT);
+        }
         m_chunks.erase(it);
     }
     std::vector<glm::ivec2> columnsToErase;
@@ -867,6 +924,9 @@ void World::Update(const glm::vec3& cameraPos) {
         for (int ly = 0; ly < kLodHeightChunks; ++ly) {
             if (it->second.mesh[ly] != vox::MeshPool::kInvalidMesh) {
                 m_meshPool.Free(it->second.mesh[ly]);
+            }
+            if (it->second.meshT[ly] != vox::MeshPool::kInvalidMesh) {
+                m_meshPool.Free(it->second.meshT[ly]);
             }
         }
         m_lodColumns.erase(it);

@@ -93,8 +93,18 @@ def leaves(x, y):
     return speckle(LEAF, x, y, 9, 14)
 
 
+WATER = (52, 96, 200)
+
+
+def water(x, y):
+    # Semi-transparent blue with faint wave streaks (alpha keyed per tile;
+    # opaque tiles get alpha 255 in write_png).
+    base = (70, 116, 216) if hash01(0, y, 10) > 0.7 else WATER
+    return speckle(base, x, y, 10, 8) + (168,)
+
+
 # Layer index in the texture array == position in this list.
-TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top, leaves]
+TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top, leaves, water]
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:
@@ -111,10 +121,11 @@ def write_png(path: Path, width: int, height: int, pixel) -> None:
     for y in range(height):
         row = bytearray(b"\x00")  # filter type: none
         for x in range(width):
-            row.extend(pixel(x, y))
+            px = pixel(x, y)
+            row.extend(px if len(px) == 4 else (*px, 255))
         rows.append(bytes(row))
 
-    ihdr = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)  # 8-bit RGB
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)  # 8-bit RGBA
     png = (
         b"\x89PNG\r\n\x1a\n"
         + png_chunk(b"IHDR", ihdr)

@@ -32,6 +32,7 @@ BlockId Glowstone = 0;
 BlockId Sand = 0;
 BlockId Log = 0;
 BlockId Leaves = 0;
+BlockId Water = 0;
 
 void RegisterDefaults() {
     auto& registry = BlockRegistry::Get();
@@ -64,6 +65,12 @@ void RegisterDefaults() {
 
     // Opaque for now; cutout leaves come with the M11 transparency pass.
     Leaves = registry.Register(BlockDef::Uniform("leaves", 8));
+
+    BlockDef water = BlockDef::Uniform("water", 9);
+    water.opaque = false; // sky light reaches the sea floor; caves see through it
+    water.solid = false;  // no collision — swimming is the player's problem
+    water.liquid = true;
+    Water = registry.Register(std::move(water));
 
     GAME_INFO("Registered {} block types", registry.Count());
 }
