@@ -33,6 +33,9 @@ COPIES = [
     ("textures/font/ascii.png", "fonts/ascii.png"),
     ("textures/gui/icons.png", "textures/gui/icons.png"),
     ("textures/gui/widgets.png", "textures/gui/widgets.png"),
+    # Celestial sheets: opaque with black backgrounds, drawn additively.
+    ("textures/environment/sun.png", "textures/environment/sun.png"),
+    ("textures/environment/moon_phases.png", "textures/environment/moon_phases.png"),
 ]
 
 

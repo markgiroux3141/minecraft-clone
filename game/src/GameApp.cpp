@@ -39,10 +39,13 @@ constexpr double kTimeFastForward = 200.0; // extra ticks per tick while T held
 
 struct DayNight {
     glm::vec3 sunDir;
-    float sunLight; // sky-light scale, moonlight floor at night
+    glm::vec3 lightDir; // dominant body for diffuse: sun by day, moon by night
+    float sunLight;     // sky-light scale, moonlight floor at night
+    glm::vec3 skyTint;  // skylight color: white by day, cool blue moonlight
     glm::vec3 zenith;
     glm::vec3 horizon;
     glm::vec3 sunColor;
+    glm::vec3 moonColor; // textured-moon tint; black while the sun is up
 };
 
 // t in [0,1): 0 sunrise, 0.25 noon, 0.5 sunset, 0.75 midnight.
@@ -53,7 +56,11 @@ DayNight ComputeDayNight(float t) {
     // East-west arc with a slight tilt so noon shadows aren't dead vertical.
     dn.sunDir = glm::normalize(glm::vec3(std::cos(angle), elevation, 0.25f));
     const float day = glm::smoothstep(-0.08f, 0.25f, elevation);
-    dn.sunLight = 0.12f + 0.88f * day;
+    // Moonlight floor 0.28: vanilla night terrain is clearly visible, just
+    // dim and blue — 0.12 read nearly black.
+    dn.sunLight = 0.28f + 0.72f * day;
+    dn.lightDir = elevation >= 0.0f ? dn.sunDir : -dn.sunDir;
+    dn.skyTint = glm::mix(glm::vec3(0.55f, 0.66f, 0.95f), glm::vec3(1.0f), day);
     dn.zenith = glm::mix(glm::vec3(0.015f, 0.025f, 0.07f), glm::vec3(0.22f, 0.51f, 0.92f), day);
     dn.horizon = glm::mix(glm::vec3(0.04f, 0.06f, 0.12f), glm::vec3(0.63f, 0.78f, 0.94f), day);
     // Warm band when the sun crosses the horizon, fading with elevation.
@@ -61,8 +68,11 @@ DayNight ComputeDayNight(float t) {
     dn.horizon = glm::mix(dn.horizon, glm::vec3(0.93f, 0.49f, 0.26f), sunset * 0.65f);
     dn.sunColor = glm::mix(glm::vec3(1.0f, 0.45f, 0.20f), glm::vec3(1.0f, 0.95f, 0.85f), day);
     if (elevation < -0.15f) {
-        dn.sunColor = glm::vec3(0.0f); // fully set — no disc (no moon yet)
+        dn.sunColor = glm::vec3(0.0f); // fully set — no disc
     }
+    // The moon sits opposite the sun; fade it out as the sun climbs so it
+    // never tracks visibly below the horizon gradient during the day.
+    dn.moonColor = glm::vec3(0.9f) * (1.0f - glm::smoothstep(-0.05f, 0.15f, elevation));
     return dn;
 }
 
@@ -121,6 +131,12 @@ void GameApp::OnInit() {
     }
 
     m_skyShader = vox::Shader::FromFiles("shaders/sky.vert", "shaders/sky.frag");
+    if (std::filesystem::exists(vox::assets::Resolve("mc/textures/environment/sun.png"))) {
+        m_celestialShader =
+            vox::Shader::FromFiles("shaders/celestial.vert", "shaders/celestial.frag");
+        m_sunTexture = vox::Texture2D::FromFile("mc/textures/environment/sun.png");
+        m_moonTexture = vox::Texture2D::FromFile("mc/textures/environment/moon_phases.png");
+    }
     constexpr float skyVerts[] = {-1, -1, 1, -1, 1, 1, -1, 1};
     constexpr uint32_t skyIndices[] = {0, 1, 2, 2, 3, 0};
     auto skyBuffer = std::make_shared<vox::VertexBuffer>(
@@ -445,15 +461,55 @@ void GameApp::OnRender(double alpha, double frameDt) {
         m_skyShader->SetFloat3("u_horizonColor", dayNight.horizon);
         m_skyShader->SetFloat3("u_sunDir", dayNight.sunDir);
         m_skyShader->SetFloat3("u_sunColor", dayNight.sunColor);
+        m_skyShader->SetFloat("u_disc", m_sunTexture ? 0.0f : 1.0f);
         vox::Renderer::SetDepthWrite(false);
         vox::Renderer::DrawIndexed(*m_skyQuad);
+
+        if (m_sunTexture) {
+            // Textured sun + phased moon on eye-glued billboards, additive so
+            // the sheets' black backgrounds vanish into the sky gradient.
+            m_celestialShader->Bind();
+            const glm::mat4 rotView = glm::mat4(glm::mat3(m_camera.View()));
+            m_celestialShader->SetMat4("u_viewRotProj", m_camera.Projection() * rotView);
+            m_celestialShader->SetInt("u_texture", 0);
+            vox::Renderer::SetBlend(vox::BlendMode::Additive);
+
+            const auto drawBody = [&](const glm::vec3& dir, float halfSize,
+                                      const glm::vec3& tint, const vox::Texture2D& tex,
+                                      glm::vec2 uvMin, glm::vec2 uvMax) {
+                const glm::vec3 right =
+                    glm::normalize(glm::cross(dir, glm::vec3(0.0f, 1.0f, 0.0f))) * halfSize;
+                const glm::vec3 up = glm::normalize(glm::cross(right, dir)) * halfSize;
+                m_celestialShader->SetFloat3("u_dir", dir);
+                m_celestialShader->SetFloat3("u_right", right);
+                m_celestialShader->SetFloat3("u_up", up);
+                m_celestialShader->SetFloat3("u_tint", tint);
+                m_celestialShader->SetFloat2("u_uvMin", uvMin);
+                m_celestialShader->SetFloat2("u_uvMax", uvMax);
+                tex.Bind(0);
+                vox::Renderer::DrawIndexed(*m_skyQuad);
+            };
+            drawBody(dayNight.sunDir, 15.0f, dayNight.sunColor, *m_sunTexture, {0.0f, 0.0f},
+                     {1.0f, 1.0f});
+            // moon_phases.png: 4x2 grid of 32x32, full moon first; one phase
+            // per day. The load flip puts image-row 0 at v 1.
+            const auto phase =
+                static_cast<int>(static_cast<int64_t>(m_worldTime / kDayTicks) % 8);
+            const auto col = static_cast<float>(phase % 4);
+            const auto row = static_cast<float>(phase / 4);
+            drawBody(-dayNight.sunDir, 10.0f, dayNight.moonColor, *m_moonTexture,
+                     {col * 0.25f, 1.0f - (row + 1.0f) * 0.5f},
+                     {(col + 1.0f) * 0.25f, 1.0f - row * 0.5f});
+            vox::Renderer::SetBlend(vox::BlendMode::None);
+        }
         vox::Renderer::SetDepthWrite(true);
 
         m_chunkShader->Bind();
         m_chunkShader->SetMat4("u_viewProj", viewProj);
         m_chunkShader->SetInt("u_atlas", 0);
-        m_chunkShader->SetFloat3("u_sunDir", dayNight.sunDir);
+        m_chunkShader->SetFloat3("u_sunDir", dayNight.lightDir);
         m_chunkShader->SetFloat("u_sunLight", dayNight.sunLight);
+        m_chunkShader->SetFloat3("u_skyTint", dayNight.skyTint);
         m_chunkShader->SetFloat3("u_eyePos", eye);
         if (EyeInWater()) {
             // Short, deep-blue fog; dims with the sky at night.
@@ -479,8 +535,9 @@ void GameApp::OnRender(double alpha, double frameDt) {
             m_entityShader->Bind();
             m_entityShader->SetMat4("u_viewProj", viewProj);
             m_entityShader->SetInt("u_atlas", 0);
-            m_entityShader->SetFloat3("u_sunDir", dayNight.sunDir);
+            m_entityShader->SetFloat3("u_sunDir", dayNight.lightDir);
             m_entityShader->SetFloat("u_sunLight", dayNight.sunLight);
+            m_entityShader->SetFloat3("u_skyTint", dayNight.skyTint);
             vox::Renderer::SetCullFace(false); // a handful of cubes; skip winding care
             for (const auto& falling : fallingBlocks) {
                 if (!m_world->FallingBlockVisible(falling)) {
@@ -518,11 +575,11 @@ void GameApp::OnRender(double alpha, double frameDt) {
         if (!m_drawItemsTransparent.empty()) {
             // Water: blended, depth-tested but not depth-written, double-
             // sided so the surface shows from below too.
-            vox::Renderer::SetBlend(true);
+            vox::Renderer::SetBlend(vox::BlendMode::Alpha);
             vox::Renderer::SetDepthWrite(false);
             vox::Renderer::SetCullFace(false);
             m_world->Meshes().Draw(m_drawItemsTransparent);
-            vox::Renderer::SetBlend(false);
+            vox::Renderer::SetBlend(vox::BlendMode::None);
             vox::Renderer::SetDepthWrite(true);
             vox::Renderer::SetCullFace(true);
         }

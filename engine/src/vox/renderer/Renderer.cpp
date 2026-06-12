@@ -79,12 +79,19 @@ void Renderer::DrawLines(const VertexArray& vertexArray, uint32_t indexCount) {
     glDrawElements(GL_LINES, static_cast<GLsizei>(count), GL_UNSIGNED_INT, nullptr);
 }
 
-void Renderer::SetBlend(bool enabled) {
-    if (enabled) {
+void Renderer::SetBlend(BlendMode mode) {
+    switch (mode) {
+    case BlendMode::None:
+        glDisable(GL_BLEND);
+        break;
+    case BlendMode::Alpha:
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    } else {
-        glDisable(GL_BLEND);
+        break;
+    case BlendMode::Additive:
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+        break;
     }
 }
 

@@ -9,6 +9,10 @@ class VertexArray;
 // Thin facade over the OpenGL backend. As the engine grows this becomes the
 // seam where a renderer abstraction (command lists, future Vulkan backend)
 // slots in; game code should never call GL directly.
+// Alpha = classic src-alpha blending (water); Additive adds onto the
+// framebuffer (sun/moon — black pixels contribute nothing).
+enum class BlendMode { None, Alpha, Additive };
+
 class Renderer {
 public:
     static void Init();
@@ -20,7 +24,7 @@ public:
 
     // Pass-level state for blended geometry (water). Baseline state is
     // blend off, depth write on, culling on — restore after the pass.
-    static void SetBlend(bool enabled);
+    static void SetBlend(BlendMode mode);
     static void SetDepthWrite(bool enabled);
     static void SetCullFace(bool enabled);
 

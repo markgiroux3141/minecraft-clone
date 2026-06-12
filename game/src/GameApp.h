@@ -62,6 +62,10 @@ private:
     // Sky dome (fullscreen gradient + sun disc) and the day/night clock.
     std::shared_ptr<vox::Shader> m_skyShader;
     std::shared_ptr<vox::VertexArray> m_skyQuad;
+    // Textured sun/moon (assets/mc only; null = procedural sky.frag disc).
+    std::shared_ptr<vox::Shader> m_celestialShader;
+    std::shared_ptr<vox::Texture2D> m_sunTexture;
+    std::shared_ptr<vox::Texture2D> m_moonTexture;
     double m_worldTime = 0.0; // ticks; one day/night cycle per kDayTicks
 
     // Falling-block entities: one textured unit cube, drawn per entity.

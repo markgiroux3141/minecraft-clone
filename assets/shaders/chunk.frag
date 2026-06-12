@@ -8,8 +8,9 @@ in float v_sky;
 in float v_block;
 
 uniform sampler2DArray u_atlas;
-uniform vec3 u_sunDir;    // toward the sun; below the horizon at night
+uniform vec3 u_sunDir;    // toward the dominant body: sun by day, moon by night
 uniform float u_sunLight; // scales sky light over the day (moonlight floor)
+uniform vec3 u_skyTint;   // skylight color: white by day, cool blue at night
 uniform vec3 u_eyePos;
 uniform vec3 u_fogColor;
 uniform vec2 u_fogRange; // (start, end) distance
@@ -23,8 +24,8 @@ void main() {
     // Sky light carries the directional sun term (caves get no sun) and
     // tracks the time of day; block light is warm, omnidirectional, and
     // constant — glowstone holds its ground at night. AO darkens both.
-    float skyTerm = v_sky * u_sunLight * (0.40 + 0.60 * diffuse);
-    vec3 light = max(vec3(skyTerm), vec3(1.0, 0.85, 0.62) * v_block);
+    vec3 skyTerm = u_skyTint * (v_sky * u_sunLight * (0.40 + 0.60 * diffuse));
+    vec3 light = max(skyTerm, vec3(1.0, 0.85, 0.62) * v_block);
     light = max(light, vec3(0.03)); // never fully black
 
     float ao = mix(0.4, 1.0, v_ao);

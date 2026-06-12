@@ -92,9 +92,17 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   levels as appended BlockIds, slope-seeking spread, infinite sources,
   source-vs-flow sheeting rules) with corner-sampled partial-height
   rendering packed into spare vertex bits.
-- **M14 — TBD**: candidates: real Minecraft assets (user-provided local
-  copy, personal use), visual polish (cutout leaves, underwater skylight
-  attenuation, moon/stars), caves/biomes, inventory UI.
+- **M14 — Real Minecraft assets** ✅: import pipeline
+  (`scripts/import_mc_assets.py`) from the user's local 1.12 source into
+  gitignored `assets/mc/` (zero distribution; committed placeholders
+  remain the fallback): block atlas with baked biome tints, the real
+  proportional 8px font (UiRenderer scans per-glyph advances), GUI
+  crosshair/hotbar/buttons via a new DrawImage sprite-sheet mode,
+  textured sun + phased moon on additive sky billboards, and a night
+  lighting rework (moonlight floor, moon-directional diffuse, blue cast).
+- **M15 — TBD**: candidates: visual polish (cutout leaves, underwater
+  skylight attenuation, stars, animated water), caves/biomes, inventory
+  UI, audio (needs an engine module; 1.12 .ogg store already surveyed).
 
 Each milestone lands as a vertical slice that runs; no big-bang integration.
 

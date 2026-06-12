@@ -8,6 +8,7 @@ uniform vec3 u_zenithColor;
 uniform vec3 u_horizonColor;
 uniform vec3 u_sunDir;
 uniform vec3 u_sunColor; // black when the sun is fully set
+uniform float u_disc;    // 0 when a textured sun is drawn instead
 
 out vec4 o_color;
 
@@ -20,8 +21,8 @@ void main() {
     vec3 color = mix(u_horizonColor, u_zenithColor, pow(up, 0.65));
 
     float sunDot = max(dot(ray, u_sunDir), 0.0);
-    color += u_sunColor * pow(sunDot, 350.0) * 1.2; // disc
-    color += u_sunColor * pow(sunDot, 8.0) * 0.12;  // halo
+    color += u_sunColor * pow(sunDot, 350.0) * 1.2 * u_disc; // procedural disc
+    color += u_sunColor * pow(sunDot, 8.0) * 0.12;           // halo (kept always)
 
     o_color = vec4(color, 1.0);
 }

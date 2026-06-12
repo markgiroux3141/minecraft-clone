@@ -1,10 +1,9 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-12, end of M13 (user-verified in-game: falling sand
-with smooth entity motion, Minecraft-parity water flow with sloped
-partial-height rendering). M14 is TBD with the user. Read alongside
-`ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md` (build
-commands, conventions).
+Updated: 2026-06-12, end of M14 (user-verified in-game: real Minecraft
+textures/font/GUI/sun/moon, fixed too-dark nights). M15 is TBD with the
+user. Read alongside `ARCHITECTURE.md` (layering rules, roadmap) and
+`CLAUDE.md` (build commands, conventions).
 
 IMPORTANT RESOURCE: the user has Minecraft's Java source (MCP 9.40 =
 1.12) at `D:\Minecraft source code` — look up exact game dynamics there
@@ -15,7 +14,7 @@ distribution (user's explicit call).
 
 ## Where the project stands
 
-M0–M13 are done and verified:
+M0–M14 are done and verified:
 - Engine (`engine/src/vox/`, namespace `vox`): fixed-timestep app loop
   (20 TPS + interpolated render), GLFW window/input (incl. cursor capture),
   GL 4.6 renderer facade with DSA abstractions (Shader, Buffer/VertexArray,
@@ -39,8 +38,8 @@ Starts on the title screen (cursor free): click a world / New World /
 Quit. In game the cursor is captured: WASD move, mouse look, Space jump
 (walk) or rise (fly), LeftShift sink (fly), LeftControl sprint/boost,
 F toggles walk/fly, O toggles occlusion culling (debug), T fast-forwards
-world time (debug), LMB break, RMB place, 1..8 hotbar (stone/dirt/grass/
-glowstone/sand/log/leaves/water). In water: W swims toward the look
+world time (debug), LMB break, RMB place, 1..9 hotbar (stone/dirt/grass/
+glowstone/sand/log/leaves/water/empty hand). In water: W swims toward the look
 direction, Space swims up (breach kick at the surface). Esc pauses
 (Resume / Save & Quit to Title) — quitting the app is the title screen's
 Quit button or the window X. Default spawn (8.5, 48, 8.5); a world with
@@ -405,26 +404,63 @@ Stage 3 — LOD shell:
 - Not done (vs Minecraft): no flow-direction surface texture animation,
   no swimming current push, lava, bucket item.
 
-## Next: M14 — TBD (decide with the user)
+## M14 real Minecraft assets (how it works)
+
+- `scripts/import_mc_assets.py` (Pillow) reads the user's 1.12 source
+  tree and writes into `assets/mc/` — GITIGNORED, because the repo is on
+  a public GitHub remote and the user's rule is zero distribution. The
+  game prefers the overlay via `PreferMcAsset()` (GameApp.cpp) or
+  explicit existence checks; the committed placeholder assets keep a
+  clean clone working. Re-run the script after pulling on this machine.
+- Block atlas: same 10-layer strip contract as gen_textures.py
+  (layer order = blocks::RegisterDefaults()). Baked at import: grass
+  top/side-overlay x plains grass colormap tint (145,189,89), oak leaves
+  x foliage tint (119,171,47) over an opaque dark backdrop (we render
+  leaves opaque — vanilla "fast graphics" look), water = frame 0 of the
+  16x512 animation strip (already blue + alpha).
+- Font: real `font/ascii.png` (16x16 grid of 8x8 cells from char 0).
+  UiRenderer::SetFont grew `proportional` — it reads the texture back
+  and scans per-glyph inked width (advance = rightmost+2, empty cell =
+  half cell), like MC's FontRenderer. MeasureText sums advances. UI text
+  uses the full GUI scale with the 8px font (`UiTextScale()` in
+  Widgets.h returns s-1 only for the 17px placeholder font).
+- GUI: UiRenderer::DrawImage (mode 3, sampler unit 2) draws sprite-sheet
+  sub-rects in image-pixel coords (flush on sheet switch). Hud draws the
+  icons.png crosshair (MC's -7,-7 offset; plain alpha blend, not
+  vanilla's invert — fine per user) and the widgets.png 182x22 hotbar +
+  selection frame; UiButton draws the 200x20 button sprites (hover row +
+  yellow label). The hotbar is 9 slots now (MC art is 9 wide): slots 1-8
+  blocks, slot 9 empty hand (place is guarded on Air). `GuiTextures`
+  (ui/Widgets.h) carries the optional sheets; null = procedural look.
+- Sun/moon: celestial.vert/.frag draw eye-glued billboards (rotation-
+  only view, distance 100, sun half-size 15, moon 10) right after the
+  sky gradient, additive blend (`Renderer::SetBlend(BlendMode)` enum
+  now: None/Alpha/Additive) — the sheets are opaque on black, so black
+  adds nothing. Moon phase = day index % 8 into the 4x2 sheet; moon dir
+  = -sunDir, faded out while the sun is up (DayNight::moonColor). The
+  procedural sky.frag disc is disabled via u_disc when textured (halo
+  kept); it remains the no-assets fallback.
+- Night lighting fix (user: "insanely dark"): moonlight floor 0.12 →
+  0.28, chunk/block_entity diffuse now follows DayNight::lightDir (sun
+  by day, MOON at night — terrain keeps shape), and skylight is tinted
+  by DayNight::skyTint (white day → blue 0.55/0.66/0.95 night). Day
+  output is unchanged (floor + range still sum to 1.0).
+
+## Next: M15 — TBD (decide with the user)
 
 Backlog, roughly by expressed interest:
-- Real Minecraft assets (surveyed 2026-06-12, all present): textures at
-  mcp940/src/minecraft/assets/minecraft/textures/ — blocks/ (500 16x16
-  RGBA, drop-in for our texture array; grass_top/leaves are grayscale +
-  colormap/ tint, bake the tint at import; animated water_still.png is a
-  16x512 frame strip + .mcmeta), gui/ (icons.png crosshair/hearts,
-  widgets.png hotbar, container/ inventory), font/ascii.png (the real MC
-  font, drop-in for UiRenderer's grid), environment/ (sun, moon_phases,
-  clouds, rain), items/ (343 icons). Audio EXISTS: mcp940/jars/assets/
-  is a hashed store — resolve indexes/1.12.json objects[name].hash to
-  objects/<hash[0:2]>/<hash>; 1085 .ogg files verified on disk (would
-  need an audio engine module — OpenAL/miniaudio + ogg decode).
-  Personal use only, zero distribution (user's explicit call).
 - Water/visual polish: skylight attenuation underwater (sea floor reads
-  bright), cutout leaves, moon + stars at night, flow-animated water.
+  bright), cutout leaves, stars at night, flow-animated water (the
+  16x512 water_still.png strip + .mcmeta is already surveyed; needs
+  texture-array layer cycling or a time uniform).
 - World depth: caves (3D noise carving), biomes (temperature/moisture
   noise driving surface blocks + tree density).
-- UI: inventory screen, world-list scrolling, settings (render distance).
+- UI: inventory screen (gui/container/ sheets are present in the MC
+  tree; DrawImage is ready for it), world-list scrolling, settings.
+- Audio: 1.12 sounds exist as a hashed store (mcp940/jars/assets/ —
+  resolve indexes/1.12.json objects[name].hash to
+  objects/<hash[0:2]>/<hash>; 1085 .ogg verified). Needs an engine
+  audio module (OpenAL/miniaudio + ogg decode).
 
 ## How to verify (UPDATED working agreement)
 
