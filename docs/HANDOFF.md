@@ -408,13 +408,18 @@ Stage 3 — LOD shell:
 ## Next: M14 — TBD (decide with the user)
 
 Backlog, roughly by expressed interest:
-- Real Minecraft assets: the local source copy bundles the full 1.12
-  asset tree (textures/models/lang) — swap the generated placeholder
-  tiles for real block textures (16x16, same texture-array pipeline),
-  HUD icons, etc. Personal use only, zero distribution. Audio is NOT in
-  the source tree (Minecraft downloads it separately as hashed asset
-  objects) — check D:\Minecraft source code for a jars/assets dir or
-  the user's .minecraft/assets before promising sound.
+- Real Minecraft assets (surveyed 2026-06-12, all present): textures at
+  mcp940/src/minecraft/assets/minecraft/textures/ — blocks/ (500 16x16
+  RGBA, drop-in for our texture array; grass_top/leaves are grayscale +
+  colormap/ tint, bake the tint at import; animated water_still.png is a
+  16x512 frame strip + .mcmeta), gui/ (icons.png crosshair/hearts,
+  widgets.png hotbar, container/ inventory), font/ascii.png (the real MC
+  font, drop-in for UiRenderer's grid), environment/ (sun, moon_phases,
+  clouds, rain), items/ (343 icons). Audio EXISTS: mcp940/jars/assets/
+  is a hashed store — resolve indexes/1.12.json objects[name].hash to
+  objects/<hash[0:2]>/<hash>; 1085 .ogg files verified on disk (would
+  need an audio engine module — OpenAL/miniaudio + ogg decode).
+  Personal use only, zero distribution (user's explicit call).
 - Water/visual polish: skylight attenuation underwater (sea floor reads
   bright), cutout leaves, moon + stars at night, flow-animated water.
 - World depth: caves (3D noise carving), biomes (temperature/moisture
