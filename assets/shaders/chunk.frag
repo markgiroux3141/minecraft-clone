@@ -30,6 +30,12 @@ void main() {
 
     float ao = mix(0.4, 1.0, v_ao);
     vec4 albedo = texture(u_atlas, v_uvw);
+    // Cutout: alpha-tested holes (leaves, plants) drop out of the opaque
+    // pass entirely. Solid tiles are alpha 255 and water is ~0.66, so
+    // neither pass is affected by the test.
+    if (albedo.a < 0.5) {
+        discard;
+    }
     vec3 color = albedo.rgb * ao * light;
 
     // Distance fog toward the horizon color; underwater the caller hands

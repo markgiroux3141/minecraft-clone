@@ -6,8 +6,8 @@ placeholder assets keep working on a clean clone.
 Block atlas: writes assets/mc/textures/atlas.png as a horizontal strip of
 16x16 tiles in the layer order of blocks::RegisterDefaults() (same contract
 as scripts/gen_textures.py). Biome tints (grass/foliage colormaps) are baked
-at import using the plains climate point; leaves are baked over an opaque
-backdrop because the game renders them opaque (cutout pass not built yet).
+at import using the plains climate point; leaf alpha holes are preserved
+(the game alpha-tests them — cutout pass, M16).
 
 Requires Pillow (same as gen_font.py). Usage:
     python scripts/import_mc_assets.py [path-to-minecraft-assets-root]
@@ -71,14 +71,9 @@ def build_atlas(mc: Path, out_path: Path) -> None:
     overlay = tinted(load_tile(blocks / "grass_side_overlay.png"), grass_tint)
     grass_side.alpha_composite(overlay)
 
-    # Leaves render opaque in-game, so bake the cutout holes onto a dark
-    # backdrop (what vanilla's "fast graphics" leaves look like).
+    # Cutout leaves (M16): alpha holes survive into the atlas — the chunk
+    # shader alpha-tests them (vanilla "fancy graphics" look).
     leaves = tinted(load_tile(blocks / "leaves_oak.png"), foliage_tint)
-    backdrop = Image.new(
-        "RGBA", (TILE, TILE),
-        (foliage_tint[0] * 2 // 5, foliage_tint[1] * 2 // 5, foliage_tint[2] * 2 // 5, 255))
-    backdrop.alpha_composite(leaves)
-    leaves = backdrop
 
     # Water: frame 0 of the 16x512 animation strip (already tinted + alpha).
     water = Image.open(blocks / "water_still.png").convert("RGBA").crop((0, 0, TILE, TILE))

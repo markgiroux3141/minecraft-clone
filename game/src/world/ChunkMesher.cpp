@@ -21,6 +21,7 @@ constexpr int PadIndex(int x, int y, int z) {
 struct PaddedVolume {
     std::array<BlockId, kPadVolume> id;
     std::array<uint8_t, kPadVolume> opaque;
+    std::array<uint8_t, kPadVolume> cutout; // alpha-tested cubes (leaves)
     std::array<uint8_t, kPadVolume> liquid;
     std::array<uint8_t, kPadVolume> level; // liquidLevel (8 source, 7..1 flow)
     std::array<uint8_t, kPadVolume> light; // packed sky<<4 | block
@@ -40,6 +41,7 @@ void FillPadded(const ChunkSnapshot& snapshot, PaddedVolume& out) {
                 const BlockDef& def = registry.Def(id);
                 out.id[p] = id;
                 out.opaque[p] = def.opaque ? 1 : 0;
+                out.cutout[p] = def.cutout ? 1 : 0;
                 out.liquid[p] = def.liquid ? 1 : 0;
                 out.level[p] = def.liquidLevel;
 
@@ -362,8 +364,13 @@ ChunkMesh ChunkMesher::Build(const ChunkSnapshot& snapshot) {
                     cell[fb.vAxis] = v;
                     const int p = PadIndex(cell[0], cell[1], cell[2]);
 
+                    // Cutout cubes (leaves) mesh exactly like opaque ones
+                    // but hide nothing: every face against a non-opaque
+                    // neighbor renders, including leaf-on-leaf (vanilla
+                    // "fancy"; the coplanar opposite-winding pairs resolve
+                    // by backface culling). Alpha test trims the holes.
                     uint64_t key = 0;
-                    if (vol.opaque[p]) {
+                    if (vol.opaque[p] || vol.cutout[p]) {
                         int nb[3] = {cell[0], cell[1], cell[2]};
                         nb[fb.n] += fb.s;
                         if (!vol.opaque[PadIndex(nb[0], nb[1], nb[2])]) {

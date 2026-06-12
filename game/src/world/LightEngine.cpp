@@ -1,5 +1,6 @@
 #include "world/LightEngine.h"
 
+#include <algorithm>
 #include <vector>
 
 #include "world/Block.h"
@@ -22,7 +23,7 @@ constexpr int CellIndex(int x, int y, int z) {
 }
 
 struct Volume {
-    std::vector<uint8_t> opaque;
+    std::vector<uint8_t> opacity; // 0 clear, 1..14 attenuating (leaves, water), 15 opaque
     std::vector<uint8_t> emission;
     std::vector<uint8_t> sky;
     std::vector<uint8_t> block;
@@ -31,11 +32,11 @@ struct Volume {
 void Fill(const ColumnLightInput& input, Volume& vol) {
     // Registry lookups hoisted into a tiny per-id table.
     const auto& registry = BlockRegistry::Get();
-    std::vector<uint8_t> idOpaque(registry.Count());
+    std::vector<uint8_t> idOpacity(registry.Count());
     std::vector<uint8_t> idEmission(registry.Count());
     for (size_t id = 0; id < registry.Count(); ++id) {
         const BlockDef& def = registry.Def(static_cast<BlockId>(id));
-        idOpaque[id] = def.opaque ? 1 : 0;
+        idOpacity[id] = def.opaque ? 15 : def.lightOpacity;
         idEmission[id] = def.emission;
     }
 
@@ -48,16 +49,17 @@ void Fill(const ColumnLightInput& input, Volume& vol) {
                 const BlockId id =
                     chunk ? chunk->Get(x & 15, y & 15, z & 15) : blocks::Air;
                 const int cell = CellIndex(x, y, z);
-                vol.opaque[cell] = idOpaque[id];
+                vol.opacity[cell] = idOpacity[id];
                 vol.emission[cell] = idEmission[id];
             }
         }
     }
 }
 
-// FIFO flood fill: levels attenuate by 1 per step into transparent cells.
-// A cell can be re-pushed when a stronger path reaches it later; with
-// monotone attenuation this converges quickly.
+// FIFO flood fill: stepping into a cell costs max(1, its opacity) — 1
+// through clear cells, more through attenuators (leaves, water); opacity
+// 15 never conducts. A cell can be re-pushed when a stronger path reaches
+// it later; with monotone attenuation this converges quickly.
 void Propagate(const Volume& vol, std::vector<uint8_t>& light, std::vector<int>& queue) {
     constexpr int kStrideX = 1;
     constexpr int kStrideZ = kSpan;
@@ -69,14 +71,15 @@ void Propagate(const Volume& vol, std::vector<uint8_t>& light, std::vector<int>&
         if (level <= 1) {
             continue;
         }
-        const uint8_t spread = static_cast<uint8_t>(level - 1);
 
         const int x = cell % kSpan;
         const int z = (cell / kSpan) % kSpan;
         const int y = cell / (kSpan * kSpan);
         const auto relax = [&](int neighbor) {
-            if (!vol.opaque[neighbor] && light[neighbor] < spread) {
-                light[neighbor] = spread;
+            const int opacity = vol.opacity[neighbor];
+            const int spread = level - std::max(1, opacity);
+            if (opacity < 15 && spread > 0 && light[neighbor] < spread) {
+                light[neighbor] = static_cast<uint8_t>(spread);
                 queue.push_back(neighbor);
             }
         };
@@ -94,7 +97,7 @@ void Propagate(const Volume& vol, std::vector<uint8_t>& light, std::vector<int>&
 std::array<std::shared_ptr<const ChunkLight>, kWorldHeightChunks> LightEngine::ComputeColumn(
     const ColumnLightInput& input) {
     Volume vol;
-    vol.opaque.resize(kCells);
+    vol.opacity.resize(kCells);
     vol.emission.resize(kCells);
     vol.sky.assign(kCells, 0);
     vol.block.assign(kCells, 0);
@@ -105,11 +108,13 @@ std::array<std::shared_ptr<const ChunkLight>, kWorldHeightChunks> LightEngine::C
 
     // Sky light: everything with a clear view straight up is level 15;
     // the flood fill then carries it sideways and down under overhangs.
+    // Any attenuation (leaves, water) ends the direct beam — those cells
+    // get their light from the flood fill instead.
     for (int z = -Chunk::kSize; z < 2 * Chunk::kSize; ++z) {
         for (int x = -Chunk::kSize; x < 2 * Chunk::kSize; ++x) {
             for (int y = kHeight - 1; y >= 0; --y) {
                 const int cell = CellIndex(x, y, z);
-                if (vol.opaque[cell]) {
+                if (vol.opacity[cell] > 0) {
                     break;
                 }
                 vol.sky[cell] = 15;

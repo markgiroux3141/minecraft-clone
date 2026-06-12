@@ -67,14 +67,21 @@ void RegisterDefaults() {
     log.faceTiles[static_cast<size_t>(BlockFace::NegY)] = 7;
     Log = registry.Register(std::move(log));
 
-    // Opaque for now; cutout leaves come with the M11 transparency pass.
-    Leaves = registry.Register(BlockDef::Uniform("leaves", 8));
+    // M16: alpha-tested cutout leaves (vanilla "fancy graphics" look) —
+    // every face against a non-opaque neighbor renders, including
+    // leaf-on-leaf. lightOpacity 1 keeps a soft shadow under canopies.
+    BlockDef leaves = BlockDef::Uniform("leaves", 8);
+    leaves.opaque = false;
+    leaves.cutout = true;
+    leaves.lightOpacity = 1;
+    Leaves = registry.Register(std::move(leaves));
 
     BlockDef water = BlockDef::Uniform("water", 9);
-    water.opaque = false; // sky light reaches the sea floor; caves see through it
+    water.opaque = false; // light reaches the sea floor (attenuated); caves see through
     water.solid = false;  // no collision — swimming is the player's problem
     water.liquid = true;
-    water.liquidLevel = 8; // source
+    water.liquidLevel = 8;  // source
+    water.lightOpacity = 3; // vanilla: skylight fades 3/block of depth
     Water = registry.Register(std::move(water));
 
     // Flow levels share the source's look and properties; the level only
@@ -85,6 +92,7 @@ void RegisterDefaults() {
         flow.solid = false;
         flow.liquid = true;
         flow.liquidLevel = static_cast<uint8_t>(level);
+        flow.lightOpacity = 3;
         WaterFlows[static_cast<size_t>(level - 1)] = registry.Register(std::move(flow));
     }
 

@@ -18,8 +18,15 @@ struct BlockDef {
     std::string name;
     bool opaque = true;   // hides adjacent faces
     bool solid = true;    // collision (used from M6)
+    bool cutout = false;  // non-opaque cube meshed normally; texture alpha holes
+                          // are alpha-tested away in chunk.frag (leaves)
     bool liquid = false;  // meshed into the blended pass; liquid-liquid faces cull
     bool gravity = false; // falls when unsupported (block-update ticks)
+    // Skylight attenuation for non-opaque blocks, 0..15: blocks direct
+    // (straight-down) sky and costs max(1, lightOpacity) per propagation
+    // step. Ignored when opaque (opaque always blocks fully). Leaves 1,
+    // water 3 — vanilla's values.
+    uint8_t lightOpacity = 0;
     // Liquids only: 8 = source, 7..1 = flow strength (decays away from the
     // source; 0 on everything else). Drives the spread/recede block updates.
     uint8_t liquidLevel = 0;

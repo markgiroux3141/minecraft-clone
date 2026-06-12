@@ -87,9 +87,11 @@ LEAF = (58, 118, 41)
 
 
 def leaves(x, y):
-    # Mottled foliage with darker gaps.
+    # Mottled foliage with cutout holes (alpha 0 — the chunk shader
+    # alpha-tests them away). Keep coverage high (~80%) so box-filtered
+    # mips stay above the 0.5 cutoff and distant leaves fill in solid.
     if hash01(x, y, 9) > 0.8:
-        return speckle((40, 86, 30), x, y, 9, 8)
+        return (0, 0, 0, 0)
     return speckle(LEAF, x, y, 9, 14)
 
 
