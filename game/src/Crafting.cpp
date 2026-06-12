@@ -149,6 +149,9 @@ void Recipes::RegisterDefaults() {
     // M21: 8 cobblestone in a ring -> furnace (3x3 grid only).
     g_recipes.push_back(
         Shaped({"CCC", "C C", "CCC"}, {{'C', cobble}}, {blocks::Furnace, 1}));
+    // Coal over a stick -> 4 torches (vanilla).
+    g_recipes.push_back(
+        Shaped({"C", "S"}, {{'C', {items::Coal}}, {'S', stick}}, {blocks::Torch, 4}));
 
     GAME_INFO("Registered {} crafting recipes", g_recipes.size());
 }

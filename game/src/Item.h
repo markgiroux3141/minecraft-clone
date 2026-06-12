@@ -43,6 +43,10 @@ private:
 
 // Helpers spanning both halves of the id space.
 inline bool IsBlockItem(ItemId id) { return id < kFirstItemId; }
+// True when the id draws as a flat sprite in 3D (held + dropped):
+// registry items always, plus sprite-like blocks (plants, torches) —
+// a mini cube of their texture reads wrong.
+bool RenderAsSprite(ItemId id);
 bool ItemExists(ItemId id); // save-load validation
 const std::string& ItemName(ItemId id);
 uint16_t ItemIconTile(ItemId id); // sprite tile, or the block's side face

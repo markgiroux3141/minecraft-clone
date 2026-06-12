@@ -182,6 +182,9 @@ def build_atlas(mc: Path, out_path: Path) -> None:
         load_tile(items / "iron_pickaxe.png"),
         load_tile(items / "iron_axe.png"),
         load_tile(items / "iron_shovel.png"),
+        # M21 follow-up: torch (62) — alpha survives, the mesher's inset
+        # planes and the alpha test carve out the post.
+        load_tile(blocks / "torch_on.png"),
     ]
 
     strip = Image.new("RGBA", (TILE * len(tiles), TILE))

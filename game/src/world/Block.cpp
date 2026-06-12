@@ -54,6 +54,7 @@ BlockId IronOre = 0;
 BlockId Furnace = 0;
 BlockId LitFurnace = 0;
 BlockId Glass = 0;
+BlockId Torch = 0;
 
 namespace {
 
@@ -269,6 +270,19 @@ void RegisterDefaults() {
     glass.hardness = 0.3f;
     glass.drop = blocks::Air;
     Glass = registry.Register(std::move(glass));
+
+    // M21 follow-up: torch (tile 62, after the M21 item sprites at
+    // 57..61). Floor-standing only; pops without solid ground below.
+    // Replaceable like plants — flowing water washes it away (vanilla)
+    // and its drop pops via CrushDrops. Instant break, light 14.
+    BlockDef torch = BlockDef::Uniform("torch", 62);
+    torch.opaque = false;
+    torch.solid = false;
+    torch.torch = true;
+    torch.replaceable = true;
+    torch.hardness = 0.0f;
+    torch.emission = 14;
+    Torch = registry.Register(std::move(torch));
 
     // M18 drop table (vanilla-ish; cross-references resolve here, after
     // every id exists). Leaves/tall grass/dead bush already drop nothing.

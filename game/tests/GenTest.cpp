@@ -329,6 +329,33 @@ int main() {
               "packed water vertices decode to the block corners");
     }
 
+    // Torch mesh (M21 follow-up): four inset one-sided planes riding the
+    // spare packed bits — every vertex carries exactly one sub-block
+    // inset code (1 = 7/16 or 2 = 9/16) on exactly one axis, anchored to
+    // the torch's own cell corners.
+    {
+        vc::ChunkSnapshot snapshot;
+        auto center = std::make_shared<vc::Chunk>();
+        center->Set(8, 8, 8, vc::blocks::Torch);
+        snapshot.chunks[vc::ChunkSnapshot::Index(1, 1, 1)] = center;
+        snapshot.skyAbove = true;
+
+        const vc::ChunkMesh mesh = vc::ChunkMesher::Build(snapshot);
+        Check(mesh.vertices.size() == 16, "lone torch meshes to 4 planes");
+        bool insetsOk = true;
+        for (const auto& vertex : mesh.vertices) {
+            const uint32_t x = vertex.data0 & 31u;
+            const uint32_t y = (vertex.data0 >> 5) & 31u;
+            const uint32_t z = (vertex.data0 >> 10) & 31u;
+            const uint32_t xIn = (vertex.data0 >> 28) & 3u;
+            const uint32_t zIn = vertex.data0 >> 30;
+            insetsOk &= x >= 8 && x <= 9 && y >= 8 && y <= 9 && z >= 8 && z <= 9;
+            insetsOk &= (xIn == 0) != (zIn == 0); // exactly one axis inset
+            insetsOk &= xIn != 3 && zIn != 3;     // codes are 1 or 2 only
+        }
+        Check(insetsOk, "torch vertices carry one inset code on one axis");
+    }
+
     if (g_failures == 0) {
         std::printf("GenTest: all checks passed (%zu logs, %zu leaves)\n", logs, leafBlocks);
     } else {

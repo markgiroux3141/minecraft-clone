@@ -22,6 +22,14 @@ const ItemDef* ItemRegistry::Find(ItemId id) const {
     return &m_defs[id - kFirstItemId];
 }
 
+bool RenderAsSprite(ItemId id) {
+    if (!IsBlockItem(id)) {
+        return true;
+    }
+    const BlockDef& def = BlockRegistry::Get().Def(id);
+    return def.cross || def.torch;
+}
+
 bool ItemExists(ItemId id) {
     if (IsBlockItem(id)) {
         return id < BlockRegistry::Get().Count();

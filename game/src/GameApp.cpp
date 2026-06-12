@@ -620,7 +620,13 @@ void GameApp::HandleInput(double frameDt, int scroll) {
         } else {
             const glm::ivec3 cell = m_target->block + m_target->normal;
             vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
-            if (!hand.Empty() && vc::IsBlockItem(hand.id) &&
+            // Torches are floor-standing only: refuse placement without
+            // solid ground (instead of placing + popping next tick).
+            const bool supported =
+                hand.Empty() || !vc::IsBlockItem(hand.id) ||
+                !vc::BlockRegistry::Get().Def(hand.id).torch ||
+                m_world->IsSolid(cell.x, cell.y - 1, cell.z);
+            if (!hand.Empty() && vc::IsBlockItem(hand.id) && supported &&
                 !m_world->IsSolid(cell.x, cell.y, cell.z) && !m_player.Intersects(cell)) {
                 m_world->SetBlock(cell, static_cast<vc::BlockId>(hand.id));
                 m_viewModel->TriggerSwing();
@@ -906,13 +912,13 @@ void GameApp::OnRender(double alpha, double frameDt) {
             for (const auto& item : items) {
                 // Vanilla item presentation: hovers (sin, ~3 s period)
                 // and spins (~6 s per turn). Block drops are quarter-
-                // scale mini cubes; registry items (sticks, tools) are
-                // flat alpha-tested sprite quads.
+                // scale mini cubes; registry items and sprite-like
+                // blocks (plants, torches) are flat alpha-tested quads.
                 const glm::vec3 pos =
                     glm::mix(item.prevPos, item.pos, static_cast<float>(alpha));
                 const float t = static_cast<float>(item.age) + static_cast<float>(alpha);
                 const float bob = std::sin(t * 0.1f + item.phase) * 0.1f + 0.1f;
-                const bool block = vc::IsBlockItem(item.id);
+                const bool block = !vc::RenderAsSprite(item.id);
                 if (block) {
                     setFaceLayers(vc::BlockRegistry::Get().Def(item.id).faceTiles);
                 } else {

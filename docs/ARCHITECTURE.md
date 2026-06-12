@@ -157,13 +157,15 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   persistence, spill-on-break, vanilla GUI with flame/arrow progress),
   smelting (iron ore -> ingot, sand -> new glass block, cobble ->
   stone), coal/wood/stick fuels, and iron tools (efficiency 6,
-  250 uses).
+  250 uses). Follow-up: floor-standing torches (light 14, vanilla
+  4-inset-plane mesh riding spare packed-vertex bits, coal + stick ->
+  4); wall mounting waits for block orientation data.
 - **Backlog**: deeper world (kWorldHeightChunks 4 → 8), audio engine,
-  torches, tall-grass wheat seeds (1/8 chance, BlockTallGrass — pairs
+  tall-grass wheat seeds (1/8 chance, BlockTallGrass — pairs
   with farming), animated water, lava, stars, world-list scrolling,
   settings screen, vanilla's 14/16 cactus inset, 3D-extruded item
   sprites in hand (flat quad for now), view bobbing, block orientation
-  data (table/furnace fronts).
+  data (table/furnace fronts, wall torches).
 - **Long-term**: native BuildCraft + IndustrialCraft systems (pipes, EU
   power network, machines) — survey, source breadcrumbs, and phased plan
   in `docs/mods/MOD_INTEGRATION.md`.

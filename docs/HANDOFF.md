@@ -362,8 +362,10 @@ Stage 3 — LOD shell:
 ## M12 perf polish (how it works)
 
 - ChunkVertex = two uint32s (8 B; was 48 B of floats):
-  data0 = x:5|y:5|z:5|normal:3|ao:2|sky:4|block:4 (positions are cell
-  corners 0..16, normal indexes BlockFace order), data1 = u:5|v:5|
+  data0 = x:5|y:5|z:5|normal:3|ao:2|sky:4|block:4|xIn:2|zIn:2
+  (positions are cell corners 0..16, normal indexes BlockFace order;
+  xIn/zIn are the M21-torch sub-block insets — 0, +7/16, or +9/16 —
+  zero everywhere else), data1 = u:5|v:5|
   layer:16 (UVs tile 0..16 across merged quads). Packed in EmitQuad,
   decoded bitwise in chunk.vert (kNormals table); the MeshPool layout is
   two UInt attributes (VertexArray routes Int/UInt types through
@@ -958,12 +960,40 @@ near-spawn chunks you've edited keep their pre-ore stone).
     input-less); RMB on a furnace stores m_openFurnace and opens.
     OpenContainer(bool) became OpenContainer(State). Closing returns
     only the cursor stack — furnace slots stay in the furnace.
-- Known M21 limits: no torches yet (coal's only use is fuel),
-  furnace front faces +X regardless of placement (same as the
-  crafting table), no charcoal/no XP, lit furnace sits in the
-  creative palette (placing it gives an always-lit furnace until
-  something opens/ticks it to unlit), no shift-click quick-move into
-  slots, no hopper-style automation (far future).
+- Torches (same-session follow-up, tile 62, 37 blocks / 15 recipes
+  total): floor-standing only — wall mounting waits for block
+  orientation data. Coal + stick -> 4 (vertical shaped recipe).
+  Block: non-solid, replaceable (water washes it away; CrushDrops
+  grew a torch check), emission 14 (the light BFS already seeds
+  non-opaque emitters — zero light-engine changes), hardness 0,
+  drops itself. Support rule in ProcessBlockUpdate: pops without
+  IsSolid below; GameApp refuses placement without solid ground
+  (instead of place-then-pop). Raycast targets torches like cross
+  plants.
+  - THE MESH (the interesting bit): vanilla's template_torch sides —
+    four ONE-SIDED full-cell planes inset 7/16 and 9/16 from the
+    cell walls (EmitTorchCell in ChunkMesher.cpp); the texture's
+    middle 2px column survives the alpha test, so any angle shows
+    one X plane + one Z plane as a 3D post. The packed vertex format
+    stores INTEGER corners only, so the insets ride the four spare
+    bits of data0 (28..31: xIn:2 | zIn:2, 0 = none / 1 = +7/16 /
+    2 = +9/16) decoded by a table add in chunk.vert — every other
+    emitter leaves them zero, so the format change is backward
+    compatible (gentest grew a torch-plane check). No top cap (UVs
+    are tile-granular; a 2x2-texel cap is invisible anyway). Own-cell
+    light, AO 3, +Y normal, regular alpha-tested stream.
+  - Sprite rendering (bonus fix): new `RenderAsSprite(ItemId)`
+    (Item.h) — registry items PLUS cross/torch blocks now draw as
+    flat quads instead of mini cubes, both as world drops (GameApp
+    entity loop) and in the first-person hand (ViewModel,
+    item/generated transform). Held flowers stopped being cubes too.
+- Known M21 limits: furnace front faces +X regardless of placement
+  (same as the crafting table), no charcoal/no XP, lit furnace sits
+  in the creative palette (placing it gives an always-lit furnace
+  until something opens/ticks it to unlit), no shift-click
+  quick-move into slots, no hopper-style automation (far future),
+  torches are floor-only and don't flicker (no particle flame —
+  pairs with the audio/ambience milestone).
 
 What the user should test (NEW WORLD recommended): dig a cave or
 strip-mine — coal ore at any depth, iron only deep (y<28, i.e. well
@@ -983,23 +1013,36 @@ block drops. Quit + reload mid-smelt -> slots, burn, and progress
 survive. An old M19/M20 world still loads fine (its furnaces.dat is
 just absent).
 
-## Next: audio engine (front-runner, NOT yet decided with the user)
+Torches: craft (coal over stick -> 4), place on the ground — reads
+as a thin 3D post from every angle, lights the area (14, just below
+glowstone) and looks right in caves at night; held torch is a flat
+sprite in hand (so are flowers now). Can't place on the side of a
+wall or on another torch (no ground); dig out the block under one ->
+it pops as a drop; flowing water washes it away (drop pops). Breaking
+is instant; quit/reload keeps placed torches (they're normal blocks).
 
-Dig/place sounds would complete the mining feel; the 1.12 .ogg
-hashed-store survey is in the M14 notes. Torches are the natural
-small M21 follow-up (coal+stick -> 4; needs a non-cube block model +
-block light 14). Confirm scope with the user first.
+## Next: audio engine (DECIDED with the user, 2026-06-12)
+
+Agreed: torches landed as the M21 follow-up, the NEXT MILESTONE IS
+AUDIO, in a fresh context. Dig/place sounds complete the mining feel.
+Start by surveying the 1.12 sound assets — the M14 notes mention the
+.ogg hashed-store layout (sounds.json maps names -> hashed files in
+the assets store; check what the local source tree actually has at
+D:\Minecraft source code). Engine work: an audio module under
+engine/src/vox/ (miniaudio is the obvious single-header backend),
+game work: block dig/break/place sounds keyed by a BlockDef sound
+class, item pickup pop, maybe ambient cave/music later. Scope the
+milestone with the user before building.
 
 Other backlog: deeper world (kWorldHeightChunks 4 -> 8, rebase
-topology + cave start heights — discussed 2026-06-12, deferred), audio
-engine (1.12 .ogg hashed store surveyed — see M14 notes), torches
-(non-cube model + light 14; natural M21 follow-up once coal exists),
+topology + cave start heights — discussed 2026-06-12, deferred),
 tall-grass wheat seeds (vanilla 1/8, BlockTallGrass.getItemDropped —
 pairs with farming), flow-animated water (16x512 strip), lava (cave
 floors below y10 in vanilla), stars, world-list scrolling, settings
 screen, vanilla's 14/16 cactus inset + touch damage, 3D-extruded item
 sprites in hand + view bobbing (M20 polish), block orientation data
-(crafting table/furnace fronts face +X regardless of placement).
+(crafting table/furnace fronts face +X regardless of placement; wall
+torches).
 
 ## How to verify (UPDATED working agreement)
 

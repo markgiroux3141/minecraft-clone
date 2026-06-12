@@ -200,7 +200,9 @@ void ViewModel::Render(const vox::PerspectiveCamera& camera, double alpha, glm::
         m = RotX(m, f1 * -80.0f);
         m = RotY(m, -45.0f);
 
-        const bool block = IsBlockItem(m_displayId);
+        // Sprite-like blocks (plants, torches) draw as the flat
+        // item/generated quad, like vanilla.
+        const bool block = !RenderAsSprite(m_displayId);
         if (block) {
             // block.json firstperson_righthand: rotate Y 45, scale 0.40.
             m = RotY(m, 45.0f);

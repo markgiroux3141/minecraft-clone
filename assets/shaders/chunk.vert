@@ -1,7 +1,8 @@
 #version 460 core
 
 // Packed vertex (see ChunkVertex in ChunkMesher.h):
-//   a_data0: x:5 | y:5 | z:5 | normal:3 | ao:2 | sky:4 | block:4
+//   a_data0: x:5 | y:5 | z:5 | normal:3 | ao:2 | sky:4 | block:4 | xIn:2 | zIn:2
+//            (xIn/zIn: sub-block insets, torch planes only)
 //   a_data1: u:5 | v:5 | layer:16 | drop:4 (liquid surface, ninths)
 layout(location = 0) in uint a_data0;
 layout(location = 1) in uint a_data1;
@@ -27,10 +28,15 @@ out float v_block;
 const vec3 kNormals[6] = vec3[](vec3(1, 0, 0), vec3(-1, 0, 0), vec3(0, 1, 0), vec3(0, -1, 0),
                                 vec3(0, 0, 1), vec3(0, 0, -1));
 
+// Sub-block inset codes (torch planes sit 7/16 and 9/16 into the cell).
+const float kInset[4] = float[](0.0, 7.0 / 16.0, 9.0 / 16.0, 0.0);
+
 void main() {
     vec3 position = vec3(float(a_data0 & 31u), float((a_data0 >> 5) & 31u),
                          float((a_data0 >> 10) & 31u));
     position.y -= float((a_data1 >> 26) & 15u) / 9.0; // liquid surface drop
+    position.x += kInset[(a_data0 >> 28) & 3u];
+    position.z += kInset[a_data0 >> 30];
     v_normal = kNormals[(a_data0 >> 15) & 7u];
     v_ao = float((a_data0 >> 18) & 3u) / 3.0;
     v_sky = float((a_data0 >> 20) & 15u) / 15.0;

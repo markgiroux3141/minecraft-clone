@@ -26,6 +26,9 @@ struct BlockDef {
                           // are alpha-tested away in chunk.frag (leaves)
     bool cross = false;   // plant: two diagonal alpha-tested quad pairs instead of
                           // a cube; targetable by raycast but never collides
+    bool torch = false;   // vanilla torch shape: four one-sided alpha-tested
+                          // planes inset 7/16 and 9/16 from the cell walls;
+                          // targetable, never collides, needs solid ground
     bool replaceable = false; // liquids flow into it and falling blocks crush it
                               // (tall grass, flowers — destroyed, not blocking)
     bool liquid = false;  // meshed into the blended pass; liquid-liquid faces cull
@@ -137,6 +140,9 @@ extern BlockId IronOre;
 extern BlockId Furnace;
 extern BlockId LitFurnace;
 extern BlockId Glass; // smelted from sand; never generated
+// M21 follow-up: floor-standing torch (coal + stick), block light 14.
+// Wall mounting waits for block orientation data (see backlog).
+extern BlockId Torch;
 
 // M18 crack overlay: destroy_stage_0..9 occupy ten consecutive texture
 // layers right after the block tiles — keep BOTH scripts/gen_textures.py

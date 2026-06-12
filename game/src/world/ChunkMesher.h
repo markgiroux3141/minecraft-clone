@@ -15,9 +15,11 @@ namespace vc {
 
 // Packed chunk vertex, 8 bytes — every field is a small integer. Decoded
 // by chunk.vert with matching bit offsets:
-//   data0: x:5 | y:5 | z:5 | normal:3 | ao:2 | sky:4 | block:4
+//   data0: x:5 | y:5 | z:5 | normal:3 | ao:2 | sky:4 | block:4 | xIn:2 | zIn:2
 //          x/y/z are chunk-local cell corners (0..16); normal indexes
-//          BlockFace order; ao 0..3; light levels 0..15.
+//          BlockFace order; ao 0..3; light levels 0..15. xIn/zIn are
+//          sub-block insets added to x/z in the shader (0 = none,
+//          1 = +7/16, 2 = +9/16) — torch planes only, zero elsewhere.
 //   data1: u:5 | v:5 | layer:16 | drop:4
 //          UVs tile 0..16 across merged quads (sampler wraps). drop is
 //          the liquid surface's distance below the cell top in ninths

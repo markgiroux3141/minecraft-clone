@@ -584,7 +584,7 @@ void World::CrushDrops(const glm::ivec3& pos) {
     const auto& registry = BlockRegistry::Get();
     const BlockId id = GetBlock(pos.x, pos.y, pos.z);
     const BlockDef& def = registry.Def(id);
-    if (def.cross) {
+    if (def.cross || def.torch) {
         SpawnBlockDrop(pos, def.ResolveDrop(id), 1);
     }
 }
@@ -635,6 +635,13 @@ void World::ProcessBlockUpdate(const glm::ivec3& worldPos) {
         // everything above it, one update at a time.
         const BlockId below = GetBlock(worldPos.x, worldPos.y - 1, worldPos.z);
         if (below != blocks::Sand && below != blocks::Cactus) {
+            SpawnBlockDrop(worldPos, def.ResolveDrop(id), 1);
+            SetBlock(worldPos, blocks::Air);
+        }
+    } else if (def.torch) {
+        // Torches need solid ground (floor-standing only until block
+        // orientation data exists for wall mounts).
+        if (!IsSolid(worldPos.x, worldPos.y - 1, worldPos.z)) {
             SpawnBlockDrop(worldPos, def.ResolveDrop(id), 1);
             SetBlock(worldPos, blocks::Air);
         }
@@ -822,10 +829,11 @@ std::optional<World::RaycastHit> World::RaycastBlocks(const glm::vec3& origin,
         }
         cell[axis] += step[axis];
         tMax[axis] += tDelta[axis];
-        // Solids and plants are targetable (break/place); liquids and air
-        // are not. Plants never collide — only the raycast sees them.
+        // Solids, plants, and torches are targetable (break/place);
+        // liquids and air are not. Plants/torches never collide — only
+        // the raycast sees them.
         const BlockDef& def = BlockRegistry::Get().Def(GetBlock(cell.x, cell.y, cell.z));
-        if (def.solid || def.cross) {
+        if (def.solid || def.cross || def.torch) {
             glm::ivec3 normal{0};
             normal[axis] = -step[axis];
             return RaycastHit{cell, normal};

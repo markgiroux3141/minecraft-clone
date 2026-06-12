@@ -409,6 +409,16 @@ def iron_ingot_sprite(x, y):
     return (0, 0, 0, 0)
 
 
+def torch(x, y):
+    # 2px stick up the middle with a glowing head (the mesher's inset
+    # planes show only these middle columns).
+    if 7 <= x <= 8 and 8 <= y <= 15:
+        return speckle((124, 98, 60), x, y, 62, 10)
+    if 7 <= x <= 8 and 5 <= y <= 7:
+        return (255, 222, 120) if y == 6 else (244, 168, 54)
+    return (0, 0, 0, 0)
+
+
 # Layer index in the texture array == position in this list.
 TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top, leaves, water,
          snow, grass_side_snowed, tall_grass, dandelion, poppy, dead_bush,
@@ -424,7 +434,9 @@ TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top,
          coal_ore, iron_ore, furnace_front(False), furnace_front(True), furnace_side,
          furnace_top, glass,
          coal_sprite, iron_ingot_sprite,
-         tool_sprite(IRON_HEAD, 59), tool_sprite(IRON_HEAD, 60), tool_sprite(IRON_HEAD, 61)]
+         tool_sprite(IRON_HEAD, 59), tool_sprite(IRON_HEAD, 60), tool_sprite(IRON_HEAD, 61),
+         # M21 follow-up: torch (62).
+         torch]
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:

@@ -23,6 +23,7 @@ struct PaddedVolume {
     std::array<uint8_t, kPadVolume> opaque;
     std::array<uint8_t, kPadVolume> cutout; // alpha-tested cubes (leaves)
     std::array<uint8_t, kPadVolume> cross;  // plants: X-shaped quad pairs
+    std::array<uint8_t, kPadVolume> torch;  // torches: inset one-sided planes
     std::array<uint8_t, kPadVolume> liquid;
     std::array<uint8_t, kPadVolume> level; // liquidLevel (8 source, 7..1 flow)
     std::array<uint8_t, kPadVolume> light; // packed sky<<4 | block
@@ -44,6 +45,7 @@ void FillPadded(const ChunkSnapshot& snapshot, PaddedVolume& out) {
                 out.opaque[p] = def.opaque ? 1 : 0;
                 out.cutout[p] = def.cutout ? 1 : 0;
                 out.cross[p] = def.cross ? 1 : 0;
+                out.torch[p] = def.torch ? 1 : 0;
                 out.liquid[p] = def.liquid ? 1 : 0;
                 out.level[p] = def.liquidLevel;
 
@@ -313,6 +315,56 @@ void EmitCrossCell(ChunkMesh& mesh, const PaddedVolume& vol, int x, int y, int z
     }
 }
 
+// Torches render as vanilla's template_torch sides: four one-sided
+// full-cell planes inset 7/16 and 9/16 from the cell walls (the post
+// pixels live in the texture's middle columns; the alpha test trims the
+// rest, and from any angle one X plane + one Z plane read as a 3D post).
+// The sub-block insets ride the spare packed bits (data0 28..31, decoded
+// in chunk.vert) — everything else still emits integer corners. No top
+// cap: UVs are tile-granular and the 2x2-texel cap is invisible at torch
+// scale. Lighting mirrors the cross plants: the cell's own light (the
+// BFS seeds it at the torch's emission), full-bright AO, +Y normal.
+void EmitTorchCell(ChunkMesh& mesh, const PaddedVolume& vol, int x, int y, int z) {
+    const int p = PadIndex(x, y, z);
+    const auto layer =
+        static_cast<uint32_t>(BlockRegistry::Get().Def(vol.id[p]).faceTiles[0]);
+    const auto sky = static_cast<uint32_t>(ChunkLight::Sky(vol.light[p]));
+    const auto block = static_cast<uint32_t>(ChunkLight::Block(vol.light[p]));
+    const uint32_t shade = 2u << 15 | 3u << 18 | sky << 20 | block << 24;
+
+    // Per plane: which axis is inset, the inset code (1 = +7/16,
+    // 2 = +9/16), and the u direction keeping the winding CCW from the
+    // plane's outward side (cross(u, +Y) = outward normal).
+    struct Plane {
+        int axis;       // 0 = inset on x, 1 = inset on z
+        uint32_t inset; // packed code
+        int du;         // +1: u runs low->high on the other axis; -1: reversed
+    };
+    constexpr Plane kPlanes[4] = {
+        {0, 1, +1}, // x + 7/16, faces -X, u = +Z
+        {0, 2, -1}, // x + 9/16, faces +X, u = -Z
+        {1, 1, -1}, // z + 7/16, faces -Z, u = -X
+        {1, 2, +1}, // z + 9/16, faces +Z, u = +X
+    };
+    constexpr int cu[4] = {0, 1, 1, 0};
+    constexpr int cv[4] = {0, 0, 1, 1};
+
+    for (const Plane& plane : kPlanes) {
+        const uint32_t nudge = plane.inset << (plane.axis == 0 ? 28 : 30);
+        for (int k = 0; k < 4; ++k) {
+            const int t = plane.du > 0 ? cu[k] : 1 - cu[k];
+            const int px = plane.axis == 0 ? x : x + t;
+            const int pz = plane.axis == 0 ? z + t : z;
+            mesh.vertices.push_back({
+                static_cast<uint32_t>(px) | static_cast<uint32_t>(y + cv[k]) << 5 |
+                    static_cast<uint32_t>(pz) << 10 | shade | nudge,
+                static_cast<uint32_t>(cu[k]) | static_cast<uint32_t>(cv[k]) << 5 |
+                    layer << 10,
+            });
+        }
+    }
+}
+
 // Face connectivity for occlusion culling: flood fill the chunk's
 // non-opaque cells; every component connects all the faces it touches.
 // Cell index i is YZX (Chunk::Index), so x = i & 15, z = (i>>4) & 15,
@@ -477,8 +529,8 @@ ChunkMesh ChunkMesher::Build(const ChunkSnapshot& snapshot) {
         }
     }
 
-    // Per-cell passes: liquids (corner-sampled surface heights) and
-    // plant crosses — neither can greedy-merge.
+    // Per-cell passes: liquids (corner-sampled surface heights), plant
+    // crosses, and torches — none can greedy-merge.
     for (int y = 0; y < Chunk::kSize; ++y) {
         for (int z = 0; z < Chunk::kSize; ++z) {
             for (int x = 0; x < Chunk::kSize; ++x) {
@@ -487,6 +539,8 @@ ChunkMesh ChunkMesher::Build(const ChunkSnapshot& snapshot) {
                     EmitLiquidCell(mesh, vol, x, y, z);
                 } else if (vol.cross[p]) {
                     EmitCrossCell(mesh, vol, x, y, z);
+                } else if (vol.torch[p]) {
+                    EmitTorchCell(mesh, vol, x, y, z);
                 }
             }
         }
