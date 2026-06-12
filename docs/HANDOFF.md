@@ -1,11 +1,12 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-12, end of M16 (flora & decoration — code complete,
-all tests green, NOT yet user-verified in-game). TWO things await the
-user's eyes: the M15 biome TOPOLOGY (committed last session, never
-flown) and all of M16 (leaves/plants/trees/cactus — test in a NEW
-world). Read alongside `ARCHITECTURE.md` (layering rules, roadmap) and
-`CLAUDE.md` (build commands, conventions).
+Updated: 2026-06-12, end of M16 (flora & decoration + sandstone +
+bedrock addenda — USER-VERIFIED in-game: "everything looks really
+good"; the M15 topology got implicitly covered by the same flights).
+M17 is TBD — the user asked about survival mechanics (block hardness /
+break times, inventory, crafting); see the M17 section for the
+discussed sequencing. Read alongside `ARCHITECTURE.md` (layering
+rules, roadmap) and `CLAUDE.md` (build commands, conventions).
 
 IMPORTANT RESOURCE: the user has Minecraft's Java source (MCP 9.40 =
 1.12) at `D:\Minecraft source code` — look up exact game dynamics there
@@ -16,8 +17,7 @@ distribution (user's explicit call).
 
 ## Where the project stands
 
-M0–M16 are done (M15 topology + all of M16 pending the user's in-game
-look):
+M0–M16 are done and user-verified:
 - Engine (`engine/src/vox/`, namespace `vox`): fixed-timestep app loop
   (20 TPS + interpolated render), GLFW window/input (incl. cursor capture),
   GL 4.6 renderer facade with DSA abstractions (Shader, Buffer/VertexArray,
@@ -585,14 +585,31 @@ unedited chunks regenerate with new rules; test in a NEW world.
 
 ## Next: M17 — TBD (decide with the user)
 
-Backlog: deeper world (kWorldHeightChunks 4 -> 8, rebase topology +
-cave start heights — discussed with the user 2026-06-12, deferred),
-inventory UI (gui/container/ sheets present; DrawImage ready), audio
+The user asked (2026-06-12) when survival mechanics land: block
+hardness / break times, inventory, crafting. Proposed sequencing
+(dependencies, not a commitment — re-confirm with the user):
+- Survival I — items & inventory: an ItemStack/slot data model behind
+  the hotbar (counts, persistence in level.dat), the inventory screen
+  (gui/container/inventory.png is already in the import set's reach;
+  UiRenderer::DrawImage is ready), mouse slot interaction. Unlocks
+  plants/new blocks in the hotbar (slots are full today).
+- Survival II — mining feel: per-block hardness + hold-to-break
+  progress (vanilla destroy_stage_0..9 crack overlays exist in the
+  1.12 assets), block drops as pickup-able item entities (reuse the
+  FallingBlock render path), pickup into the inventory.
+- Survival III — crafting: recipe registry, 2x2 player grid + crafting
+  table 3x3 (gui/container/crafting_table.png), tools as items (tool
+  speed multipliers hook back into Survival II's hardness).
+Vanilla references when porting: Block.getBlockHardness /
+getPlayerRelativeBlockHardness, PlayerControllerMP.onPlayerDamageBlock
+(break progress), Container/InventoryPlayer, CraftingManager.
+
+Other backlog: deeper world (kWorldHeightChunks 4 -> 8, rebase
+topology + cave start heights — discussed 2026-06-12, deferred), audio
 engine (1.12 .ogg hashed store surveyed — see M14 notes), flow-animated
 water (16x512 strip), lava (cave floors below y10 in vanilla), stars,
 world-list scrolling, settings screen, vanilla's 14/16 cactus inset +
-touch damage, plants in the hotbar (slots are full — needs inventory
-UI or slot rethink).
+touch damage.
 
 ## How to verify (UPDATED working agreement)
 
