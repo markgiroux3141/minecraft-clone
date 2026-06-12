@@ -105,6 +105,49 @@ void GameApp::OnInit() {
     m_skyQuad->SetIndexBuffer(std::make_shared<vox::IndexBuffer>(
         skyIndices, static_cast<uint32_t>(std::size(skyIndices))));
 
+    m_entityShader =
+        vox::Shader::FromFiles("shaders/block_entity.vert", "shaders/block_entity.frag");
+    {
+        // Unit cube, 4 verts per face in BlockFace order; drawn with
+        // culling off, so winding doesn't matter.
+        constexpr int kCorners[6][4][3] = {
+            {{1, 0, 0}, {1, 1, 0}, {1, 1, 1}, {1, 0, 1}}, // +X
+            {{0, 0, 0}, {0, 0, 1}, {0, 1, 1}, {0, 1, 0}}, // -X
+            {{0, 1, 0}, {0, 1, 1}, {1, 1, 1}, {1, 1, 0}}, // +Y
+            {{0, 0, 0}, {1, 0, 0}, {1, 0, 1}, {0, 0, 1}}, // -Y
+            {{0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {0, 1, 1}}, // +Z
+            {{0, 0, 0}, {0, 1, 0}, {1, 1, 0}, {1, 0, 0}}, // -Z
+        };
+        constexpr float kNormals[6][3] = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0},
+                                          {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+        constexpr float kUv[4][2] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+        std::vector<float> verts;
+        std::vector<uint32_t> indices;
+        for (uint32_t face = 0; face < 6; ++face) {
+            for (int c = 0; c < 4; ++c) {
+                verts.insert(verts.end(),
+                             {static_cast<float>(kCorners[face][c][0]),
+                              static_cast<float>(kCorners[face][c][1]),
+                              static_cast<float>(kCorners[face][c][2]), kNormals[face][0],
+                              kNormals[face][1], kNormals[face][2], kUv[c][0], kUv[c][1],
+                              static_cast<float>(face)});
+            }
+            const uint32_t base = face * 4;
+            indices.insert(indices.end(),
+                           {base, base + 1, base + 2, base + 2, base + 3, base});
+        }
+        auto cubeBuffer = std::make_shared<vox::VertexBuffer>(
+            verts.data(), static_cast<uint32_t>(verts.size() * sizeof(float)));
+        cubeBuffer->SetLayout({{vox::ShaderDataType::Float3, "a_position"},
+                               {vox::ShaderDataType::Float3, "a_normal"},
+                               {vox::ShaderDataType::Float2, "a_uv"},
+                               {vox::ShaderDataType::Float, "a_face"}});
+        m_entityCube = std::make_shared<vox::VertexArray>();
+        m_entityCube->AddVertexBuffer(std::move(cubeBuffer));
+        m_entityCube->SetIndexBuffer(std::make_shared<vox::IndexBuffer>(
+            indices.data(), static_cast<uint32_t>(indices.size())));
+    }
+
     m_outlineShader = vox::Shader::FromFiles("shaders/outline.vert", "shaders/outline.frag");
     constexpr float corners[] = {
         0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, // bottom-then-top ring order below
@@ -197,6 +240,7 @@ void GameApp::PersistPlayerState() {
 void GameApp::OnTick(double dt) {
     if (m_world && m_state == State::Playing) {
         m_player.Tick(*m_world, dt);
+        m_world->Tick(); // scheduled block updates (falling sand, water flow)
         m_worldTime += 1.0;
         if (vox::Input::IsKeyDown(vox::Key::T)) {
             m_worldTime += kTimeFastForward; // debug: watch the cycle quickly
@@ -397,6 +441,50 @@ void GameApp::OnRender(double alpha, double frameDt) {
         m_world->CollectVisibleChunks(m_camera.Position(), frustum, m_occlusionCulling,
                                       m_drawItems, m_drawItemsTransparent);
         m_world->Meshes().Draw(m_drawItems);
+
+        // Falling-block entities: opaque, so before the water pass (which
+        // expects the chunk shader bound again afterwards).
+        const auto& fallingBlocks = m_world->FallingBlocks();
+        if (!fallingBlocks.empty()) {
+            m_entityShader->Bind();
+            m_entityShader->SetMat4("u_viewProj", viewProj);
+            m_entityShader->SetInt("u_atlas", 0);
+            m_entityShader->SetFloat3("u_sunDir", dayNight.sunDir);
+            m_entityShader->SetFloat("u_sunLight", dayNight.sunLight);
+            vox::Renderer::SetCullFace(false); // a handful of cubes; skip winding care
+            for (const auto& falling : fallingBlocks) {
+                if (!m_world->FallingBlockVisible(falling)) {
+                    continue; // mesh handover in progress (no double-draw/gap)
+                }
+                const float y = glm::mix(falling.prevY, falling.y, static_cast<float>(alpha));
+                const auto& def = vc::BlockRegistry::Get().Def(falling.id);
+                for (int face = 0; face < 6; ++face) {
+                    m_entityShader->SetFloat(std::format("u_faceLayers[{}]", face),
+                                             static_cast<float>(def.faceTiles[face]));
+                }
+                // Sample the cell AND the cell above and take the max:
+                // once the block is placed, its own (opaque) cell reads
+                // light 0 and the lingering cube would flash black.
+                const glm::ivec3 cell{falling.x, static_cast<int>(std::floor(y + 0.5f)),
+                                      falling.z};
+                const uint8_t here = m_world->PackedLightAt(cell);
+                const uint8_t above = m_world->PackedLightAt(cell + glm::ivec3{0, 1, 0});
+                m_entityShader->SetFloat2(
+                    "u_light",
+                    {static_cast<float>(std::max(vc::ChunkLight::Sky(here),
+                                                 vc::ChunkLight::Sky(above))) /
+                         15.0f,
+                     static_cast<float>(std::max(vc::ChunkLight::Block(here),
+                                                 vc::ChunkLight::Block(above))) /
+                         15.0f});
+                m_entityShader->SetFloat3("u_origin", {static_cast<float>(falling.x), y,
+                                                       static_cast<float>(falling.z)});
+                vox::Renderer::DrawIndexed(*m_entityCube);
+            }
+            vox::Renderer::SetCullFace(true);
+            m_chunkShader->Bind();
+        }
+
         if (!m_drawItemsTransparent.empty()) {
             // Water: blended, depth-tested but not depth-written, double-
             // sided so the surface shows from below too.

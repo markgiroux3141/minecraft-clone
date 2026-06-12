@@ -28,6 +28,17 @@ add_executable(game
     src/world/WorldSave.h
 )
 
+# Worker-side number crunching (light BFS, greedy meshing, noise) is
+# unusably slow at /Od during edit bursts — keep it optimized even in
+# Debug builds. Game logic stays fully debuggable.
+if(MSVC)
+    set_source_files_properties(
+        src/world/ChunkMesher.cpp
+        src/world/LightEngine.cpp
+        src/world/TerrainGen.cpp
+        PROPERTIES COMPILE_OPTIONS "$<$<CONFIG:Debug>:/O2>")
+endif()
+
 set_target_properties(game PROPERTIES OUTPUT_NAME "Voxcraft")
 target_include_directories(game PRIVATE src)
 target_link_libraries(game PRIVATE vox::engine fastnoise)

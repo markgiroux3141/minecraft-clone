@@ -19,6 +19,7 @@ struct BlockDef {
     bool opaque = true;   // hides adjacent faces
     bool solid = true;    // collision (used from M6)
     bool liquid = false;  // meshed into the blended pass; liquid-liquid faces cull
+    bool gravity = false; // falls when unsupported (block-update ticks)
     uint8_t emission = 0; // block light emitted, 0..15
     std::array<uint16_t, 6> faceTiles{}; // texture-array layer per face
 

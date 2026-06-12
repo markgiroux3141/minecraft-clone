@@ -63,6 +63,10 @@ private:
     std::shared_ptr<vox::VertexArray> m_skyQuad;
     double m_worldTime = 0.0; // ticks; one day/night cycle per kDayTicks
 
+    // Falling-block entities: one textured unit cube, drawn per entity.
+    std::shared_ptr<vox::Shader> m_entityShader;
+    std::shared_ptr<vox::VertexArray> m_entityCube;
+
     // Frustum-surviving chunks for the frame's multi-draws (reused scratch):
     // opaque front-to-back, then water back-to-front in the blended pass.
     std::vector<vox::MeshPool::DrawItem> m_drawItems;

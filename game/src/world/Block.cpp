@@ -56,7 +56,9 @@ void RegisterDefaults() {
     glowstone.emission = 15;
     Glowstone = registry.Register(std::move(glowstone));
 
-    Sand = registry.Register(BlockDef::Uniform("sand", 5));
+    BlockDef sand = BlockDef::Uniform("sand", 5);
+    sand.gravity = true;
+    Sand = registry.Register(std::move(sand));
 
     BlockDef log = BlockDef::Uniform("log", 6);
     log.faceTiles[static_cast<size_t>(BlockFace::PosY)] = 7;

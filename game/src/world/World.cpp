@@ -107,6 +107,16 @@ World::World(int defaultSeed, std::filesystem::path saveDir)
       m_lastAutosave(std::chrono::steady_clock::now()) {}
 
 World::~World() {
+    // Blocks still in flight settle instantly so they persist.
+    for (const auto& falling : m_fallingBlocks) {
+        int restY = std::clamp(static_cast<int>(std::lround(falling.y)), 0, kHeightBlocks - 1);
+        while (restY < kHeightBlocks && IsSolid(falling.x, restY, falling.z)) {
+            ++restY;
+        }
+        if (restY < kHeightBlocks) {
+            SetBlock({falling.x, restY, falling.z}, falling.id);
+        }
+    }
     // Workers may still be running (the pool joins after this body), but
     // they never touch the chunk map or the save store.
     SaveEditedChunks();
@@ -219,6 +229,149 @@ void World::SetBlock(const glm::ivec3& worldPos, BlockId id) {
             if (colIt != m_columns.end()) {
                 ++colIt->second.dirtySeq;
             }
+        }
+    }
+
+    // Every edit wakes its neighborhood: gravity (and water flow) react
+    // via scheduled ticks, and their own SetBlocks keep the cascade going.
+    constexpr int kEditUpdateDelay = 2;
+    constexpr glm::ivec3 kFaceDirs[6] = {
+        {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1},
+    };
+    ScheduleBlockUpdate(worldPos, kEditUpdateDelay);
+    for (const auto& dir : kFaceDirs) {
+        ScheduleBlockUpdate(worldPos + dir, kEditUpdateDelay);
+    }
+}
+
+void World::ScheduleBlockUpdate(const glm::ivec3& worldPos, int delayTicks) {
+    m_blockUpdates.push({m_simTick + static_cast<uint64_t>(std::max(1, delayTicks)), worldPos});
+}
+
+void World::Tick() {
+    ++m_simTick;
+    // Cap the work per tick; the queue carries the rest. Updates pushed
+    // while processing are due in the future, so this can't spin forever.
+    constexpr int kMaxUpdatesPerTick = 512;
+    for (int i = 0; i < kMaxUpdatesPerTick && !m_blockUpdates.empty() &&
+                    m_blockUpdates.top().due <= m_simTick;
+         ++i) {
+        const glm::ivec3 pos = m_blockUpdates.top().pos;
+        m_blockUpdates.pop();
+        ProcessBlockUpdate(pos);
+    }
+
+    // Falling blocks: accelerate down, settle when the cell below the one
+    // being entered is solid. Spawn order is bottom-first for a broken
+    // column, so stacked sand restacks in order.
+    constexpr float kTickDt = 0.05f; // 20 TPS
+    constexpr float kFallAccel = 18.0f;
+    constexpr float kFallTerminal = 40.0f;
+    constexpr float kFallTerminalLiquid = 4.0f; // sand sinks gently in water
+
+    const auto& registry = BlockRegistry::Get();
+    for (size_t i = 0; i < m_fallingBlocks.size();) {
+        FallingBlock& falling = m_fallingBlocks[i];
+        if (falling.landed) {
+            // Block already placed — linger (still drawn) until the chunk
+            // mesh shows it, then disappear without a gap.
+            if (MeshCaughtUp(falling.syncCell, falling.syncVersion)) {
+                m_fallingBlocks.erase(m_fallingBlocks.begin() + static_cast<ptrdiff_t>(i));
+            } else {
+                ++i;
+            }
+            continue;
+        }
+        falling.prevY = falling.y;
+
+        const int cellY = static_cast<int>(std::floor(falling.y));
+        const glm::ivec3 cc{falling.x >> 4,
+                            std::clamp(cellY, 0, kHeightBlocks - 1) >> 4, falling.z >> 4};
+        const auto chunkIt = m_chunks.find(cc);
+        if (chunkIt == m_chunks.end() || !chunkIt->second.blocks) {
+            ++i; // ground not loaded — hang in the air until it is
+            continue;
+        }
+
+        const bool inLiquid = registry.Def(GetBlock(falling.x, cellY, falling.z)).liquid;
+        falling.velocity = std::min(falling.velocity + kFallAccel * kTickDt,
+                                    inLiquid ? kFallTerminalLiquid : kFallTerminal);
+        const float newY = falling.y - falling.velocity * kTickDt;
+
+        bool landed = false;
+        for (int level = cellY; level >= static_cast<int>(std::floor(newY)) && !landed;
+             --level) {
+            if (newY > static_cast<float>(level)) {
+                continue; // hasn't reached this cell boundary yet
+            }
+            if (level - 1 < 0 || IsSolid(falling.x, level - 1, falling.z)) {
+                // Settle at `level` — or above it if something solid moved
+                // in (the landing SetBlock replaces at worst a liquid).
+                int restY = level;
+                while (restY < kHeightBlocks && IsSolid(falling.x, restY, falling.z)) {
+                    ++restY;
+                }
+                if (restY < kHeightBlocks) {
+                    const glm::ivec3 restCell{falling.x, restY, falling.z};
+                    SetBlock(restCell, falling.id);
+                    // Freeze the cube on the placed cell and keep drawing
+                    // it until the remesh lands.
+                    falling.y = static_cast<float>(restY);
+                    falling.prevY = falling.y;
+                    falling.syncCell = restCell;
+                    falling.syncVersion = DataVersionAt(restCell);
+                }
+                landed = true;
+            }
+        }
+        if (landed) {
+            falling.landed = true;
+        } else {
+            falling.y = newY;
+        }
+        ++i;
+    }
+}
+
+uint32_t World::DataVersionAt(const glm::ivec3& worldPos) const {
+    const auto it = m_chunks.find({worldPos.x >> 4, worldPos.y >> 4, worldPos.z >> 4});
+    return it != m_chunks.end() ? it->second.dataVersion : 0;
+}
+
+bool World::MeshCaughtUp(const glm::ivec3& worldPos, uint32_t version) const {
+    const auto it = m_chunks.find({worldPos.x >> 4, worldPos.y >> 4, worldPos.z >> 4});
+    return it == m_chunks.end() || it->second.meshedVersion >= version;
+}
+
+bool World::FallingBlockVisible(const FallingBlock& falling) const {
+    // Landed cubes cover the not-yet-remeshed block; in-flight cubes stay
+    // hidden while the stale mesh still shows the block they came from.
+    return falling.landed || MeshCaughtUp(falling.syncCell, falling.syncVersion);
+}
+
+void World::ProcessBlockUpdate(const glm::ivec3& worldPos) {
+    if (worldPos.y <= 0 || worldPos.y >= kHeightBlocks) {
+        return; // the world floor supports everything
+    }
+    const glm::ivec3 cc{worldPos.x >> 4, worldPos.y >> 4, worldPos.z >> 4};
+    const auto it = m_chunks.find(cc);
+    if (it == m_chunks.end() || !it->second.blocks) {
+        return; // unloaded mid-flight; edits only happen near the player
+    }
+
+    const auto& registry = BlockRegistry::Get();
+    const BlockId id = GetBlock(worldPos.x, worldPos.y, worldPos.z);
+    if (registry.Def(id).gravity) {
+        const BlockId below = GetBlock(worldPos.x, worldPos.y - 1, worldPos.z);
+        if (below == blocks::Air || registry.Def(below).liquid) {
+            // Detach into a falling entity; it becomes a block again on
+            // landing. The SetBlock wakes the neighborhood, so sand above
+            // follows next tick. The entity stays hidden until the remesh
+            // drops the removed block (see FallingBlockVisible).
+            SetBlock(worldPos, blocks::Air);
+            m_fallingBlocks.push_back({worldPos.x, worldPos.z, static_cast<float>(worldPos.y),
+                                       static_cast<float>(worldPos.y), 0.0f, id, worldPos,
+                                       DataVersionAt(worldPos), false});
         }
     }
 }

@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <queue>
 #include <unordered_map>
 #include <vector>
 
@@ -107,6 +108,40 @@ public:
 
     void Update(const glm::vec3& cameraPos);
 
+    // Fixed-rate simulation step (20 TPS, from GameApp::OnTick): runs the
+    // scheduled block updates that drive falling sand (and water flow).
+    // SetBlock schedules the edited cell and its neighbors automatically,
+    // so cascades sustain themselves until everything settles.
+    void Tick();
+    void ScheduleBlockUpdate(const glm::ivec3& worldPos, int delayTicks);
+
+    // A detached gravity block in flight: an unsupported sand block turns
+    // into one of these (smooth, accelerating fall), then turns back into
+    // a block on landing. Tick-simulated; the renderer interpolates
+    // prevY/y with the frame alpha, like the player.
+    //
+    // Remeshing is asynchronous, so the entity and the chunk mesh must
+    // hand over without overlap: at spawn the entity stays HIDDEN until
+    // the mesh stops showing the removed block (no z-fighting), and at
+    // landing it keeps drawing until the mesh shows the placed block (no
+    // one-frame gap). syncCell/syncVersion track the chunk edit to wait
+    // for; FallingBlockVisible answers for the renderer.
+    struct FallingBlock {
+        int x, z; // stays on its column
+        float y, prevY;
+        float velocity;
+        BlockId id;
+        glm::ivec3 syncCell;
+        uint32_t syncVersion;
+        bool landed; // physics done; lingers until the mesh catches up
+    };
+    const std::vector<FallingBlock>& FallingBlocks() const { return m_fallingBlocks; }
+    bool FallingBlockVisible(const FallingBlock& falling) const;
+
+    // Packed light at a world position (sky 15 above the world, 0 when
+    // unloaded/below). Used for entity lighting too.
+    uint8_t PackedLightAt(const glm::ivec3& worldPos) const;
+
     // World-space block query; air for unloaded chunks or outside the world.
     BlockId GetBlock(int wx, int wy, int wz) const;
 
@@ -204,9 +239,6 @@ private:
     };
 
     void DrainCompletedJobs();
-    // Packed light at a world position (sky 15 above the world, 0 when
-    // unloaded/below).
-    uint8_t PackedLightAt(const glm::ivec3& worldPos) const;
     void SubmitGenerate(const glm::ivec3& coord);
     void SubmitLight(const glm::ivec2& column);
     void SubmitMesh(const glm::ivec3& coord);
@@ -236,6 +268,13 @@ private:
     bool ColumnHasData(const glm::ivec2& column) const;
     // Put()s every loaded edited chunk into the save store (autosave/quit).
     void SaveEditedChunks();
+    // One scheduled block update: applies the block's rule (gravity for
+    // now) and lets SetBlock's scheduling carry the cascade.
+    void ProcessBlockUpdate(const glm::ivec3& worldPos);
+    uint32_t DataVersionAt(const glm::ivec3& worldPos) const;
+    // Has the mesh of the chunk containing worldPos caught up to (at
+    // least) this dataVersion? True for unloaded chunks.
+    bool MeshCaughtUp(const glm::ivec3& worldPos, uint32_t version) const;
 
     WorldSave m_save; // declared before m_generator: its manifest provides the seed
     TerrainGenerator m_generator; // stateless — shared by all workers
@@ -246,6 +285,21 @@ private:
     size_t m_pendingMeshes = 0; // chunks in radius without an up-to-date mesh
     size_t m_jobsInFlight = 0;  // main-thread counter: ++submit, --drain
     std::chrono::steady_clock::time_point m_lastAutosave;
+
+    // Scheduled block updates, ordered by due tick. Duplicates are fine —
+    // updates re-check the world state and no-op.
+    struct BlockUpdate {
+        uint64_t due;
+        glm::ivec3 pos;
+    };
+    struct LaterFirst {
+        bool operator()(const BlockUpdate& a, const BlockUpdate& b) const {
+            return a.due > b.due;
+        }
+    };
+    uint64_t m_simTick = 0;
+    std::priority_queue<BlockUpdate, std::vector<BlockUpdate>, LaterFirst> m_blockUpdates;
+    std::vector<FallingBlock> m_fallingBlocks; // settled back into blocks in ~World
 
     // CollectVisibleChunks scratch, reused across frames. The visit grid
     // covers the view square (stamped instead of cleared); the queue holds

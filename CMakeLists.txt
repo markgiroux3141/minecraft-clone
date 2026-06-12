@@ -5,6 +5,13 @@ project(Voxcraft VERSION 0.1.0 LANGUAGES C CXX)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 include(ProjectDefaults)
 
+# Drop MSVC's /RTC1 from Debug so hot worker files can opt into /O2 (the
+# two are mutually exclusive). Debug stays unoptimized everywhere else;
+# see the set_source_files_properties block in game/CMakeLists.txt.
+if(MSVC)
+    string(REPLACE "/RTC1" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+endif()
+
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
 
