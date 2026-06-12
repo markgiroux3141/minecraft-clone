@@ -85,6 +85,10 @@ extern BlockId BirchLeaves;
 extern BlockId SpruceLog;
 extern BlockId SpruceLeaves;
 extern BlockId Cactus; // needs sand (or more cactus) underfoot
+// M16: vanilla's buffer under sandy surfaces — carvable but never falls,
+// so caves under deserts/beaches mostly expose sandstone ceilings instead
+// of floating sand (Biome.generateBiomeTerrain's sand->sandstone rule).
+extern BlockId Sandstone;
 
 void RegisterDefaults();
 

@@ -554,6 +554,14 @@ unedited chunks regenerate with new rules; test in a NEW world.
   canopy (single tip, alternating radius-1/2 layers) still within
   kCanopyRadius=2 and top+2 — the cell-enumeration and height guards
   rely on that. Oak unchanged (4-6).
+- Sandstone (post-stage-3 user request): vanilla's anti-floating-sand
+  buffer, ported from Biome.generateBiomeTerrain — sandy columns are 3
+  sand over a per-column nextInt(4)-deep sandstone band (hash salt 9),
+  then stone; the cave carver's replaceable set includes it. Worldgen
+  sand over a carved void still floats until disturbed — that is
+  VANILLA-ACCURATE (BlockFalling only reacts to onBlockAdded /
+  neighborChanged; generation writes raw chunk data, no updates), the
+  band just makes it rare. Tiles 24/25/26 (side/top/bottom).
 - Cactus (stage 3): full opaque cube (tiles 22/23; import bakes the
   texture's transparent 14/16-inset margin opaque over the body color —
   the real inset model is backlog). Desert sand, 0.5% of columns (salts

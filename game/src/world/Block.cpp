@@ -44,6 +44,7 @@ BlockId BirchLeaves = 0;
 BlockId SpruceLog = 0;
 BlockId SpruceLeaves = 0;
 BlockId Cactus = 0;
+BlockId Sandstone = 0;
 
 namespace {
 
@@ -148,6 +149,13 @@ void RegisterDefaults() {
     SpruceLog = registry.Register(LogDef("spruce log", 19, 20));
     SpruceLeaves = registry.Register(LeavesDef("spruce leaves", 21));
     Cactus = registry.Register(LogDef("cactus", 22, 23));
+
+    // M16: sandstone (tiles 24 side / 25 top / 26 bottom) — the vanilla
+    // buffer under sand so cave ceilings in deserts don't hover.
+    BlockDef sandstone = BlockDef::Uniform("sandstone", 24);
+    sandstone.faceTiles[static_cast<size_t>(BlockFace::PosY)] = 25;
+    sandstone.faceTiles[static_cast<size_t>(BlockFace::NegY)] = 26;
+    Sandstone = registry.Register(std::move(sandstone));
 
     GAME_INFO("Registered {} block types", registry.Count());
 }

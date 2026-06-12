@@ -299,6 +299,14 @@ void TerrainGenerator::Generate(Chunk& chunk, const glm::ivec3& chunkCoord) cons
             // Beach band overrides the biome near sea level (deserts are
             // already sand; snowy shores stay sand too — close enough).
             const bool sandy = height <= kBeachTop || biome == Biome::Desert;
+            // Vanilla (Biome.generateBiomeTerrain): when the sand filler
+            // runs out it switches to a nextInt(4)-deep sandstone band, so
+            // caves under sandy surfaces mostly open onto sandstone, not
+            // hovering sand. Falling is update-driven (BlockFalling only
+            // reacts to neighbor changes), so worldgen sand over a carved
+            // void would float exactly like vanilla's — this keeps it rare.
+            const int sandstoneDepth =
+                sandy ? static_cast<int>(Hash(m_seed, origin.x + x, origin.z + z, 9) % 4) : 0;
 
             for (int y = 0; y < Chunk::kSize; ++y) {
                 const int wy = origin.y + y;
@@ -313,6 +321,8 @@ void TerrainGenerator::Generate(Chunk& chunk, const glm::ivec3& chunkCoord) cons
                 if (sandy) {
                     if (wy >= height - 2) {
                         id = blocks::Sand;
+                    } else if (wy >= height - 2 - sandstoneDepth) {
+                        id = blocks::Sandstone;
                     }
                 } else if (wy == height) {
                     // Snowy climate, or an alpine cap on high hill peaks.

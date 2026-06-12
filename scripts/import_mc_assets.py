@@ -120,6 +120,10 @@ def build_atlas(mc: Path, out_path: Path) -> None:
         tinted(load_tile(blocks / "leaves_spruce.png"), (97, 153, 97)),
         flattened(load_tile(blocks / "cactus_side.png")),
         flattened(load_tile(blocks / "cactus_top.png")),
+        # Sandstone: the vanilla buffer band under sand surfaces.
+        load_tile(blocks / "sandstone_normal.png"),
+        load_tile(blocks / "sandstone_top.png"),
+        load_tile(blocks / "sandstone_bottom.png"),
     ]
 
     strip = Image.new("RGBA", (TILE * len(tiles), TILE))

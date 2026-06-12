@@ -212,7 +212,8 @@ struct Carver {
                         // (Its sand-under-water exception can't trigger: the
                         // breach test already rejected any water in the box.)
                         if (id != blocks::Stone && id != blocks::Dirt && id != blocks::Grass &&
-                            id != blocks::SnowyGrass && id != blocks::Sand) {
+                            id != blocks::SnowyGrass && id != blocks::Sand &&
+                            id != blocks::Sandstone) {
                             continue;
                         }
                         chunk.Set(lx, ly, lz, blocks::Air);

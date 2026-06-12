@@ -192,6 +192,8 @@ int main() {
         bool sawGrass = false;
         bool sawSnowOrDesert = false;
         bool snowOnDirt = true;
+        size_t sandColumns = 0;
+        size_t sandstoneColumns = 0;
         for (int scz = -64; scz <= 64; scz += 32) {
             for (int scx = -64; scx <= 64; scx += 32) {
                 std::array<vc::Chunk, vc::kWorldHeightChunks> column;
@@ -211,12 +213,27 @@ int main() {
                     if (id == vc::blocks::SnowyGrass) {
                         snowOnDirt &= columnBlock(8, wy - 1, 8) == vc::blocks::Dirt;
                     }
+                    // Sandy columns: 3 blocks of sand, then a 0..3-block
+                    // sandstone band (vanilla's anti-floating-sand buffer).
+                    if (id == vc::blocks::Sand) {
+                        ++sandColumns;
+                        for (int dy = 3; dy <= 6 && wy - dy > 0; ++dy) {
+                            if (columnBlock(8, wy - dy, 8) == vc::blocks::Sandstone) {
+                                ++sandstoneColumns;
+                                break;
+                            }
+                        }
+                    }
                     break;
                 }
             }
         }
         Check(sawGrass && sawSnowOrDesert, "climate produces multiple biomes");
         Check(snowOnDirt, "snowy grass sits on dirt");
+        // nextInt(4)-deep band: ~3/4 of sandy columns have one. Require
+        // presence without demanding every column (0-depth rolls are legal).
+        Check(sandColumns == 0 || sandstoneColumns > 0,
+              "sandstone band generates under sand surfaces");
     }
 
     // Mesher smoke test: a lone stone block and a lone water block in an

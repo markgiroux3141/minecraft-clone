@@ -234,11 +234,32 @@ def cactus_top(x, y):
     return speckle(CACTUS, x, y, 24, 8)
 
 
+SANDSTONE = (213, 202, 159)
+
+
+def sandstone_side(x, y):
+    # Smooth cap rows top and bottom, horizontal strata between.
+    if y < 2 or y >= 14:
+        return speckle(SANDSTONE, x, y, 25, 5)
+    if hash01(0, y, 25) > 0.6:
+        return speckle((196, 184, 138), x, y, 25, 7)
+    return speckle(SANDSTONE, x, y, 25, 8)
+
+
+def sandstone_top(x, y):
+    return speckle(SANDSTONE, x, y, 26, 6)
+
+
+def sandstone_bottom(x, y):
+    # Coarser, slightly darker underside.
+    return speckle((201, 190, 147), x, y, 27, 10)
+
+
 # Layer index in the texture array == position in this list.
 TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top, leaves, water,
          snow, grass_side_snowed, tall_grass, dandelion, poppy, dead_bush,
          birch_side, birch_top, birch_leaves, spruce_side, spruce_top, spruce_leaves,
-         cactus_side, cactus_top]
+         cactus_side, cactus_top, sandstone_side, sandstone_top, sandstone_bottom]
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:
