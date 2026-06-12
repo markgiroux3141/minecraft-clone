@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <filesystem>
 #include <format>
 #include <random>
 
@@ -65,6 +66,17 @@ DayNight ComputeDayNight(float t) {
     return dn;
 }
 
+// Real Minecraft assets imported by scripts/import_mc_assets.py land in the
+// gitignored assets/mc/ overlay; prefer them so the committed placeholders
+// still work on a clean clone (the imported set is personal-use only).
+std::string PreferMcAsset(const std::string& relative) {
+    const std::string overlay = "mc/" + relative;
+    if (std::filesystem::exists(vox::assets::Resolve(overlay))) {
+        return overlay;
+    }
+    return relative;
+}
+
 vox::ApplicationConfig MakeConfig() {
     vox::ApplicationConfig config;
     config.window.title = "Voxcraft";
@@ -88,7 +100,8 @@ void GameApp::OnInit() {
                 vc::blocks::Sand,  vc::blocks::Log,  vc::blocks::Leaves, vc::blocks::Water};
 
     m_chunkShader = vox::Shader::FromFiles("shaders/chunk.vert", "shaders/chunk.frag");
-    m_blockTextures = vox::Texture2DArray::FromFileStrip("textures/atlas.png", 16);
+    m_blockTextures =
+        vox::Texture2DArray::FromFileStrip(PreferMcAsset("textures/atlas.png"), 16);
 
     m_ui = std::make_unique<vox::UiRenderer>();
     // Grid layout matches scripts/gen_font.py: ASCII 32..127, 16 cols x 6 rows.

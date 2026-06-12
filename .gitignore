@@ -1,6 +1,9 @@
 build/
 out/
 saves/
+# Imported real-Minecraft assets (scripts/import_mc_assets.py) — personal
+# use only, never distributed.
+assets/mc/
 .vs/
 .vscode/
 .idea/
