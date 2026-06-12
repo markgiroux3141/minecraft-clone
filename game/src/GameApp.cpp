@@ -224,6 +224,8 @@ void GameApp::OnInit() {
         m_itemQuad->SetIndexBuffer(std::make_shared<vox::IndexBuffer>(
             quadIndices, static_cast<uint32_t>(std::size(quadIndices))));
     }
+    m_particles = std::make_unique<vc::ParticleSystem>();
+    m_viewModel = std::make_unique<vc::ViewModel>(m_entityCube, m_itemQuad);
 
     m_outlineShader = vox::Shader::FromFiles("shaders/outline.vert", "shaders/outline.frag");
     constexpr float corners[] = {
@@ -360,6 +362,8 @@ void GameApp::OnTick(double dt) {
     if (m_world && (m_state == State::Playing || ContainerOpen())) {
         m_player.Tick(*m_world, dt, m_state == State::Playing);
         m_world->Tick(); // scheduled block updates (falling sand, water flow)
+        m_particles->Tick(*m_world);
+        m_viewModel->Tick(m_inventory.Slot(m_hotbarSlot));
 
         // Vacuum nearby drops: the player AABB grown by vanilla's pickup
         // reach (1.0, 0.5, 1.0); whatever the bag can't hold stays put.
@@ -489,6 +493,8 @@ void GameApp::HandleInput(double frameDt) {
                 m_world->GetBlock(m_target->block.x, m_target->block.y, m_target->block.z);
             if (!vc::BlockRegistry::Get().Def(targetId).unbreakable) {
                 m_world->SetBlock(m_target->block, vc::blocks::Air);
+                m_particles->SpawnBlockDestroy(*m_world, m_target->block, targetId);
+                m_viewModel->TriggerSwing();
             }
             m_breakCooldown = kEditRepeatDelay;
         }
@@ -514,6 +520,15 @@ void GameApp::HandleInput(double frameDt) {
                 m_digProgress = 0.0f;
             }
             if (m_breakCooldown == 0.0) {
+                // Vanilla digging feedback: continuous arm swing + one
+                // hit chip from the dug face per tick.
+                m_viewModel->TriggerSwing();
+                m_chipAccum += frameDt;
+                if (m_chipAccum >= 0.05) {
+                    m_chipAccum = 0.0;
+                    m_particles->SpawnBlockHit(*m_world, m_target->block, m_target->normal,
+                                               targetId);
+                }
                 vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
                 const vc::ItemDef* tool = vc::ItemRegistry::Get().Find(hand.id);
                 const bool canHarvest =
@@ -538,6 +553,7 @@ void GameApp::HandleInput(double frameDt) {
                 }
                 if (m_digProgress >= 1.0f) {
                     m_world->SetBlock(m_target->block, vc::blocks::Air);
+                    m_particles->SpawnBlockDestroy(*m_world, m_target->block, targetId);
                     if (canHarvest) {
                         m_world->SpawnBlockDrop(m_target->block, def.ResolveDrop(targetId), 1);
                     }
@@ -589,6 +605,7 @@ void GameApp::HandleInput(double frameDt) {
             if (!hand.Empty() && vc::IsBlockItem(hand.id) &&
                 !m_world->IsSolid(cell.x, cell.y, cell.z) && !m_player.Intersects(cell)) {
                 m_world->SetBlock(cell, static_cast<vc::BlockId>(hand.id));
+                m_viewModel->TriggerSwing();
                 if (--hand.count <= 0) {
                     hand = {};
                 }
@@ -922,7 +939,21 @@ void GameApp::OnRender(double alpha, double frameDt) {
         }
         m_chunksDrawn = m_drawItems.size();
 
+        // Break particles after the water (vanilla's pass order).
+        m_particles->Render(m_camera, m_state == State::Playing || ContainerOpen() ? alpha : 0.0,
+                            dayNight.sunLight, dayNight.skyTint);
+
         DrawTargetOutline();
+
+        // First-person hand, last: it draws over a cleared depth buffer.
+        const glm::ivec3 eyeCell{static_cast<int>(std::floor(eye.x)),
+                                 static_cast<int>(std::floor(eye.y)),
+                                 static_cast<int>(std::floor(eye.z))};
+        const uint8_t eyeLight = m_world->PackedLightAt(eyeCell);
+        m_viewModel->Render(m_camera, m_state == State::Playing || ContainerOpen() ? alpha : 0.0,
+                            {static_cast<float>(vc::ChunkLight::Sky(eyeLight)) / 15.0f,
+                             static_cast<float>(vc::ChunkLight::Block(eyeLight)) / 15.0f},
+                            dayNight.sunLight, dayNight.skyTint);
     }
 
     DrawUi();

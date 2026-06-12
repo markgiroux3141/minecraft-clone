@@ -67,6 +67,10 @@ void Renderer::Clear() {
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
+void Renderer::ClearDepth() {
+    glClear(GL_DEPTH_BUFFER_BIT);
+}
+
 void Renderer::DrawIndexed(const VertexArray& vertexArray, uint32_t indexCount) {
     vertexArray.Bind();
     const uint32_t count = indexCount ? indexCount : vertexArray.GetIndexBuffer()->Count();

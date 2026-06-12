@@ -1,13 +1,12 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-12. M17 USER-VERIFIED; M18 user-verified in essence
-("really good") with the crack-overlay blend fixed on feedback
-(crumble blend — see M18 section). M19 (Survival III: crafting) CODE
-COMPLETE — builds clean, savetest/gentest pass, startup sanity-checked;
-AWAITING USER VERIFICATION, see the M19 section. Decided with the
-user: tool durability INCLUDED, vanilla pickaxe gating INCLUDED. Read
-alongside `ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md`
-(build commands, conventions).
+Updated: 2026-06-12. M17/M18 user-verified; M19 (crafting) verified
+("works amazingly well"). M20 (game feel: block-break particles +
+first-person view model) CODE COMPLETE — builds clean, startup
+sanity-checked (shaders compile, steve skin loads); AWAITING USER
+VERIFICATION, see the M20 section (it's all visual). Read alongside
+`ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md` (build
+commands, conventions).
 
 IMPORTANT RESOURCE: the user has Minecraft's Java source (MCP 9.40 =
 1.12) at `D:\Minecraft source code` — look up exact game dynamics there
@@ -807,34 +806,78 @@ thrown with Q keeps its bar when picked up; quit/reload preserves
 damage; sticks render as flat sprites when tossed; old M17/M18 world
 loads its inventory intact.
 
-## Next: M20 candidates
+## M20 — Game feel: particles + first-person hand (how it works)
 
-- Game feel (RECOMMENDED next, user has flagged all three gaps):
-  first-person view model — held block/tool + bare arm (Steve skin is
-  in the 1.12 assets), dig swing loop synced to crack progress, click
-  swing, equip dip on slot change, optional view bobbing. Vanilla
-  reference: ItemRenderer.renderItemInFirstPerson (equippedProgress /
-  swingProgress curves, 6-tick swing), EntityRenderer (bobbing).
-  Needs a camera-space render path with a real model matrix (the
-  entity shader only has center/scale/yaw) + a depth trick so the
-  hand doesn't clip walls. Pairs with block-break particles (see
-  backlog).
-- Ores + furnace/smelting (iron tier, coal — makes durability
-  matter).
-User decides the order.
+CODE COMPLETE 2026-06-12, awaiting user verification (this one is all
+visual — the user's eyes are the test).
 
-Other backlog: deeper world (kWorldHeightChunks 4 -> 8, rebase
-topology + cave start heights — discussed 2026-06-12, deferred), audio
-engine (1.12 .ogg hashed store surveyed — see M14 notes), block-break
-particles (user asked 2026-06-12: vanilla gives EVERY block hit chips
-while digging + a 64-chip destroy burst textured from random
-sub-regions of the block's tile — ParticleManager.addBlockHitEffects /
-addBlockDestroyEffects; needs a small particle system in the engine),
-tall-grass wheat seeds (vanilla 1/8, BlockTallGrass.getItemDropped —
-blocked on non-block items, so post-M19, pairs with farming),
-flow-animated water (16x512 strip), lava (cave floors below y10 in
-vanilla), stars, world-list scrolling, settings screen, vanilla's
-14/16 cactus inset + touch damage.
+- Particles (game/src/Particles.h/.cpp, ParticleDigging port):
+  `ParticleSystem` owns a streamed billboard batch (one 2048-quad
+  dynamic VBO, CPU-built corners from the camera basis, particle.vert/
+  .frag, alpha-tested, depth-tested, NO depth writes, drawn after the
+  water pass — vanilla's order). Spawns: destroy burst = 4x4x4 chips
+  filling the broken cell, velocity = normalize(offset-center + rand)
+  * (rand+rand+1)*0.15*0.4 + 0.1y (b/tick x20); hit chip = one per
+  tick while digging, on the dug face 0.1 proud, velocity x0.2 scale
+  x0.6. Physics per tick: gravity 0.04 b/t^2, drag x0.98, ground
+  friction x0.7, life 4/(rand*0.9+0.1) ticks, axis-separated collision
+  vs IsSolid. Texture: random QUARTER of the block's side tile
+  (vanilla jitter), tinted x0.6 gray in the shader, lit by
+  spawn-sampled cell light. Ticked alongside entities; spawned from
+  GameApp's dig/break paths (walk dig chips + burst, fly instant-break
+  burst). World-side crushes (water/sand popping plants) do NOT emit
+  particles — player edits only, fine for now.
+- View model (game/src/ViewModel.h/.cpp + viewmodel.vert/.frag): drawn
+  LAST in the world pass over `Renderer::ClearDepth()` (new engine
+  call) so it never clips into walls; u_model is a full view-space
+  matrix — vanilla's first-person GL chains port verbatim. Held block
+  = the shared entity mini-cube (block.json display: rotY 45, scale
+  0.4); held item = the shared sprite quad (item/generated display:
+  T(1.13,3.2,1.13)/16, rot[0,-90,25], scale 0.68); empty hand = a
+  Steve right-arm box mesh (ModelBiped: 4x12x4 px at (-3,-2,-2), rot
+  point (-5,2,0), y-down model space — the chain's Rx(200) flips it)
+  textured from textures/entity/steve.png (NEW import COPIES entry; no
+  skin imported -> empty hand draws nothing, placeholder-safe).
+  Animation state ticks at 20 TPS, render-interpolated: swing = 6
+  ticks (vanilla), TriggerSwing() queues a restart so held digging
+  loops continuously; also fires on fly-break and successful place.
+  Equip dip: progress slides +-0.4/tick toward (held == displayed ?
+  1 : 0), the displayed item swaps at the bottom of the dip. Lighting:
+  eye-cell light + a fixed view-space key light so the cube reads 3D.
+- Render order recap (OnRender): sky -> celestial -> opaque terrain ->
+  entity cubes/sprites + crack -> water -> PARTICLES -> outline ->
+  VIEW MODEL (depth cleared) -> UI.
+- Known M20 limits: no view bobbing, item sprites are flat (vanilla
+  extrudes them to ~1px-thick 3D), no swing on Q-throw or attack-miss
+  swings (no left-click-in-air swing), arm only for the right hand, no
+  particle emission from world-side plant crushes.
+
+What the user should test (visual): bare hand visible bottom-right
+(Steve sleeve); hold dirt/stone -> mini block in hand; hold a
+tool/stick -> flat sprite held diagonally; 1..9 switching dips the
+hand down and back up with the new item; digging swings the arm
+continuously AND sprays chips from the face being dug; the break
+pops a burst of chips that bounce and settle on the ground; chips
+match the block's texture (grass chips greenish from the side tile);
+fly-mode instant breaks also burst; particles fade out after a couple
+seconds; placing swings once; night: hand and chips dim with the
+world. Esc/pause freezes the swing mid-pose; resume continues.
+
+## Next: M21 candidates
+
+Ores + furnace/smelting (iron tier, coal — makes durability matter)
+is the front-runner; audio engine (dig/place/step sounds would
+complete the mining feel), deeper world, lava. User decides.
+
+Other backlog: ores + furnace/smelting (iron tier; makes durability
+matter), deeper world (kWorldHeightChunks 4 -> 8, rebase topology +
+cave start heights — discussed 2026-06-12, deferred), audio engine
+(1.12 .ogg hashed store surveyed — see M14 notes), tall-grass wheat
+seeds (vanilla 1/8, BlockTallGrass.getItemDropped — pairs with
+farming), flow-animated water (16x512 strip), lava (cave floors below
+y10 in vanilla), stars, world-list scrolling, settings screen,
+vanilla's 14/16 cactus inset + touch damage, 3D-extruded item sprites
+in hand + view bobbing (M20 polish).
 
 ## How to verify (UPDATED working agreement)
 

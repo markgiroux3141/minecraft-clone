@@ -141,17 +141,20 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   gating: stone family digs /100 and drops nothing bare-handed) with
   durability (59/131 uses, vanilla bar, persisted per stack), and flat
   sprite rendering for non-block item drops.
-- **Backlog**: first-person view model (held block/tool + bare arm,
-  dig swing + equip animations — ItemRenderer.renderItemInFirstPerson;
-  pairs with break particles as a game-feel milestone), deeper world
-  (kWorldHeightChunks 4 → 8), audio engine,
-  block-break particles (vanilla has them for EVERY block, not just
-  glass: hit chips at the dig face + a 64-chip destroy burst textured
-  from the block — ParticleManager.addBlockHit/DestroyEffects; needs a
-  small particle system), tall-grass wheat seeds (1/8 chance,
-  BlockTallGrass — needs non-block items, so after M19's item
-  registry, ideally with farming), animated water, lava, stars,
-  world-list scrolling, settings screen, vanilla's 14/16 cactus inset.
+- **M20 — Game feel** ✅: block-break particles (ParticleDigging port:
+  hit chips at the dug face each tick + the 4x4x4 destroy burst,
+  quarter-tile jittered UVs, vanilla physics, one streamed billboard
+  batch) and the first-person view model (held block as a mini cube /
+  item as a flat sprite / bare Steve arm when empty-handed, vanilla
+  ItemRenderer transform chains: 6-tick swing looped while digging,
+  +-0.4-per-tick equip dip on slot change, drawn over a cleared depth
+  buffer).
+- **Backlog**: deeper world (kWorldHeightChunks 4 → 8), audio engine,
+  ores + furnace/smelting (iron tier), tall-grass wheat seeds (1/8
+  chance, BlockTallGrass — pairs with farming), animated water, lava,
+  stars, world-list scrolling, settings screen, vanilla's 14/16 cactus
+  inset, 3D-extruded item sprites in hand (flat quad for now), view
+  bobbing.
 - **Long-term**: native BuildCraft + IndustrialCraft systems (pipes, EU
   power network, machines) — survey, source breadcrumbs, and phased plan
   in `docs/mods/MOD_INTEGRATION.md`.

@@ -41,6 +41,8 @@ COPIES = [
     # Celestial sheets: opaque with black backgrounds, drawn additively.
     ("textures/environment/sun.png", "textures/environment/sun.png"),
     ("textures/environment/moon_phases.png", "textures/environment/moon_phases.png"),
+    # Steve skin (M20): the first-person bare arm samples it.
+    ("textures/entity/steve.png", "textures/entity/steve.png"),
 ]
 
 

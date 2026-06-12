@@ -15,7 +15,9 @@
 #include "vox/renderer/VertexArray.h"
 
 #include "Inventory.h"
+#include "Particles.h"
 #include "Player.h"
+#include "ViewModel.h"
 #include "ui/Widgets.h"
 #include "world/World.h"
 
@@ -85,6 +87,11 @@ private:
     std::shared_ptr<vox::Shader> m_entityShader;
     std::shared_ptr<vox::VertexArray> m_entityCube;
     std::shared_ptr<vox::VertexArray> m_itemQuad;
+
+    // M20 game feel: block-break particles + the first-person hand.
+    std::unique_ptr<vc::ParticleSystem> m_particles;
+    std::unique_ptr<vc::ViewModel> m_viewModel;
+    double m_chipAccum = 0.0; // dig hit-chip spawn pacing (one per tick)
 
     // Frustum-surviving chunks for the frame's multi-draws (reused scratch):
     // opaque front-to-back, then water back-to-front in the blended pass.

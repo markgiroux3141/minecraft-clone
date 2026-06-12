@@ -22,6 +22,9 @@ public:
 
     static void SetClearColor(float r, float g, float b, float a = 1.0f);
     static void Clear();
+    // Depth only — first-person view-model pass (the hand draws over the
+    // world and must never clip into walls).
+    static void ClearDepth();
     static void SetViewport(uint32_t width, uint32_t height);
 
     // Pass-level state for blended geometry (water). Baseline state is

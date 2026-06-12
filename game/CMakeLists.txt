@@ -8,8 +8,12 @@ add_executable(game
     src/Item.cpp
     src/Item.h
     src/Main.cpp
+    src/Particles.cpp
+    src/Particles.h
     src/Player.cpp
     src/Player.h
+    src/ViewModel.cpp
+    src/ViewModel.h
     src/ui/Hud.cpp
     src/ui/Hud.h
     src/ui/InventoryScreen.cpp
