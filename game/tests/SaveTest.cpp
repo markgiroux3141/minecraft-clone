@@ -88,6 +88,8 @@ int main() {
         Check(!vc::WorldSave::Decode({0, 1, 2, 3}, garbage), "corrupt blob rejected");
 
         Check(!save.GetPlayerState().has_value(), "pre-player-state manifest reads as absent");
+        Check(!save.GetWorldTime().has_value(), "pre-time manifest reads as absent");
+        save.SetWorldTime(13337);
         save.SetPlayerState({{1234.5f, 70.25f, -8.125f}, 123.5f, -45.0f, true});
     }
     {
@@ -97,6 +99,7 @@ int main() {
         Check(player && player->position == glm::vec3(1234.5f, 70.25f, -8.125f) &&
                   player->yaw == 123.5f && player->pitch == -45.0f && player->fly,
               "player state round-trips exactly");
+        Check(save.GetWorldTime() == 13337, "world time round-trips");
         Check(save.Seed() == 42, "seed survives the manifest rewrite");
         Check(save.SavedChunkCount() == 4, "chunks survive the manifest rewrite");
     }

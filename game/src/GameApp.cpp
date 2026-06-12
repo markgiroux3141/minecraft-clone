@@ -5,6 +5,7 @@
 #include <format>
 #include <random>
 
+#include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
 #include "vox/core/Assets.h"
@@ -28,6 +29,41 @@ constexpr double kEditRepeatDelay = 0.25; // held-button repeat, seconds
 constexpr glm::vec3 kSpawnPos{8.5f, 48.0f, 8.5f};
 constexpr float kSpawnYaw = 45.0f;
 constexpr float kSpawnPitch = -15.0f;
+
+// Day/night cycle: Minecraft's pacing (20 real minutes per day at 20 TPS).
+// New worlds start shortly after sunrise; holding T fast-forwards.
+constexpr double kDayTicks = 24000.0;
+constexpr int64_t kNewWorldTime = 1000;
+constexpr double kTimeFastForward = 200.0; // extra ticks per tick while T held
+
+struct DayNight {
+    glm::vec3 sunDir;
+    float sunLight; // sky-light scale, moonlight floor at night
+    glm::vec3 zenith;
+    glm::vec3 horizon;
+    glm::vec3 sunColor;
+};
+
+// t in [0,1): 0 sunrise, 0.25 noon, 0.5 sunset, 0.75 midnight.
+DayNight ComputeDayNight(float t) {
+    const float angle = t * glm::two_pi<float>();
+    const float elevation = std::sin(angle); // -1..1
+    DayNight dn;
+    // East-west arc with a slight tilt so noon shadows aren't dead vertical.
+    dn.sunDir = glm::normalize(glm::vec3(std::cos(angle), elevation, 0.25f));
+    const float day = glm::smoothstep(-0.08f, 0.25f, elevation);
+    dn.sunLight = 0.12f + 0.88f * day;
+    dn.zenith = glm::mix(glm::vec3(0.015f, 0.025f, 0.07f), glm::vec3(0.22f, 0.51f, 0.92f), day);
+    dn.horizon = glm::mix(glm::vec3(0.04f, 0.06f, 0.12f), glm::vec3(0.63f, 0.78f, 0.94f), day);
+    // Warm band when the sun crosses the horizon, fading with elevation.
+    const float sunset = std::max(0.0f, 1.0f - std::abs(elevation) * 5.0f);
+    dn.horizon = glm::mix(dn.horizon, glm::vec3(0.93f, 0.49f, 0.26f), sunset * 0.65f);
+    dn.sunColor = glm::mix(glm::vec3(1.0f, 0.45f, 0.20f), glm::vec3(1.0f, 0.95f, 0.85f), day);
+    if (elevation < -0.15f) {
+        dn.sunColor = glm::vec3(0.0f); // fully set — no disc (no moon yet)
+    }
+    return dn;
+}
 
 vox::ApplicationConfig MakeConfig() {
     vox::ApplicationConfig config;
@@ -57,6 +93,17 @@ void GameApp::OnInit() {
     m_ui = std::make_unique<vox::UiRenderer>();
     // Grid layout matches scripts/gen_font.py: ASCII 32..127, 16 cols x 6 rows.
     m_ui->SetFont(vox::Texture2D::FromFile("fonts/ascii.png"), 16, 6);
+
+    m_skyShader = vox::Shader::FromFiles("shaders/sky.vert", "shaders/sky.frag");
+    constexpr float skyVerts[] = {-1, -1, 1, -1, 1, 1, -1, 1};
+    constexpr uint32_t skyIndices[] = {0, 1, 2, 2, 3, 0};
+    auto skyBuffer = std::make_shared<vox::VertexBuffer>(
+        skyVerts, static_cast<uint32_t>(sizeof(skyVerts)));
+    skyBuffer->SetLayout({{vox::ShaderDataType::Float2, "a_position"}});
+    m_skyQuad = std::make_shared<vox::VertexArray>();
+    m_skyQuad->AddVertexBuffer(std::move(skyBuffer));
+    m_skyQuad->SetIndexBuffer(std::make_shared<vox::IndexBuffer>(
+        skyIndices, static_cast<uint32_t>(std::size(skyIndices))));
 
     m_outlineShader = vox::Shader::FromFiles("shaders/outline.vert", "shaders/outline.frag");
     constexpr float corners[] = {
@@ -106,6 +153,8 @@ void GameApp::EnterWorld(const std::string& name, int defaultSeed) {
         m_player.SetLook(kSpawnYaw, kSpawnPitch);
         m_player.SetMode(Player::Mode::Walk);
     }
+    m_worldTime =
+        static_cast<double>(m_world->SaveStore().GetWorldTime().value_or(kNewWorldTime));
 
     m_state = State::Playing;
     m_target.reset();
@@ -140,6 +189,7 @@ void GameApp::PersistPlayerState() {
     if (!m_world) {
         return;
     }
+    m_world->SaveStore().SetWorldTime(static_cast<int64_t>(m_worldTime));
     m_world->SaveStore().SetPlayerState({m_player.Position(), m_player.Yaw(), m_player.Pitch(),
                                          m_player.GetMode() == Player::Mode::Fly});
 }
@@ -147,6 +197,10 @@ void GameApp::PersistPlayerState() {
 void GameApp::OnTick(double dt) {
     if (m_world && m_state == State::Playing) {
         m_player.Tick(*m_world, dt);
+        m_worldTime += 1.0;
+        if (vox::Input::IsKeyDown(vox::Key::T)) {
+            m_worldTime += kTimeFastForward; // debug: watch the cycle quickly
+        }
     }
     ++m_tickCount;
     ++m_totalTicks;
@@ -216,6 +270,16 @@ void GameApp::HandleInput(double frameDt) {
     m_placeWasDown = placeDown;
 }
 
+bool GameApp::EyeInWater() const {
+    if (!m_world) {
+        return false;
+    }
+    const glm::vec3 eye = m_camera.Position();
+    return m_world->GetBlock(static_cast<int>(std::floor(eye.x)),
+                             static_cast<int>(std::floor(eye.y)),
+                             static_cast<int>(std::floor(eye.z))) == vc::blocks::Water;
+}
+
 void GameApp::DrawTargetOutline() {
     if (!m_target) {
         return;
@@ -240,15 +304,9 @@ void GameApp::DrawUi() {
     const glm::vec2 mouse = vox::Input::MousePosition();
 
     m_ui->Begin(GetWindow().Width(), GetWindow().Height(), m_blockTextures.get());
-    if (m_world) {
-        // Underwater tint: the eye is inside a water cell. (Real fog can
-        // come with the day/night shader work.)
-        const glm::vec3 eye = m_camera.Position();
-        if (m_world->GetBlock(static_cast<int>(std::floor(eye.x)),
-                              static_cast<int>(std::floor(eye.y)),
-                              static_cast<int>(std::floor(eye.z))) == vc::blocks::Water) {
-            m_ui->DrawRect({0.0f, 0.0f}, screen, {0.09f, 0.27f, 0.55f, 0.45f});
-        }
+    if (EyeInWater()) {
+        // Underwater tint on top of the shader fog.
+        m_ui->DrawRect({0.0f, 0.0f}, screen, {0.09f, 0.27f, 0.55f, 0.35f});
     }
     if (m_state == State::Title) {
         const auto action = vc::TitleScreen::Draw(*m_ui, screen, mouse, clicked, m_worlds);
@@ -299,12 +357,43 @@ void GameApp::OnRender(double alpha, double frameDt) {
     vox::Renderer::Clear();
 
     if (m_world) {
+        const double dayFraction =
+            std::fmod((m_worldTime + (m_state == State::Playing ? alpha : 0.0)) / kDayTicks, 1.0);
+        const DayNight dayNight = ComputeDayNight(static_cast<float>(dayFraction));
+        const glm::mat4 viewProj = m_camera.ViewProjection();
+        const glm::vec3 eye = m_camera.Position();
+
+        // Sky dome first: depth writes off, the terrain covers it after.
+        m_skyShader->Bind();
+        m_skyShader->SetMat4("u_invViewProj", glm::inverse(viewProj));
+        m_skyShader->SetFloat3("u_eyePos", eye);
+        m_skyShader->SetFloat3("u_zenithColor", dayNight.zenith);
+        m_skyShader->SetFloat3("u_horizonColor", dayNight.horizon);
+        m_skyShader->SetFloat3("u_sunDir", dayNight.sunDir);
+        m_skyShader->SetFloat3("u_sunColor", dayNight.sunColor);
+        vox::Renderer::SetDepthWrite(false);
+        vox::Renderer::DrawIndexed(*m_skyQuad);
+        vox::Renderer::SetDepthWrite(true);
+
         m_chunkShader->Bind();
-        m_chunkShader->SetMat4("u_viewProj", m_camera.ViewProjection());
+        m_chunkShader->SetMat4("u_viewProj", viewProj);
         m_chunkShader->SetInt("u_atlas", 0);
+        m_chunkShader->SetFloat3("u_sunDir", dayNight.sunDir);
+        m_chunkShader->SetFloat("u_sunLight", dayNight.sunLight);
+        m_chunkShader->SetFloat3("u_eyePos", eye);
+        if (EyeInWater()) {
+            // Short, deep-blue fog; dims with the sky at night.
+            m_chunkShader->SetFloat3("u_fogColor",
+                                     glm::vec3(0.05f, 0.18f, 0.40f) * dayNight.sunLight);
+            m_chunkShader->SetFloat2("u_fogRange", {2.0f, 28.0f});
+        } else {
+            // Fades into the horizon just inside the LOD shell's edge.
+            m_chunkShader->SetFloat3("u_fogColor", dayNight.horizon);
+            m_chunkShader->SetFloat2("u_fogRange", {320.0f, 500.0f});
+        }
         m_blockTextures->Bind(0);
 
-        const auto frustum = vox::Frustum::FromViewProjection(m_camera.ViewProjection());
+        const auto frustum = vox::Frustum::FromViewProjection(viewProj);
         m_world->CollectVisibleChunks(m_camera.Position(), frustum, m_occlusionCulling,
                                       m_drawItems, m_drawItemsTransparent);
         m_world->Meshes().Draw(m_drawItems);
@@ -338,10 +427,15 @@ void GameApp::OnRender(double alpha, double frameDt) {
                     m_trianglesLoaded += indexCount / 3;
                 });
             const auto pos = m_camera.Position();
+            // In-world clock: t=0 is sunrise at 06:00.
+            const int clockMinutes = static_cast<int>(
+                std::fmod(m_worldTime / kDayTicks * 24.0 + 6.0, 24.0) * 60.0);
             GetWindow().SetTitle(std::format(
-                "Voxcraft | {} fps | {} tps | ({:.0f}, {:.0f}, {:.0f}) | {} | hand: {} | chunks: "
+                "Voxcraft | {} fps | {} tps | ({:.0f}, {:.0f}, {:.0f}) | {:02}:{:02} | {} | "
+                "hand: {} | chunks: "
                 "{} loaded, {}/{} drawn, {} pending | {} jobs | {:.2f}M tris | pool {}/{} MB",
-                m_frameCount, m_tickCount, pos.x, pos.y, pos.z,
+                m_frameCount, m_tickCount, pos.x, pos.y, pos.z, clockMinutes / 60,
+                clockMinutes % 60,
                 m_player.GetMode() == Player::Mode::Fly ? "fly" : "walk",
                 vc::BlockRegistry::Get().Def(m_hotbar[m_hotbarSlot]).name,
                 m_world->LoadedChunkCount(), m_chunksDrawn, m_chunksWithMesh,

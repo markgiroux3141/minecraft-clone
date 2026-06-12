@@ -26,6 +26,7 @@ public:
 
     void SetInt(std::string_view name, int value);
     void SetFloat(std::string_view name, float value);
+    void SetFloat2(std::string_view name, const glm::vec2& value);
     void SetFloat3(std::string_view name, const glm::vec3& value);
     void SetFloat4(std::string_view name, const glm::vec4& value);
     void SetMat4(std::string_view name, const glm::mat4& value);

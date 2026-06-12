@@ -20,6 +20,7 @@ layout(std430, binding = 0) readonly buffer PerDraw {
 
 out vec3 v_normal;
 out vec3 v_uvw;
+out vec3 v_worldPos;
 out float v_ao;
 out float v_sky;
 out float v_block;
@@ -30,6 +31,6 @@ void main() {
     v_ao = a_ao;
     v_sky = a_sky;
     v_block = a_block;
-    gl_Position =
-        u_viewProj * vec4(a_position * u_perDraw[gl_DrawID].w + u_perDraw[gl_DrawID].xyz, 1.0);
+    v_worldPos = a_position * u_perDraw[gl_DrawID].w + u_perDraw[gl_DrawID].xyz;
+    gl_Position = u_viewProj * vec4(v_worldPos, 1.0);
 }

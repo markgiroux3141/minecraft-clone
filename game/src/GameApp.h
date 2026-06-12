@@ -42,6 +42,7 @@ private:
     void ExitToTitle(); // persists player state, drops the world
     void PersistPlayerState();
     void HandleInput(double frameDt);
+    bool EyeInWater() const;
     void DrawTargetOutline();
     void DrawUi(); // HUD + menus; may change state (menu clicks)
 
@@ -56,6 +57,11 @@ private:
     std::shared_ptr<vox::Shader> m_outlineShader;
     std::shared_ptr<vox::VertexArray> m_outlineCube;
     std::optional<vc::World::RaycastHit> m_target;
+
+    // Sky dome (fullscreen gradient + sun disc) and the day/night clock.
+    std::shared_ptr<vox::Shader> m_skyShader;
+    std::shared_ptr<vox::VertexArray> m_skyQuad;
+    double m_worldTime = 0.0; // ticks; one day/night cycle per kDayTicks
 
     // Frustum-surviving chunks for the frame's multi-draws (reused scratch):
     // opaque front-to-back, then water back-to-front in the blended pass.

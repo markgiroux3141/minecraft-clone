@@ -1,14 +1,14 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-11, end of M10 (user-verified in-game: HUD, pause menu,
-world select, position persistence all working). Agreed milestone
-sequence: M10 UI/menus ✅ → M11 gameplay depth → M12 perf polish. Read
-alongside `ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md`
-(build commands, conventions).
+Updated: 2026-06-12, end of M11 (user-verified in-game: trees, water +
+swimming, day/night cycle). Agreed milestone sequence: M10 UI/menus ✅ →
+M11 gameplay depth ✅ → M12 perf polish (next). Read alongside
+`ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md` (build
+commands, conventions).
 
 ## Where the project stands
 
-M0–M10 are done and verified:
+M0–M11 are done and verified:
 - Engine (`engine/src/vox/`, namespace `vox`): fixed-timestep app loop
   (20 TPS + interpolated render), GLFW window/input (incl. cursor capture),
   GL 4.6 renderer facade with DSA abstractions (Shader, Buffer/VertexArray,
@@ -31,8 +31,10 @@ M0–M10 are done and verified:
 Starts on the title screen (cursor free): click a world / New World /
 Quit. In game the cursor is captured: WASD move, mouse look, Space jump
 (walk) or rise (fly), LeftShift sink (fly), LeftControl sprint/boost,
-F toggles walk/fly, O toggles occlusion culling (debug), LMB break,
-RMB place, 1/2/3/4 hotbar (stone/dirt/grass/glowstone). Esc pauses
+F toggles walk/fly, O toggles occlusion culling (debug), T fast-forwards
+world time (debug), LMB break, RMB place, 1..8 hotbar (stone/dirt/grass/
+glowstone/sand/log/leaves/water). In water: W swims toward the look
+direction, Space swims up (breach kick at the surface). Esc pauses
 (Resume / Save & Quit to Title) — quitting the app is the title screen's
 Quit button or the window X. Default spawn (8.5, 48, 8.5); a world with
 saved player state restores position/look/mode instead.
@@ -297,17 +299,59 @@ Stage 3 — LOD shell:
   pre-M10 save = default spawn. savetest covers the round-trip and that
   seed/chunks survive the manifest rewrite.
 
-## Next: M11 — gameplay depth (then M12 perf polish)
+## M11 gameplay depth (how it works)
 
-Agreed scope, staging TBD at session start: trees/structures (terrain
-gen decoration pass — needs cross-chunk placement), water + a
-transparent mesh pass (second pool stream or sorted pass; mesher
-currently skips non-opaque), more block types (sand, wood, leaves,
-water; texture layers via gen_textures.py), day/night cycle (sun
-direction + sky gradient; skylight already separate from block light in
-the shader, so tinting/scaling the sky term is the hook). M12 after:
-vertex compression (48 B -> ~12 B; halves the ~96 MB pool and upload
-bursts) + per-frame GPU upload budget.
+- Blocks: sand/log/leaves/water appended after the M10 set — BlockIds are
+  stored in save blobs, so registrations may only APPEND, and texture
+  layer order must match scripts/gen_textures.py (atlas.png is RGBA now;
+  water's alpha is 168). BlockDef grew a `liquid` flag. Leaves are
+  opaque for now (cutout deferred).
+- Terrain: beach band (sand surface) where height <= kSeaLevel+2; water
+  fills air up to kSeaLevel (14, in TerrainGen.h). Trees: one candidate
+  per 8x8-column cell (seeded hash gate at 45% + jittered position),
+  classic oak shape, grass-only ground. Chunks enumerate all cells whose
+  canopy (radius 2) could reach them and visit cells in a stable order,
+  so every chunk independently regenerates identical trees; decoration
+  only writes into air (plus dirt under the trunk). `gentest.exe` guards
+  determinism, trunk contiguity across seams, and leaf anchoring — run
+  it after touching TerrainGen.
+- Water rendering: the mesher routes liquid faces into
+  ChunkMesh::transparentVertices (mask key bit 57); liquid faces show
+  only against non-opaque non-liquid neighbors. Chunks and LOD columns
+  carry a second MeshPool handle (meshT); CollectVisibleChunks returns a
+  second draw list sorted back-to-front by chunk center, drawn after
+  opaque with blend on, depth write off, cull off (surface visible from
+  below). chunk.frag passes texture alpha through. LOD downsample lets
+  water win only all-liquid cells (solid-superset seam rule survives
+  shorelines).
+- Swimming (Player::TickWalk): in water, W follows the full look
+  direction (SwimWishDir), Space swims straight up with a stronger
+  breach kick when the head is out (climbs 1-block shores), gentle sink
+  otherwise, 55% horizontal speed. Eye-in-water draws a blue UI tint on
+  top of short blue shader fog.
+- Day/night: GameApp::m_worldTime (ticks; 24000 = 20 min/day), advances
+  only while Playing, persisted as an optional `time` line in level.dat
+  (manifest reader is a tag loop now — player/time lines in any order).
+  ComputeDayNight (GameApp.cpp) maps t (0 = sunrise 06:00) to sun
+  direction, skylight scale (0.12 moonlight floor), and sky colors;
+  sky.vert/.frag draw a fullscreen gradient dome + sun disc before the
+  terrain (depth write off); chunk.frag takes u_sunDir/u_sunLight and
+  distance fog (320..500 outside, 2..28 deep blue underwater). Title
+  bar shows the in-world clock.
+- Deferred for a future block-update milestone: water flow + falling
+  sand (need per-block metadata + scheduled ticks), water-attenuated
+  skylight (sea floor reads bright), lowered water surface, cutout
+  leaves, moon/stars.
+
+## Next: M12 — perf polish (last of the agreed sequence)
+
+Vertex compression: ChunkVertex is 48 B of floats but every field is
+small-integer (chunk-local positions/UVs 0..16, normal is one of 6, AO
+0..3, light 0..15, layer < 64k) — packs into two uint32s (~8 B, 6x
+smaller pool and uploads). Needs integer vertex attributes through
+VertexArray/MeshPool layout and a bit-decoding chunk.vert. Then a
+per-frame GPU upload budget (cap bytes/frame in DrainCompletedJobs,
+carry the rest) to smooth streaming bursts.
 
 ## How to verify (UPDATED working agreement)
 

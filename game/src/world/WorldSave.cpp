@@ -103,13 +103,24 @@ void WorldSave::ReadManifest(int defaultSeed) {
             GAME_ERROR("Save: malformed {}; using seed {}", path.string(), defaultSeed);
             return;
         }
-        PlayerState player;
-        int fly = 0;
-        if (in >> tag >> player.position.x >> player.position.y >> player.position.z >>
-                player.yaw >> player.pitch >> fly &&
-            tag == "player") {
-            player.fly = fly != 0;
-            m_player = player;
+        // Optional tagged lines, any order; unknown tags end parsing.
+        while (in >> tag) {
+            if (tag == "player") {
+                PlayerState player;
+                int fly = 0;
+                if (in >> player.position.x >> player.position.y >> player.position.z >>
+                    player.yaw >> player.pitch >> fly) {
+                    player.fly = fly != 0;
+                    m_player = player;
+                }
+            } else if (tag == "time") {
+                int64_t ticks = 0;
+                if (in >> ticks) {
+                    m_worldTime = ticks;
+                }
+            } else {
+                break;
+            }
         }
         return;
     }
@@ -119,6 +130,9 @@ void WorldSave::ReadManifest(int defaultSeed) {
 void WorldSave::WriteManifest() const {
     std::ofstream out{m_dir / "level.dat"};
     out << "voxcraft-save " << kManifestVersion << "\nseed " << m_seed << '\n';
+    if (m_worldTime) {
+        out << "time " << *m_worldTime << '\n';
+    }
     if (m_player) {
         out << std::setprecision(9) << "player " << m_player->position.x << ' '
             << m_player->position.y << ' ' << m_player->position.z << ' ' << m_player->yaw << ' '
@@ -128,6 +142,11 @@ void WorldSave::WriteManifest() const {
 
 void WorldSave::SetPlayerState(const PlayerState& state) {
     m_player = state;
+    WriteManifest();
+}
+
+void WorldSave::SetWorldTime(int64_t ticks) {
+    m_worldTime = ticks;
     WriteManifest();
 }
 

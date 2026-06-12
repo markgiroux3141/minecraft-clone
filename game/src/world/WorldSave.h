@@ -57,6 +57,11 @@ public:
     // Rewrites the manifest immediately (it's a quit-path write, not per-frame).
     void SetPlayerState(const PlayerState& state);
 
+    // World time in ticks (day/night cycle), also in the manifest; absent
+    // in saves that predate it.
+    const std::optional<int64_t>& GetWorldTime() const { return m_worldTime; }
+    void SetWorldTime(int64_t ticks);
+
     // Null when the chunk was never saved. Invalidated by the next Put.
     const std::vector<uint8_t>* FindBlob(const glm::ivec3& chunkCoord) const;
 
@@ -99,6 +104,7 @@ private:
     std::filesystem::path m_dir;
     int m_seed = 0;
     std::optional<PlayerState> m_player;
+    std::optional<int64_t> m_worldTime;
     std::unordered_map<glm::ivec2, RegionChunks, IVec2Hash> m_regions;
     std::unordered_set<glm::ivec2, IVec2Hash> m_dirtyRegions;
     size_t m_count = 0;

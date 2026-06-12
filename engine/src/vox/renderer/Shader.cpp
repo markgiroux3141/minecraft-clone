@@ -103,6 +103,10 @@ void Shader::SetFloat(std::string_view name, float value) {
     glProgramUniform1f(m_handle, UniformLocation(name), value);
 }
 
+void Shader::SetFloat2(std::string_view name, const glm::vec2& value) {
+    glProgramUniform2fv(m_handle, UniformLocation(name), 1, glm::value_ptr(value));
+}
+
 void Shader::SetFloat3(std::string_view name, const glm::vec3& value) {
     glProgramUniform3fv(m_handle, UniformLocation(name), 1, glm::value_ptr(value));
 }

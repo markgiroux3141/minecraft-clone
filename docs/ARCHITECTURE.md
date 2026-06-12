@@ -77,11 +77,13 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   hotbar HUD, pause menu with a Title/Playing/Paused state machine, title
   screen with world select / new-world creation (random seed), player
   position/look/mode persisted in the save manifest.
-- **M11 — Gameplay depth** (next): trees/structures, water + transparent
-  mesh pass, more block types, day/night cycle (sun direction + sky
-  gradient).
-- **M12 — Perf polish**: vertex compression (ChunkVertex 48 B -> ~12 B),
-  per-frame GPU upload budget.
+- **M11 — Gameplay depth** ✅: sand/log/leaves/water blocks, beach band,
+  deterministic cell-hashed trees (seam-safe, gentest-guarded), water to
+  sea level with a second blended mesh stream (chunk + LOD), look-
+  direction swimming, day/night cycle (persisted world time, sky-dome
+  gradient + sun disc, time-driven sun light, distance + underwater fog).
+- **M12 — Perf polish** (next): vertex compression (ChunkVertex 48 B ->
+  ~8 B packed ints), per-frame GPU upload budget.
 
 Each milestone lands as a vertical slice that runs; no big-bang integration.
 
