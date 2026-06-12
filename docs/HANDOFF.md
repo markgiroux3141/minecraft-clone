@@ -675,11 +675,14 @@ on break, inventory outside-click discard).
   Pause/inventory-open also reset (no frozen cracks).
 - Crack overlay: destroy_stage_0..9 live at atlas layers 29..38
   (`blocks::kFirstCrackTile`; BOTH texture scripts grew them + tile 28
-  cobble — import thresholds the translucent gray wash to a hard
-  cutout at alpha>=140 because we alpha-test instead of vanilla's
-  multiplicative blend). Stage = int(progress*10)-1; drawn as an
-  inflated (1.004) entity cube over the dig cell, lit from the hit
-  face; backfaces hide behind the block's own opaque mesh.
+  cobble — import thresholds alpha to clean 0/255, replicating
+  vanilla's alpha test). Stage = int(progress*10)-1; drawn as an
+  inflated (1.004) entity cube over the dig cell with vanilla's
+  CRUMBLE blend (`BlendMode::Crumble`, 2*src*dst — the textures are
+  dual-shade: dark 61-gray pixels darken the block, light 155-gray
+  ones highlight) and u_unlit=1 (the framebuffer is already lit),
+  depth writes off; backfaces hide behind the block's opaque mesh.
+  First cut drew the texels as opaque lit gray — user caught it.
 - block_entity shaders REWRITTEN for shared use: vert is now
   center-based — u_center/u_scale/u_yaw (spin around Y) replace
   u_origin; frag alpha-tests (discard < 0.5) so leaf/plant item minis
