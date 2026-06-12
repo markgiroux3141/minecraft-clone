@@ -117,8 +117,11 @@ void Player::TickWalk(const vc::World& world, float dt) {
     }
 
     const auto waterAt = [&](float wx, float wy, float wz) {
-        return world.GetBlock(static_cast<int>(std::floor(wx)), static_cast<int>(std::floor(wy)),
-                              static_cast<int>(std::floor(wz))) == vc::blocks::Water;
+        return vc::BlockRegistry::Get()
+            .Def(world.GetBlock(static_cast<int>(std::floor(wx)),
+                                static_cast<int>(std::floor(wy)),
+                                static_cast<int>(std::floor(wz))))
+            .liquid;
     };
     const bool inWater = waterAt(m_position.x, m_position.y + 0.4f, m_position.z);
     const bool headInWater = waterAt(m_position.x, m_position.y + kEyeHeight, m_position.z);

@@ -2,7 +2,7 @@
 
 // Packed vertex (see ChunkVertex in ChunkMesher.h):
 //   a_data0: x:5 | y:5 | z:5 | normal:3 | ao:2 | sky:4 | block:4
-//   a_data1: u:5 | v:5 | layer:16
+//   a_data1: u:5 | v:5 | layer:16 | drop:4 (liquid surface, ninths)
 layout(location = 0) in uint a_data0;
 layout(location = 1) in uint a_data1;
 
@@ -30,6 +30,7 @@ const vec3 kNormals[6] = vec3[](vec3(1, 0, 0), vec3(-1, 0, 0), vec3(0, 1, 0), ve
 void main() {
     vec3 position = vec3(float(a_data0 & 31u), float((a_data0 >> 5) & 31u),
                          float((a_data0 >> 10) & 31u));
+    position.y -= float((a_data1 >> 26) & 15u) / 9.0; // liquid surface drop
     v_normal = kNormals[(a_data0 >> 15) & 7u];
     v_ao = float((a_data0 >> 18) & 3u) / 3.0;
     v_sky = float((a_data0 >> 20) & 15u) / 15.0;

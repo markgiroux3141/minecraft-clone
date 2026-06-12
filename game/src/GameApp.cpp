@@ -319,9 +319,11 @@ bool GameApp::EyeInWater() const {
         return false;
     }
     const glm::vec3 eye = m_camera.Position();
-    return m_world->GetBlock(static_cast<int>(std::floor(eye.x)),
-                             static_cast<int>(std::floor(eye.y)),
-                             static_cast<int>(std::floor(eye.z))) == vc::blocks::Water;
+    return vc::BlockRegistry::Get()
+        .Def(m_world->GetBlock(static_cast<int>(std::floor(eye.x)),
+                               static_cast<int>(std::floor(eye.y)),
+                               static_cast<int>(std::floor(eye.z))))
+        .liquid;
 }
 
 void GameApp::DrawTargetOutline() {

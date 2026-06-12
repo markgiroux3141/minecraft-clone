@@ -20,6 +20,9 @@ struct BlockDef {
     bool solid = true;    // collision (used from M6)
     bool liquid = false;  // meshed into the blended pass; liquid-liquid faces cull
     bool gravity = false; // falls when unsupported (block-update ticks)
+    // Liquids only: 8 = source, 7..1 = flow strength (decays away from the
+    // source; 0 on everything else). Drives the spread/recede block updates.
+    uint8_t liquidLevel = 0;
     uint8_t emission = 0; // block light emitted, 0..15
     std::array<uint16_t, 6> faceTiles{}; // texture-array layer per face
 
@@ -55,7 +58,9 @@ extern BlockId Glowstone;
 extern BlockId Sand;
 extern BlockId Log;
 extern BlockId Leaves;
-extern BlockId Water;
+extern BlockId Water; // source block (liquidLevel 8); world gen places only this
+// Flowing water by strength: WaterFlows[level - 1] for levels 1..7.
+extern std::array<BlockId, 7> WaterFlows;
 
 void RegisterDefaults();
 

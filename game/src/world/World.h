@@ -268,9 +268,19 @@ private:
     bool ColumnHasData(const glm::ivec2& column) const;
     // Put()s every loaded edited chunk into the save store (autosave/quit).
     void SaveEditedChunks();
-    // One scheduled block update: applies the block's rule (gravity for
-    // now) and lets SetBlock's scheduling carry the cascade.
+    // One scheduled block update: applies the block's rule (gravity,
+    // liquid flow) and lets SetBlock's scheduling carry the cascade.
     void ProcessBlockUpdate(const glm::ivec3& worldPos);
+    // Liquid rule, matching Minecraft 1.12's BlockDynamicLiquid: flow
+    // cells re-derive their level from their neighbors (which is also how
+    // flows recede), two sources over solid/source ground mint a new
+    // source, falling beats sideways spread, flows over water never sheet
+    // (only sources do), and sideways spread is slope-seeking — it only
+    // goes toward the directions nearest a drop within 4 blocks.
+    void UpdateLiquid(const glm::ivec3& worldPos, int level);
+    // Min path distance (1-based) through passable cells to a cell with a
+    // non-solid floor ("hole"), bounded at 4; 1000 when none in range.
+    int SlopeDistance(const glm::ivec3& worldPos, int distance, int fromDir) const;
     uint32_t DataVersionAt(const glm::ivec3& worldPos) const;
     // Has the mesh of the chunk containing worldPos caught up to (at
     // least) this dataVersion? True for unloaded chunks.

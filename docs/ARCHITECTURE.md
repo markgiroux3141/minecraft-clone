@@ -86,10 +86,15 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   two uint32s (8 B, ~6x smaller pool + uploads; bit-decoded in
   chunk.vert), GPU mesh uploads budgeted at 2 MB/frame with versioned
   carry-over.
-- **M13 — TBD**: candidates: block updates (falling sand + flowing water
-  — needs per-block metadata and scheduled ticks), visual polish (cutout
-  leaves, water skylight attenuation, lowered water surface, moon/stars),
-  caves/biomes, inventory UI.
+- **M13 — Block updates** ✅: scheduled block ticks (every SetBlock wakes
+  its neighborhood), falling sand as render-interpolated entities with
+  versioned mesh handover, and Minecraft-1.12-parity water flow (7 flow
+  levels as appended BlockIds, slope-seeking spread, infinite sources,
+  source-vs-flow sheeting rules) with corner-sampled partial-height
+  rendering packed into spare vertex bits.
+- **M14 — TBD**: candidates: real Minecraft assets (user-provided local
+  copy, personal use), visual polish (cutout leaves, underwater skylight
+  attenuation, moon/stars), caves/biomes, inventory UI.
 
 Each milestone lands as a vertical slice that runs; no big-bang integration.
 

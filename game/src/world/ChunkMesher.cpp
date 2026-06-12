@@ -22,6 +22,7 @@ struct PaddedVolume {
     std::array<BlockId, kPadVolume> id;
     std::array<uint8_t, kPadVolume> opaque;
     std::array<uint8_t, kPadVolume> liquid;
+    std::array<uint8_t, kPadVolume> level; // liquidLevel (8 source, 7..1 flow)
     std::array<uint8_t, kPadVolume> light; // packed sky<<4 | block
 };
 
@@ -40,6 +41,7 @@ void FillPadded(const ChunkSnapshot& snapshot, PaddedVolume& out) {
                 out.id[p] = id;
                 out.opaque[p] = def.opaque ? 1 : 0;
                 out.liquid[p] = def.liquid ? 1 : 0;
+                out.level[p] = def.liquidLevel;
 
                 const ChunkLight* light = snapshot.light[slot].get();
                 if (light) {
@@ -132,14 +134,12 @@ CornerSample SampleCorner(const PaddedVolume& vol, const int cell[3], const Face
     return sample;
 }
 
-// Mask cell key (uint64): bit 57 = transparent stream, bit 56 = face
-// present, bits 40..55 = corner block light (4x4), bits 24..39 = corner
-// sky light (4x4), bits 8..23 = texture layer, bits 0..7 = corner AO
-// (4x2). Corners are stored in emitted order. Cells merge only on exact
-// key match, which keeps both AO and light gradients continuous across
-// merged quads (and never merges liquid with solid faces).
-constexpr uint64_t kKeyTransparent = uint64_t{1} << 57;
-
+// Mask cell key (uint64), opaque faces only — liquids emit per cell, see
+// EmitLiquidCell: bit 56 = face present, bits 40..55 = corner block light
+// (4x4), bits 24..39 = corner sky light (4x4), bits 8..23 = texture
+// layer, bits 0..7 = corner AO (4x2). Corners are stored in emitted
+// order. Cells merge only on exact key match, which keeps both AO and
+// light gradients continuous across merged quads.
 uint64_t MaskKey(uint32_t layer, const CornerSample corners[4]) {
     uint64_t key = uint64_t{1} << 56;
     key |= uint64_t{layer} << 8;
@@ -153,7 +153,7 @@ uint64_t MaskKey(uint32_t layer, const CornerSample corners[4]) {
 
 void EmitQuad(ChunkMesh& mesh, int face, const FaceBasis& fb, int slice, int u0, int v0, int w,
               int h, uint64_t key) {
-    auto& vertices = (key & kKeyTransparent) ? mesh.transparentVertices : mesh.vertices;
+    auto& vertices = mesh.vertices;
     const int plane = slice + (fb.s > 0 ? 1 : 0);
     const auto layer = static_cast<uint32_t>((key >> 8) & 0xFFFFu);
     uint32_t ao[4];
@@ -187,6 +187,86 @@ void EmitQuad(ChunkMesh& mesh, int face, const FaceBasis& fb, int slice, int u0,
                 ao[k] << 18 | sky[k] << 20 | block[k] << 24,
             static_cast<uint32_t>(u) | static_cast<uint32_t>(v) << 5 | layer << 10,
         });
+    }
+}
+
+// Surface height (in ninths of a block) of the liquid corner of cell
+// (x,y,z) toward (dx,dz): the max level over the up-to-4 liquid cells
+// sharing that corner, or a full 9 if any of them is submerged (liquid
+// above — ocean interiors and falling columns stay flush). Sampling the
+// corner across neighbors is what makes the surface slope continuously
+// from cell to cell instead of stepping.
+int CornerNinths(const PaddedVolume& vol, int x, int y, int z, int dx, int dz) {
+    const int cx[4] = {x, x + dx, x, x + dx};
+    const int cz[4] = {z, z, z + dz, z + dz};
+    int ninths = 0;
+    for (int i = 0; i < 4; ++i) {
+        const int p = PadIndex(cx[i], y, cz[i]);
+        if (!vol.liquid[p]) {
+            continue;
+        }
+        if (vol.liquid[PadIndex(cx[i], y + 1, cz[i])]) {
+            return 9;
+        }
+        ninths = std::max(ninths, static_cast<int>(vol.level[p]));
+    }
+    return ninths;
+}
+
+// Liquid cells emit per cell into the transparent stream — corner heights
+// vary with the neighborhood, so quads can't greedy-merge. Cell-top
+// corners carry a "drop" (block top minus surface, in ninths) that
+// chunk.vert subtracts, giving sources an 8/9-high surface and flows
+// their sloped, decaying sheets.
+void EmitLiquidCell(ChunkMesh& mesh, const PaddedVolume& vol, int x, int y, int z) {
+    const BlockDef& def = BlockRegistry::Get().Def(vol.id[PadIndex(x, y, z)]);
+    const int cell[3] = {x, y, z};
+
+    for (int face = 0; face < 6; ++face) {
+        const FaceBasis& fb = kFaces[face];
+        int nb[3] = {x, y, z};
+        nb[fb.n] += fb.s;
+        const int np = PadIndex(nb[0], nb[1], nb[2]);
+        if (vol.opaque[np] || vol.liquid[np]) {
+            continue;
+        }
+
+        const CornerSample corners[4] = {
+            SampleCorner(vol, cell, fb, -1, -1),
+            SampleCorner(vol, cell, fb, +1, -1),
+            SampleCorner(vol, cell, fb, +1, +1),
+            SampleCorner(vol, cell, fb, -1, +1),
+        };
+        const int cu[4] = {0, 1, 1, 0};
+        const int cv[4] = {0, 0, 1, 1};
+        const int rotate =
+            corners[0].ao + corners[2].ao >= corners[1].ao + corners[3].ao ? 0 : 1;
+        const int plane = cell[fb.n] + (fb.s > 0 ? 1 : 0);
+
+        for (int j = 0; j < 4; ++j) {
+            const int k = (j + rotate) & 3;
+            int pos[3];
+            pos[fb.n] = plane;
+            pos[fb.uAxis] = cell[fb.uAxis] + cu[k];
+            pos[fb.vAxis] = cell[fb.vAxis] + cv[k];
+            uint32_t drop = 0;
+            if (pos[1] == y + 1) { // cell-top corner: the surface sits below it
+                drop = static_cast<uint32_t>(
+                    9 - CornerNinths(vol, x, y, z, pos[0] == x + 1 ? 1 : -1,
+                                     pos[2] == z + 1 ? 1 : -1));
+            }
+            const int u = fb.swapUv ? cv[k] : cu[k];
+            const int v = fb.swapUv ? cu[k] : cv[k];
+            mesh.transparentVertices.push_back({
+                static_cast<uint32_t>(pos[0]) | static_cast<uint32_t>(pos[1]) << 5 |
+                    static_cast<uint32_t>(pos[2]) << 10 | static_cast<uint32_t>(face) << 15 |
+                    static_cast<uint32_t>(corners[k].ao) << 18 |
+                    static_cast<uint32_t>(corners[k].sky) << 20 |
+                    static_cast<uint32_t>(corners[k].block) << 24,
+                static_cast<uint32_t>(u) | static_cast<uint32_t>(v) << 5 |
+                    static_cast<uint32_t>(def.faceTiles[face]) << 10 | drop << 26,
+            });
+        }
     }
 }
 
@@ -272,10 +352,8 @@ ChunkMesh ChunkMesher::Build(const ChunkSnapshot& snapshot) {
     for (int face = 0; face < 6; ++face) {
         const FaceBasis& fb = kFaces[face];
         for (int slice = 0; slice < Chunk::kSize; ++slice) {
-            // Build the visibility mask for this slice. Opaque faces show
-            // against any non-opaque neighbor; liquid faces only against
-            // non-opaque non-liquid neighbors (no internal water-water
-            // faces) and go to the transparent stream.
+            // Build the visibility mask for this slice. Opaque blocks only
+            // — liquids are emitted per cell after the greedy passes.
             for (int v = 0; v < Chunk::kSize; ++v) {
                 for (int u = 0; u < Chunk::kSize; ++u) {
                     int cell[3];
@@ -285,14 +363,10 @@ ChunkMesh ChunkMesher::Build(const ChunkSnapshot& snapshot) {
                     const int p = PadIndex(cell[0], cell[1], cell[2]);
 
                     uint64_t key = 0;
-                    if (vol.opaque[p] || vol.liquid[p]) {
+                    if (vol.opaque[p]) {
                         int nb[3] = {cell[0], cell[1], cell[2]};
                         nb[fb.n] += fb.s;
-                        const int np = PadIndex(nb[0], nb[1], nb[2]);
-                        const bool visible = vol.opaque[p]
-                                                 ? !vol.opaque[np]
-                                                 : !vol.opaque[np] && !vol.liquid[np];
-                        if (visible) {
+                        if (!vol.opaque[PadIndex(nb[0], nb[1], nb[2])]) {
                             const BlockDef& def = registry.Def(vol.id[p]);
                             CornerSample corners[4] = {
                                 SampleCorner(vol, cell, fb, -1, -1),
@@ -309,9 +383,6 @@ ChunkMesh ChunkMesher::Build(const ChunkSnapshot& snapshot) {
                                 }
                             }
                             key = MaskKey(def.faceTiles[face], corners);
-                            if (vol.liquid[p]) {
-                                key |= kKeyTransparent;
-                            }
                         }
                     }
                     mask[v * Chunk::kSize + u] = key;
@@ -353,6 +424,17 @@ ChunkMesh ChunkMesher::Build(const ChunkSnapshot& snapshot) {
                         }
                     }
                     u += w;
+                }
+            }
+        }
+    }
+
+    // Liquid pass: per-cell emission with corner-sampled surface heights.
+    for (int y = 0; y < Chunk::kSize; ++y) {
+        for (int z = 0; z < Chunk::kSize; ++z) {
+            for (int x = 0; x < Chunk::kSize; ++x) {
+                if (vol.liquid[PadIndex(x, y, z)]) {
+                    EmitLiquidCell(mesh, vol, x, y, z);
                 }
             }
         }

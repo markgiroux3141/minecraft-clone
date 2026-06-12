@@ -33,6 +33,7 @@ BlockId Sand = 0;
 BlockId Log = 0;
 BlockId Leaves = 0;
 BlockId Water = 0;
+std::array<BlockId, 7> WaterFlows{};
 
 void RegisterDefaults() {
     auto& registry = BlockRegistry::Get();
@@ -72,7 +73,19 @@ void RegisterDefaults() {
     water.opaque = false; // sky light reaches the sea floor; caves see through it
     water.solid = false;  // no collision — swimming is the player's problem
     water.liquid = true;
+    water.liquidLevel = 8; // source
     Water = registry.Register(std::move(water));
+
+    // Flow levels share the source's look and properties; the level only
+    // drives the spread/recede simulation (and, later, render height).
+    for (int level = 1; level <= 7; ++level) {
+        BlockDef flow = BlockDef::Uniform("flowing_water_" + std::to_string(level), 9);
+        flow.opaque = false;
+        flow.solid = false;
+        flow.liquid = true;
+        flow.liquidLevel = static_cast<uint8_t>(level);
+        WaterFlows[static_cast<size_t>(level - 1)] = registry.Register(std::move(flow));
+    }
 
     GAME_INFO("Registered {} block types", registry.Count());
 }

@@ -18,8 +18,10 @@ namespace vc {
 //   data0: x:5 | y:5 | z:5 | normal:3 | ao:2 | sky:4 | block:4
 //          x/y/z are chunk-local cell corners (0..16); normal indexes
 //          BlockFace order; ao 0..3; light levels 0..15.
-//   data1: u:5 | v:5 | layer:16
-//          UVs tile 0..16 across merged quads (sampler wraps).
+//   data1: u:5 | v:5 | layer:16 | drop:4
+//          UVs tile 0..16 across merged quads (sampler wraps). drop is
+//          the liquid surface's distance below the cell top in ninths
+//          (0..9), subtracted from y in the shader; 0 on solid faces.
 struct ChunkVertex {
     uint32_t data0;
     uint32_t data1;

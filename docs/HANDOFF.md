@@ -1,14 +1,21 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-12, end of M12 (user-verified in-game: rendering
-identical with packed vertices, pool ~6x smaller, smoother streaming).
-The agreed M10 UI/menus → M11 gameplay depth → M12 perf polish sequence
-is COMPLETE; M13 is TBD with the user. Read alongside `ARCHITECTURE.md`
-(layering rules, roadmap) and `CLAUDE.md` (build commands, conventions).
+Updated: 2026-06-12, end of M13 (user-verified in-game: falling sand
+with smooth entity motion, Minecraft-parity water flow with sloped
+partial-height rendering). M14 is TBD with the user. Read alongside
+`ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md` (build
+commands, conventions).
+
+IMPORTANT RESOURCE: the user has Minecraft's Java source (MCP 9.40 =
+1.12) at `D:\Minecraft source code` — look up exact game dynamics there
+(e.g. block/BlockDynamicLiquid.java drove the M13 water rules) instead
+of recalling them. Its bundled assets (textures/models/lang under
+mcp940/src/minecraft/assets/) are fair game: personal use only, zero
+distribution (user's explicit call).
 
 ## Where the project stands
 
-M0–M12 are done and verified:
+M0–M13 are done and verified:
 - Engine (`engine/src/vox/`, namespace `vox`): fixed-timestep app loop
   (20 TPS + interpolated render), GLFW window/input (incl. cursor capture),
   GL 4.6 renderer facade with DSA abstractions (Shader, Buffer/VertexArray,
@@ -126,9 +133,10 @@ M6 break/place/fly. Exercise clean shutdown (`CloseMainWindow()`, expect
   wash out on pale blocks (glowstone); GL core can't draw thick lines,
   so a real fix means quad-based outlines.
 - Title screen world list shows at most 6 worlds (no scrolling yet).
-- Sand doesn't fall (user noted during M11 stage 1 verification). Needs a
-  block-update/scheduled-tick system — a good fit for a later gameplay
-  milestone alongside water flow.
+- Debug-build fps dips hard during big water-flow bursts (remesh + light
+  recompute churn; worker files are /O2 even in Debug since M13, release
+  is fine — user accepts). Next lever if needed: batch/coalesce light
+  recomputes during flow bursts.
 - Remote: https://github.com/markgiroux3141/minecraft-clone.git (branch
   `main`). Commit + push at milestone boundaries.
 
@@ -358,16 +366,57 @@ Stage 3 — LOD shell:
   deferred, so nothing resubmits early; the first item each frame always
   processes so one huge mesh can't starve).
 
-## Next: M13 — TBD (decide with the user)
+## M13 block updates (how it works)
+
+- Tick system: World::Tick (20 TPS from GameApp::OnTick, frozen while
+  paused) drains a priority queue of scheduled updates (512/tick cap).
+  Every SetBlock wakes the edited cell + 6 neighbors — liquids at 4-tick
+  delay, everything else at 2 — so cascades sustain themselves.
+- Falling sand: BlockDef::gravity; an unsupported gravity block detaches
+  into World::FallingBlock (x/z fixed, float y, 18 b/s^2 accel, slow in
+  water), drawn as a textured unit cube (block_entity shaders, per-face
+  layers, light sampled at cell AND cell-above — the placed block's own
+  cell reads 0) and re-placed on landing. Entity/mesh handover uses
+  dataVersion/meshedVersion (syncCell/syncVersion on the entity): hidden
+  at detach until the remesh drops the old block, lingering at landing
+  until the remesh shows the new one — no z-fighting, no gap. ~World
+  settles in-flight blocks so they persist.
+- Water flow (World::UpdateLiquid, ported from the 1.12 source's
+  BlockDynamicLiquid — see the resource note at the top): Water (id) is
+  the source, WaterFlows[7] are appended flow-level ids (BlockDef::
+  liquidLevel: 8 source, 7..1 flow), so storage/saves are untouched.
+  Rules: flows re-derive their level each update (max neighbor - 1;
+  falling neighbors count as 8; liquid above = 7) which is also how they
+  recede; >= 2 adjacent sources over solid/source mint a new source
+  (infinite water); pour-down beats sideways; flows over water never
+  sheet (only sources do — ocean breaches flood at every depth, pillar
+  water pours down the sides); sideways spread is slope-seeking (only
+  toward the drop(s) nearest within 4 blocks, SlopeDistance recursion);
+  sources and waterfall landings sheet at strength 7, others level-1.
+  Worldgen oceans are all-source and surrounded by sources/land = stable
+  until disturbed. Swimming/eye-tint check BlockDef::liquid.
+- Partial-height rendering: liquids skip greedy merging (EmitLiquidCell,
+  per cell) — each cell-top corner gets a height in ninths (level for
+  the max liquid cell around the corner, 9 if any is submerged → ocean
+  interiors stay flush, surfaces slope continuously; sources sit at
+  8/9). The drop is packed into 4 spare bits of data1 (bits 26..29) and
+  subtracted in chunk.vert. Raycast still ignores liquids — remove water
+  by placing a block into it or cutting the source.
+- Not done (vs Minecraft): no flow-direction surface texture animation,
+  no swimming current push, lava, bucket item.
+
+## Next: M14 — TBD (decide with the user)
 
 Backlog, roughly by expressed interest:
-- Block updates: falling sand + flowing water (user asked about both).
-  Needs per-block metadata (water flow levels / partial heights touch
-  chunk storage, the save format, and the mesher) plus a scheduled-tick
-  system on the main thread feeding SetBlock.
+- Real Minecraft assets: the local source copy bundles the full 1.12
+  asset tree (textures/models/lang) — swap the generated placeholder
+  tiles for real block textures (16x16, same texture-array pipeline),
+  HUD icons, etc. Personal use only, zero distribution. Audio is NOT in
+  the source tree (Minecraft downloads it separately as hashed asset
+  objects) — check D:\Minecraft source code for a jars/assets dir or
+  the user's .minecraft/assets before promising sound.
 - Water/visual polish: skylight attenuation underwater (sea floor reads
-  bright), lowered water surface (14/16 height), cutout leaves, moon +
-  stars at night.
+  bright), cutout leaves, moon + stars at night, flow-animated water.
 - World depth: caves (3D noise carving), biomes (temperature/moisture
   noise driving surface blocks + tree density).
 - UI: inventory screen, world-list scrolling, settings (render distance).
