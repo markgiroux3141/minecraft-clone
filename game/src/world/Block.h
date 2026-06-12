@@ -78,6 +78,13 @@ extern BlockId TallGrass;
 extern BlockId Dandelion;
 extern BlockId Poppy;
 extern BlockId DeadBush; // ...except the dead bush, which needs sand
+// M16 tree species (birch in forests, spruce in snow) + the desert cactus
+// (full cube for now; vanilla's 14/16 inset is a later polish).
+extern BlockId BirchLog;
+extern BlockId BirchLeaves;
+extern BlockId SpruceLog;
+extern BlockId SpruceLeaves;
+extern BlockId Cactus; // needs sand (or more cactus) underfoot
 
 void RegisterDefaults();
 

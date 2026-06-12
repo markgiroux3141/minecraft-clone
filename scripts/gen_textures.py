@@ -162,9 +162,83 @@ def dead_bush(x, y):
     return (0, 0, 0, 0)
 
 
+BIRCH = (222, 219, 209)
+BIRCH_DARK = (66, 64, 58)
+
+
+def birch_side(x, y):
+    # Pale bark with scattered dark eye patches.
+    if hash01(x // 3, y // 3, 17) > 0.82:
+        return speckle(BIRCH_DARK, x, y, 17, 8)
+    return speckle(BIRCH, x, y, 17, 8)
+
+
+def birch_top(x, y):
+    ring = max(abs(2 * x - 15), abs(2 * y - 15)) // 2
+    if ring >= 7:
+        return speckle(BIRCH_DARK, x, y, 18, 8)
+    return speckle(BIRCH if ring % 2 == 0 else (196, 188, 168), x, y, 18, 6)
+
+
+BIRCH_LEAF = (116, 168, 88)
+
+
+def birch_leaves(x, y):
+    if hash01(x, y, 19) > 0.8:
+        return (0, 0, 0, 0)
+    return speckle(BIRCH_LEAF, x, y, 19, 14)
+
+
+SPRUCE = (74, 56, 34)
+SPRUCE_DARK = (52, 40, 24)
+
+
+def spruce_side(x, y):
+    if hash01(x, 0, 20) > 0.6:
+        return speckle(SPRUCE_DARK, x, y, 20, 8)
+    return speckle(SPRUCE, x, y, 20, 10)
+
+
+def spruce_top(x, y):
+    ring = max(abs(2 * x - 15), abs(2 * y - 15)) // 2
+    if ring >= 7:
+        return speckle(SPRUCE_DARK, x, y, 21, 8)
+    return speckle((118, 92, 58) if ring % 2 == 0 else SPRUCE, x, y, 21, 6)
+
+
+SPRUCE_LEAF = (46, 88, 52)
+
+
+def spruce_leaves(x, y):
+    if hash01(x, y, 22) > 0.84:
+        return (0, 0, 0, 0)
+    return speckle(SPRUCE_LEAF, x, y, 22, 12)
+
+
+CACTUS = (62, 130, 64)
+
+
+def cactus_side(x, y):
+    # Vertical ribs with pale spine dots; fully opaque (full-cube cactus).
+    if x % 4 == 1 and y % 4 == 2:
+        return speckle((196, 214, 160), x, y, 23, 6)
+    if x % 4 == 3:
+        return speckle((48, 104, 50), x, y, 23, 8)
+    return speckle(CACTUS, x, y, 23, 10)
+
+
+def cactus_top(x, y):
+    ring = max(abs(2 * x - 15), abs(2 * y - 15)) // 2
+    if ring >= 7:
+        return speckle((48, 104, 50), x, y, 24, 8)
+    return speckle(CACTUS, x, y, 24, 8)
+
+
 # Layer index in the texture array == position in this list.
 TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top, leaves, water,
-         snow, grass_side_snowed, tall_grass, dandelion, poppy, dead_bush]
+         snow, grass_side_snowed, tall_grass, dandelion, poppy, dead_bush,
+         birch_side, birch_top, birch_leaves, spruce_side, spruce_top, spruce_leaves,
+         cactus_side, cactus_top]
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:

@@ -61,6 +61,17 @@ def tinted(img: Image.Image, tint: tuple[int, int, int]) -> Image.Image:
     return out
 
 
+def flattened(img: Image.Image) -> Image.Image:
+    # Bake transparent pixels opaque over the tile's own body color — used
+    # for the full-cube cactus, whose vanilla texture leaves the model's
+    # 14/16 inset margin transparent (alpha-testing it on a full cube
+    # would punch see-through slits).
+    out = Image.new("RGBA", img.size, img.getpixel((img.width // 2, img.height // 2)))
+    out.alpha_composite(img)
+    out.putalpha(255)
+    return out
+
+
 def build_atlas(mc: Path, out_path: Path) -> None:
     blocks = mc / "textures" / "blocks"
     grass_tint = colormap_tint(mc / "textures" / "colormap" / "grass.png")
@@ -99,6 +110,16 @@ def build_atlas(mc: Path, out_path: Path) -> None:
         load_tile(blocks / "flower_dandelion.png"),
         load_tile(blocks / "flower_rose.png"),
         load_tile(blocks / "deadbush.png"),
+        # M16 tree species + cactus. Birch and spruce leaves use vanilla's
+        # FIXED foliage constants (ColorizerFoliage), not the colormap.
+        load_tile(blocks / "log_birch.png"),
+        load_tile(blocks / "log_birch_top.png"),
+        tinted(load_tile(blocks / "leaves_birch.png"), (128, 167, 85)),
+        load_tile(blocks / "log_spruce.png"),
+        load_tile(blocks / "log_spruce_top.png"),
+        tinted(load_tile(blocks / "leaves_spruce.png"), (97, 153, 97)),
+        flattened(load_tile(blocks / "cactus_side.png")),
+        flattened(load_tile(blocks / "cactus_top.png")),
     ]
 
     strip = Image.new("RGBA", (TILE * len(tiles), TILE))

@@ -39,6 +39,11 @@ BlockId TallGrass = 0;
 BlockId Dandelion = 0;
 BlockId Poppy = 0;
 BlockId DeadBush = 0;
+BlockId BirchLog = 0;
+BlockId BirchLeaves = 0;
+BlockId SpruceLog = 0;
+BlockId SpruceLeaves = 0;
+BlockId Cactus = 0;
 
 namespace {
 
@@ -48,6 +53,21 @@ BlockDef Plant(std::string name, uint16_t tile) {
     def.solid = false; // walk through; raycast still targets it (cross)
     def.cross = true;
     def.replaceable = true;
+    return def;
+}
+
+BlockDef LogDef(std::string name, uint16_t sideTile, uint16_t topTile) {
+    BlockDef def = BlockDef::Uniform(std::move(name), sideTile);
+    def.faceTiles[static_cast<size_t>(BlockFace::PosY)] = topTile;
+    def.faceTiles[static_cast<size_t>(BlockFace::NegY)] = topTile;
+    return def;
+}
+
+BlockDef LeavesDef(std::string name, uint16_t tile) {
+    BlockDef def = BlockDef::Uniform(std::move(name), tile);
+    def.opaque = false;
+    def.cutout = true;
+    def.lightOpacity = 1;
     return def;
 }
 
@@ -79,19 +99,12 @@ void RegisterDefaults() {
     sand.gravity = true;
     Sand = registry.Register(std::move(sand));
 
-    BlockDef log = BlockDef::Uniform("log", 6);
-    log.faceTiles[static_cast<size_t>(BlockFace::PosY)] = 7;
-    log.faceTiles[static_cast<size_t>(BlockFace::NegY)] = 7;
-    Log = registry.Register(std::move(log));
+    Log = registry.Register(LogDef("log", 6, 7));
 
     // M16: alpha-tested cutout leaves (vanilla "fancy graphics" look) —
     // every face against a non-opaque neighbor renders, including
     // leaf-on-leaf. lightOpacity 1 keeps a soft shadow under canopies.
-    BlockDef leaves = BlockDef::Uniform("leaves", 8);
-    leaves.opaque = false;
-    leaves.cutout = true;
-    leaves.lightOpacity = 1;
-    Leaves = registry.Register(std::move(leaves));
+    Leaves = registry.Register(LeavesDef("leaves", 8));
 
     BlockDef water = BlockDef::Uniform("water", 9);
     water.opaque = false; // light reaches the sea floor (attenuated); caves see through
@@ -126,6 +139,15 @@ void RegisterDefaults() {
     Dandelion = registry.Register(Plant("dandelion", 13));
     Poppy = registry.Register(Plant("poppy", 14));
     DeadBush = registry.Register(Plant("dead bush", 15));
+
+    // M16 tree species + cactus (tiles 16..23 — keep both atlas scripts
+    // in sync). The cactus renders as a full opaque cube for now; its
+    // import bakes the texture's transparent edge pixels opaque.
+    BirchLog = registry.Register(LogDef("birch log", 16, 17));
+    BirchLeaves = registry.Register(LeavesDef("birch leaves", 18));
+    SpruceLog = registry.Register(LogDef("spruce log", 19, 20));
+    SpruceLeaves = registry.Register(LeavesDef("spruce leaves", 21));
+    Cactus = registry.Register(LogDef("cactus", 22, 23));
 
     GAME_INFO("Registered {} block types", registry.Count());
 }

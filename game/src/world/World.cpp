@@ -379,6 +379,13 @@ void World::ProcessBlockUpdate(const glm::ivec3& worldPos) {
         if (!supported) {
             SetBlock(worldPos, blocks::Air);
         }
+    } else if (id == blocks::Cactus) {
+        // Cactus stands on sand or more cactus; breaking a segment pops
+        // everything above it, one update at a time.
+        const BlockId below = GetBlock(worldPos.x, worldPos.y - 1, worldPos.z);
+        if (below != blocks::Sand && below != blocks::Cactus) {
+            SetBlock(worldPos, blocks::Air);
+        }
     } else if (def.gravity) {
         const BlockId below = GetBlock(worldPos.x, worldPos.y - 1, worldPos.z);
         const BlockDef& belowDef = registry.Def(below);

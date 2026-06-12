@@ -130,9 +130,41 @@ void SetIfAir(Chunk& chunk, const glm::ivec3& origin, int wx, int wy, int wz, Bl
     }
 }
 
-// Classic oak: trunk, two radius-2 leaf layers (minus corners) around the
-// trunk top, a 3x3 above, and a plus-shaped cap.
-void PlaceTree(Chunk& chunk, const glm::ivec3& origin, int tx, int ground, int tz, int trunk) {
+// M16 species: oak and birch share the classic shape; spruce is conical.
+enum class TreeSpecies : uint8_t { Oak, Birch, Spruce };
+
+bool IsAnyLeaves(BlockId id) {
+    return id == blocks::Leaves || id == blocks::BirchLeaves || id == blocks::SpruceLeaves;
+}
+
+// One square canopy layer of `radius` around (tx, wy, tz), optionally
+// clipping the four corners.
+void PlaceCanopyLayer(Chunk& chunk, const glm::ivec3& origin, int tx, int wy, int tz,
+                      int radius, bool clipCorners, BlockId leavesId) {
+    for (int dz = -radius; dz <= radius; ++dz) {
+        for (int dx = -radius; dx <= radius; ++dx) {
+            if (clipCorners && std::abs(dx) == radius && std::abs(dz) == radius) {
+                continue;
+            }
+            SetIfAir(chunk, origin, tx + dx, wy, tz + dz, leavesId);
+        }
+    }
+}
+
+// Oak/birch: trunk, two radius-2 leaf layers (minus corners) around the
+// trunk top, a 3x3 above, and a plus-shaped cap. Spruce: a cone of
+// alternating radius-2/radius-1 layers with a single-leaf tip. Both stay
+// within kCanopyRadius and top+2 (the cell-enumeration and world-height
+// guards rely on it).
+void PlaceTree(Chunk& chunk, const glm::ivec3& origin, int tx, int ground, int tz, int trunk,
+               TreeSpecies species) {
+    const BlockId logId = species == TreeSpecies::Birch    ? blocks::BirchLog
+                          : species == TreeSpecies::Spruce ? blocks::SpruceLog
+                                                           : blocks::Log;
+    const BlockId leavesId = species == TreeSpecies::Birch    ? blocks::BirchLeaves
+                             : species == TreeSpecies::Spruce ? blocks::SpruceLeaves
+                                                              : blocks::Leaves;
+
     // The dirt patch under the trunk (replaces the grass/snowy surface).
     const int lx = tx - origin.x;
     const int ly = ground - origin.y;
@@ -153,30 +185,29 @@ void PlaceTree(Chunk& chunk, const glm::ivec3& origin, int tx, int ground, int t
         if (wlx >= 0 && wlx < Chunk::kSize && wly >= 0 && wly < Chunk::kSize && wlz >= 0 &&
             wlz < Chunk::kSize &&
             (chunk.Get(wlx, wly, wlz) == blocks::Air ||
-             chunk.Get(wlx, wly, wlz) == blocks::Leaves)) {
-            chunk.Set(wlx, wly, wlz, blocks::Log);
+             IsAnyLeaves(chunk.Get(wlx, wly, wlz)))) {
+            chunk.Set(wlx, wly, wlz, logId);
         }
     }
-    for (int wy = top - 1; wy <= top; ++wy) {
-        for (int dz = -kCanopyRadius; dz <= kCanopyRadius; ++dz) {
-            for (int dx = -kCanopyRadius; dx <= kCanopyRadius; ++dx) {
-                if (std::abs(dx) == kCanopyRadius && std::abs(dz) == kCanopyRadius) {
-                    continue; // clipped corners
-                }
-                SetIfAir(chunk, origin, tx + dx, wy, tz + dz, blocks::Leaves);
-            }
-        }
+
+    if (species == TreeSpecies::Spruce) {
+        SetIfAir(chunk, origin, tx, top + 1, tz, leavesId);
+        PlaceCanopyLayer(chunk, origin, tx, top, tz, 1, true, leavesId);
+        PlaceCanopyLayer(chunk, origin, tx, top - 1, tz, 1, false, leavesId);
+        PlaceCanopyLayer(chunk, origin, tx, top - 2, tz, 2, true, leavesId);
+        PlaceCanopyLayer(chunk, origin, tx, top - 3, tz, 1, false, leavesId);
+        PlaceCanopyLayer(chunk, origin, tx, top - 4, tz, 2, true, leavesId);
+        return;
     }
-    for (int dz = -1; dz <= 1; ++dz) {
-        for (int dx = -1; dx <= 1; ++dx) {
-            SetIfAir(chunk, origin, tx + dx, top + 1, tz + dz, blocks::Leaves);
-        }
-    }
-    SetIfAir(chunk, origin, tx - 1, top + 2, tz, blocks::Leaves);
-    SetIfAir(chunk, origin, tx + 1, top + 2, tz, blocks::Leaves);
-    SetIfAir(chunk, origin, tx, top + 2, tz - 1, blocks::Leaves);
-    SetIfAir(chunk, origin, tx, top + 2, tz + 1, blocks::Leaves);
-    SetIfAir(chunk, origin, tx, top + 2, tz, blocks::Leaves);
+
+    PlaceCanopyLayer(chunk, origin, tx, top - 1, tz, kCanopyRadius, true, leavesId);
+    PlaceCanopyLayer(chunk, origin, tx, top, tz, kCanopyRadius, true, leavesId);
+    PlaceCanopyLayer(chunk, origin, tx, top + 1, tz, 1, false, leavesId);
+    SetIfAir(chunk, origin, tx - 1, top + 2, tz, leavesId);
+    SetIfAir(chunk, origin, tx + 1, top + 2, tz, leavesId);
+    SetIfAir(chunk, origin, tx, top + 2, tz - 1, leavesId);
+    SetIfAir(chunk, origin, tx, top + 2, tz + 1, leavesId);
+    SetIfAir(chunk, origin, tx, top + 2, tz, leavesId);
 }
 
 } // namespace
@@ -317,7 +348,8 @@ void TerrainGenerator::Generate(Chunk& chunk, const glm::ivec3& chunkCoord) cons
             const int tz = cz * kTreeCell + static_cast<int>(Hash(m_seed, cx, cz, 3) % kTreeCell);
             // Density follows the biome at the tree's own position, so the
             // gate stays identical from every chunk that can see the tree.
-            const float chance = TreeChance(biomeAt(tx, tz));
+            const Biome treeBiome = biomeAt(tx, tz);
+            const float chance = TreeChance(treeBiome);
             if (chance <= 0.0f || Hash01(m_seed, cx, cz, 1) > chance) {
                 continue;
             }
@@ -325,14 +357,26 @@ void TerrainGenerator::Generate(Chunk& chunk, const glm::ivec3& chunkCoord) cons
             if (ground <= kBeachTop) {
                 continue; // grass only — no beach or underwater trees
             }
-            const int trunk = 4 + static_cast<int>(Hash(m_seed, cx, cz, 4) % 3); // 4..6
+            // Species: snowy climate and alpine caps grow spruce; forests
+            // mix in birch; everything else is oak. Spruce/birch run a
+            // little taller than oak's 4..6.
+            TreeSpecies species = TreeSpecies::Oak;
+            if (treeBiome == Biome::Snowy || ground >= kSnowLine) {
+                species = TreeSpecies::Spruce;
+            } else if (treeBiome == Biome::Forest && Hash01(m_seed, cx, cz, 7) < 0.25f) {
+                species = TreeSpecies::Birch;
+            }
+            const int base = species == TreeSpecies::Spruce ? 6
+                             : species == TreeSpecies::Birch ? 5
+                                                             : 4;
+            const int trunk = base + static_cast<int>(Hash(m_seed, cx, cz, 4) % 3);
             if (ground + trunk + 2 >= kWorldHeightBlocks) {
                 continue;
             }
             if (mask->Carved(tx - origin.x, ground - origin.y, tz - origin.z)) {
                 continue; // a cave opened the ground cell — no floating trees
             }
-            PlaceTree(chunk, origin, tx, ground, tz, trunk);
+            PlaceTree(chunk, origin, tx, ground, tz, trunk, species);
         }
     }
 
@@ -347,7 +391,9 @@ void TerrainGenerator::Generate(Chunk& chunk, const glm::ivec3& chunkCoord) cons
             const int wz = origin.z + z;
             const int height = heightAt(wx, wz);
             const int ly = height + 1 - origin.y;
-            if (ly < 0 || ly >= Chunk::kSize || chunk.Get(x, ly, z) != blocks::Air) {
+            // A plant fills one cell; a cactus up to three, so a column
+            // based just below this chunk can still reach into it.
+            if (ly >= Chunk::kSize || ly < -2) {
                 continue;
             }
             if (mask->Carved(x, height - origin.y, z)) {
@@ -355,22 +401,40 @@ void TerrainGenerator::Generate(Chunk& chunk, const glm::ivec3& chunkCoord) cons
             }
             const Biome biome = biomeAt(wx, wz);
             const float r = Hash01(m_seed, wx, wz, 5);
-            BlockId plant = blocks::Air;
             if (biome == Biome::Desert) {
                 if (r < 0.015f) {
-                    plant = blocks::DeadBush;
+                    if (ly >= 0 && chunk.Get(x, ly, z) == blocks::Air) {
+                        chunk.Set(x, ly, z, blocks::DeadBush);
+                    }
+                } else if (r < 0.020f && height > kBeachTop) {
+                    // Cactus column, 1-3 tall, derived purely from
+                    // (wx, wz, height): a column straddling a vertical
+                    // chunk seam regenerates identically in both chunks —
+                    // each writes the cells that fall inside it.
+                    const int tall = 1 + static_cast<int>(Hash(m_seed, wx, wz, 8) % 3);
+                    for (int k = 0; k < tall; ++k) {
+                        const int cy = ly + k;
+                        if (cy >= 0 && cy < Chunk::kSize &&
+                            chunk.Get(x, cy, z) == blocks::Air) {
+                            chunk.Set(x, cy, z, blocks::Cactus);
+                        }
+                    }
                 }
-            } else if (height > kBeachTop) { // beaches stay bare
-                // Snowy surfaces (biome or alpine cap) get sparse grass
-                // only; flowers keep to the green biomes.
-                const bool snowy = biome == Biome::Snowy || height >= kSnowLine;
-                const float grass = snowy ? 0.02f : biome == Biome::Forest ? 0.06f : 0.10f;
-                const float flower = snowy ? 0.0f : biome == Biome::Forest ? 0.006f : 0.012f;
-                if (r < grass) {
-                    plant = blocks::TallGrass;
-                } else if (r < grass + flower) {
-                    plant = Hash(m_seed, wx, wz, 6) & 1 ? blocks::Dandelion : blocks::Poppy;
-                }
+                continue;
+            }
+            if (ly < 0 || height <= kBeachTop || chunk.Get(x, ly, z) != blocks::Air) {
+                continue; // beaches stay bare
+            }
+            // Snowy surfaces (biome or alpine cap) get sparse grass only;
+            // flowers keep to the green biomes.
+            const bool snowy = biome == Biome::Snowy || height >= kSnowLine;
+            const float grass = snowy ? 0.02f : biome == Biome::Forest ? 0.06f : 0.10f;
+            const float flower = snowy ? 0.0f : biome == Biome::Forest ? 0.006f : 0.012f;
+            BlockId plant = blocks::Air;
+            if (r < grass) {
+                plant = blocks::TallGrass;
+            } else if (r < grass + flower) {
+                plant = Hash(m_seed, wx, wz, 6) & 1 ? blocks::Dandelion : blocks::Poppy;
             }
             if (plant != blocks::Air) {
                 chunk.Set(x, ly, z, plant);

@@ -76,6 +76,14 @@ int main() {
     // edge don't reference ungenerated chunks).
     const int lo = -kRadius * vc::Chunk::kSize + vc::Chunk::kSize;
     const int hi = (kRadius + 1) * vc::Chunk::kSize - vc::Chunk::kSize;
+    const auto isLog = [](vc::BlockId id) {
+        return id == vc::blocks::Log || id == vc::blocks::BirchLog ||
+               id == vc::blocks::SpruceLog;
+    };
+    const auto isLeaves = [](vc::BlockId id) {
+        return id == vc::blocks::Leaves || id == vc::blocks::BirchLeaves ||
+               id == vc::blocks::SpruceLeaves;
+    };
     size_t logs = 0;
     size_t leafBlocks = 0;
     bool trunksIntact = true;
@@ -84,19 +92,19 @@ int main() {
         for (int wx = lo; wx < hi; ++wx) {
             for (int wy = 1; wy < vc::kWorldHeightBlocks - 1; ++wy) {
                 const vc::BlockId id = blockAt(wx, wy, wz);
-                if (id == vc::blocks::Log) {
+                if (isLog(id)) {
                     ++logs;
                     // A trunk runs dirt -> logs -> canopy with no gaps; a
                     // vertical-seam bug would leave air above or below.
                     const vc::BlockId below = blockAt(wx, wy - 1, wz);
                     const vc::BlockId above = blockAt(wx, wy + 1, wz);
-                    if (below != vc::blocks::Log && below != vc::blocks::Dirt) {
+                    if (!isLog(below) && below != vc::blocks::Dirt) {
                         trunksIntact = false;
                     }
-                    if (above != vc::blocks::Log && above != vc::blocks::Leaves) {
+                    if (!isLog(above) && !isLeaves(above)) {
                         trunksIntact = false;
                     }
-                } else if (id == vc::blocks::Leaves) {
+                } else if (isLeaves(id)) {
                     ++leafBlocks;
                     // Every canopy block sits within 2 blocks of its trunk; a
                     // horizontal-seam bug strands leaves with no log nearby.
@@ -104,7 +112,7 @@ int main() {
                     for (int dy = -2; dy <= 2 && !anchored; ++dy) {
                         for (int dz = -2; dz <= 2 && !anchored; ++dz) {
                             for (int dx = -2; dx <= 2 && !anchored; ++dx) {
-                                anchored = blockAt(wx + dx, wy + dy, wz + dz) == vc::blocks::Log;
+                                anchored = isLog(blockAt(wx + dx, wy + dy, wz + dz));
                             }
                         }
                     }
@@ -136,6 +144,9 @@ int main() {
                     } else if (id == vc::blocks::DeadBush) {
                         ++plants;
                         rooted &= below == vc::blocks::Sand;
+                    } else if (id == vc::blocks::Cactus) {
+                        ++plants;
+                        rooted &= below == vc::blocks::Sand || below == vc::blocks::Cactus;
                     }
                 }
             }
