@@ -61,6 +61,7 @@ extern BlockId Leaves;
 extern BlockId Water; // source block (liquidLevel 8); world gen places only this
 // Flowing water by strength: WaterFlows[level - 1] for levels 1..7.
 extern std::array<BlockId, 7> WaterFlows;
+extern BlockId SnowyGrass; // M15 snowy-biome surface (snow top, snowed sides)
 
 void RegisterDefaults();
 

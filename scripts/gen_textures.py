@@ -103,8 +103,24 @@ def water(x, y):
     return speckle(base, x, y, 10, 8) + (168,)
 
 
+SNOW = (240, 244, 248)
+
+
+def snow(x, y):
+    return speckle(SNOW, x, y, 11, 6)
+
+
+def grass_side_snowed(x, y):
+    # Dirt with a ragged snow cap (the snowy twin of grass_side).
+    fringe = 2 + int(hash01(x, 0, 12) * 3)
+    if y < fringe:
+        return speckle(SNOW, x, y, 12, 5)
+    return speckle(DIRT, x, y, 1)
+
+
 # Layer index in the texture array == position in this list.
-TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top, leaves, water]
+TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top, leaves, water,
+         snow, grass_side_snowed]
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:

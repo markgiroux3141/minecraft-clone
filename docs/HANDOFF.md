@@ -1,9 +1,11 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-12, end of M14 (user-verified in-game: real Minecraft
-textures/font/GUI/sun/moon, fixed too-dark nights). M15 is TBD with the
-user. Read alongside `ARCHITECTURE.md` (layering rules, roadmap) and
-`CLAUDE.md` (build commands, conventions).
+Updated: 2026-06-12, end of M15 (caves user-verified in-game; biome
+SURFACES user-verified; biome TOPOLOGY committed but NOT yet flown by
+the user — verify that first thing next session). M16 is TBD with the
+user; flora & decoration is the discussed favorite (see the backlog at
+the bottom). Read alongside `ARCHITECTURE.md` (layering rules, roadmap)
+and `CLAUDE.md` (build commands, conventions).
 
 IMPORTANT RESOURCE: the user has Minecraft's Java source (MCP 9.40 =
 1.12) at `D:\Minecraft source code` — look up exact game dynamics there
@@ -14,7 +16,7 @@ distribution (user's explicit call).
 
 ## Where the project stands
 
-M0–M14 are done and verified:
+M0–M15 are done (M15 topology pending the user's in-game look):
 - Engine (`engine/src/vox/`, namespace `vox`): fixed-timestep app loop
   (20 TPS + interpolated render), GLFW window/input (incl. cursor capture),
   GL 4.6 renderer facade with DSA abstractions (Shader, Buffer/VertexArray,
@@ -446,21 +448,84 @@ Stage 3 — LOD shell:
   by DayNight::skyTint (white day → blue 0.55/0.66/0.95 night). Day
   output is unchanged (floor + range still sum to 1.0).
 
-## Next: M15 — TBD (decide with the user)
+## M15 caves + biomes + topology (how it works)
 
-Backlog, roughly by expressed interest:
-- Water/visual polish: skylight attenuation underwater (sea floor reads
-  bright), cutout leaves, stars at night, flow-animated water (the
-  16x512 water_still.png strip + .mcmeta is already surveyed; needs
-  texture-array layer cycling or a time uniform).
-- World depth: caves (3D noise carving), biomes (temperature/moisture
-  noise driving surface blocks + tree density).
-- UI: inventory screen (gui/container/ sheets are present in the MC
-  tree; DrawImage is ready for it), world-list scrolling, settings.
-- Audio: 1.12 sounds exist as a hashed store (mcp940/jars/assets/ —
-  resolve indexes/1.12.json objects[name].hash to
-  objects/<hash[0:2]>/<hash>; 1085 .ogg verified). Needs an engine
-  audio module (OpenAL/miniaudio + ogg decode).
+IMPORTANT for old saves: M15 changed worldgen (heights, surfaces, caves)
+— unedited chunks in pre-M15 saves regenerate with the NEW rules and
+will seam badly against previously edited/saved chunks. Test in a New
+World.
+
+- Caves (world/CaveGen.h/.cpp, called from TerrainGen between fill and
+  trees — vanilla order): a port of 1.12 MapGenCaves, including an EXACT
+  java.util.Random clone (the tunnel shapes live in its draw sequence —
+  don't swap PRNGs). Per chunk, replay the 17x17 origin-chunk
+  neighborhood (range 8), each origin seeded ocx*saltX ^ ocz*saltZ ^
+  seed; tunnels are worm walks (sine-bulged radius, drift-damped
+  yaw/pitch, midpoint branch into two perpendicular arms when radius>1,
+  1-in-4 rooms with 0.5 vertical squash, the d9>-0.7 flat-floor quirk
+  kept). Start heights scaled to our 64 world: nextInt(nextInt(54)+8).
+  No lava floor yet (no lava block) — deep caves stay open; world keeps
+  a 1-block floor (y>=1 clamp).
+- Two deliberate departures from vanilla: (1) the ocean-breach test is
+  ANALYTIC (worldgen water rule height<y<=sea over the UNCLIPPED sphere
+  box) instead of scanning clipped chunk contents, so every chunk makes
+  the same abort decision and carved air provably never touches
+  worldgen water (gentest asserts it); (2) a CarveMask (chunk + skirt:
+  +-2 x/z, 8 down — canopy/trunk reach) records covered cells
+  GEOMETRICALLY, and the tree gate vetoes candidates whose ground cell
+  was carved — no floating trees, and every chunk sharing a tree
+  computes the same veto. Carved grass-family columns regrow their own
+  surface block on the dirt below.
+- Biomes (TerrainGen.cpp): temperature + moisture OpenSimplex fields
+  (freq 0.0030, ~300-block features) classify per column: desert
+  (t>0.65, m<0.40; deep sand, no trees), snowy (t<0.32; SnowyGrass
+  surface), forest (m>0.55; tree chance 0.85/cell), plains (0.18).
+  Beach band still overrides near sea level. SnowyGrass is a NEW block
+  appended after the flow ids (tiles 10 snow top / 11 snowed side; BOTH
+  scripts/gen_textures.py and import_mc_assets.py grew the two layers —
+  keep them in sync). Tree chance samples the biome at the tree's own
+  position (seam-deterministic). Fixed along the way: trunks now grow
+  through neighboring canopies (dense forests exposed that SetIfAir
+  left leaf gaps in trunks; gentest caught it).
+- Topology (ported from ChunkGeneratorOverworld.generateHeightmap —
+  looked up in the local 1.12 source, worth doing again for anything
+  similar): per-biome (baseHeight, heightVariation) using vanilla's
+  table (desert/plains 0.125/0.05 flat, forest 0.1/0.2, snowy taiga
+  0.2/0.2), blended over a 5x5 neighborhood of 4-block biome cells with
+  the parabolic kernel 10/sqrt(d^2+0.2), each weight divided by
+  (base+2) and HALVED when the neighbor is higher than the center
+  (vanilla's sharp-cliff-base trick). A third "ruggedness" field (freq
+  0.0035) smoothsteps (0.60..0.85) any cell toward its hills variant
+  (extreme hills 1.0/0.5; desert hills 0.45/0.3). height = 16 + base*22
+  + n*(5 + variation*34) — flats ~y19+-7, hill peaks toward y59 (world
+  ceiling 64; real mountains would need kWorldHeightChunks raised).
+  Peaks >= y48 get a SnowyGrass alpine cap (sandy columns excluded).
+  Cell params are memoized per Generate call (heightAt blends 25 cells
+  per column; caves/trees re-query columns heavily).
+- gentest grew: caves carve, carved air never touches water, climate
+  produces multiple biomes (spread 5x5 column sample over +-64 chunks),
+  snowy grass sits on dirt. Run it after touching TerrainGen/CaveGen.
+
+## Next: M16 — TBD (decide with the user)
+
+Leading candidate (discussed 2026-06-12, user interest): flora &
+decoration —
+- Stage 1: cross-mesh (two diagonal quads) + cutout pass (alpha-test
+  discard in chunk.frag, non-greedy emission, non-opaque/non-solid
+  blocks). Also unlocks transparent CUTOUT LEAVES (drop the
+  dark-backdrop bake in import_mc_assets.py when it lands).
+- Stage 2: tall grass / flowers / dead bush (biome-driven density;
+  tallgrass.png is grayscale — bake the plains grass tint at import
+  like grass_top).
+- Stage 3: birch + spruce trees (new log/leaves pairs — APPEND-only
+  block registration, grow both atlas scripts in sync; conical spruce
+  in snowy, birch mixed into forests) + cactus (desert, sand-only, 1-3
+  tall; full cube first pass, vanilla's 14/16 inset later).
+
+Other backlog: inventory UI (gui/container/ sheets present; DrawImage
+ready), audio engine (1.12 .ogg hashed store surveyed — see M14 notes),
+flow-animated water (16x512 strip), underwater skylight attenuation,
+stars, world-list scrolling, settings screen.
 
 ## How to verify (UPDATED working agreement)
 

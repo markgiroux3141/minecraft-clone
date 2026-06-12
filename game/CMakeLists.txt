@@ -14,6 +14,8 @@ add_executable(game
     src/ui/Widgets.h
     src/world/Block.cpp
     src/world/Block.h
+    src/world/CaveGen.cpp
+    src/world/CaveGen.h
     src/world/Chunk.h
     src/world/ChunkMesher.cpp
     src/world/ChunkMesher.h
@@ -33,6 +35,7 @@ add_executable(game
 # Debug builds. Game logic stays fully debuggable.
 if(MSVC)
     set_source_files_properties(
+        src/world/CaveGen.cpp
         src/world/ChunkMesher.cpp
         src/world/LightEngine.cpp
         src/world/TerrainGen.cpp
@@ -58,6 +61,7 @@ vox_set_target_defaults(savetest)
 add_executable(gentest
     tests/GenTest.cpp
     src/world/Block.cpp
+    src/world/CaveGen.cpp
     src/world/ChunkMesher.cpp
     src/world/TerrainGen.cpp
 )

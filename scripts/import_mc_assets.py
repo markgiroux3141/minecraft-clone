@@ -96,6 +96,8 @@ def build_atlas(mc: Path, out_path: Path) -> None:
         load_tile(blocks / "log_oak_top.png"),
         leaves,
         water,
+        load_tile(blocks / "snow.png"),
+        load_tile(blocks / "grass_side_snowed.png"),
     ]
 
     strip = Image.new("RGBA", (TILE * len(tiles), TILE))

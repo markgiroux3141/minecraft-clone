@@ -34,6 +34,7 @@ BlockId Log = 0;
 BlockId Leaves = 0;
 BlockId Water = 0;
 std::array<BlockId, 7> WaterFlows{};
+BlockId SnowyGrass = 0;
 
 void RegisterDefaults() {
     auto& registry = BlockRegistry::Get();
@@ -86,6 +87,13 @@ void RegisterDefaults() {
         flow.liquidLevel = static_cast<uint8_t>(level);
         WaterFlows[static_cast<size_t>(level - 1)] = registry.Register(std::move(flow));
     }
+
+    // M15 biomes (appended after the M13 flow ids — save blobs store
+    // BlockIds): tiles 10 snow top, 11 snowed grass side.
+    BlockDef snowyGrass = BlockDef::Uniform("snowy grass", 11);
+    snowyGrass.faceTiles[static_cast<size_t>(BlockFace::PosY)] = 10;
+    snowyGrass.faceTiles[static_cast<size_t>(BlockFace::NegY)] = 1;
+    SnowyGrass = registry.Register(std::move(snowyGrass));
 
     GAME_INFO("Registered {} block types", registry.Count());
 }

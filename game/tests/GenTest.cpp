@@ -117,6 +117,70 @@ int main() {
     Check(trunksIntact, "trunks are contiguous across chunk seams");
     Check(leavesAnchored, "every leaf block has a trunk within reach");
 
+    // Caves (M15): carved air shows up as air with stone directly above
+    // (heightmap terrain has no other overhangs). The breach invariant:
+    // below sea level the only air is carved, and the carver's analytic
+    // water test guarantees it never touches worldgen water — a violation
+    // means cave-into-ocean leaks (waterfalls at chunk seams).
+    size_t caveAir = 0;
+    bool noOceanBreach = true;
+    for (int wz = lo; wz < hi; ++wz) {
+        for (int wx = lo; wx < hi; ++wx) {
+            for (int wy = 1; wy < vc::kWorldHeightBlocks - 1; ++wy) {
+                if (blockAt(wx, wy, wz) != vc::blocks::Air) {
+                    continue;
+                }
+                if (blockAt(wx, wy + 1, wz) == vc::blocks::Stone) {
+                    ++caveAir;
+                }
+                if (wy <= vc::TerrainGenerator::kSeaLevel) {
+                    noOceanBreach &= blockAt(wx + 1, wy, wz) != vc::blocks::Water &&
+                                     blockAt(wx - 1, wy, wz) != vc::blocks::Water &&
+                                     blockAt(wx, wy, wz + 1) != vc::blocks::Water &&
+                                     blockAt(wx, wy, wz - 1) != vc::blocks::Water &&
+                                     blockAt(wx, wy + 1, wz) != vc::blocks::Water &&
+                                     blockAt(wx, wy - 1, wz) != vc::blocks::Water;
+                }
+            }
+        }
+    }
+    Check(caveAir > 0, "caves actually carve");
+    Check(noOceanBreach, "carved air never touches worldgen water");
+
+    // Biomes (M15): sample columns ~512 blocks apart; the climate fields
+    // (~300-block features) must produce more than one surface family over
+    // a 2-km span. Also: snowy surfaces always sit on dirt (not stone).
+    {
+        bool sawGrass = false;
+        bool sawSnowOrDesert = false;
+        bool snowOnDirt = true;
+        for (int scz = -64; scz <= 64; scz += 32) {
+            for (int scx = -64; scx <= 64; scx += 32) {
+                std::array<vc::Chunk, vc::kWorldHeightChunks> column;
+                for (int cy = 0; cy < vc::kWorldHeightChunks; ++cy) {
+                    gen.Generate(column[static_cast<size_t>(cy)], {scx, cy, scz});
+                }
+                const auto columnBlock = [&](int lx, int wy, int lz) {
+                    return column[static_cast<size_t>(wy >> 4)].Get(lx, wy & 15, lz);
+                };
+                for (int wy = vc::kWorldHeightBlocks - 1; wy > 0; --wy) {
+                    const vc::BlockId id = columnBlock(8, wy, 8);
+                    if (id == vc::blocks::Air || id == vc::blocks::Water) {
+                        continue;
+                    }
+                    sawGrass |= id == vc::blocks::Grass;
+                    sawSnowOrDesert |= id == vc::blocks::SnowyGrass || id == vc::blocks::Sand;
+                    if (id == vc::blocks::SnowyGrass) {
+                        snowOnDirt &= columnBlock(8, wy - 1, 8) == vc::blocks::Dirt;
+                    }
+                    break;
+                }
+            }
+        }
+        Check(sawGrass && sawSnowOrDesert, "climate produces multiple biomes");
+        Check(snowOnDirt, "snowy grass sits on dirt");
+    }
+
     // Mesher smoke test: a lone stone block and a lone water block in an
     // otherwise empty snapshot. Decodes the packed vertex stream the same
     // way chunk.vert does.

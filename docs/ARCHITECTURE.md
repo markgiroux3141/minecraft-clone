@@ -100,9 +100,17 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   crosshair/hotbar/buttons via a new DrawImage sprite-sheet mode,
   textured sun + phased moon on additive sky billboards, and a night
   lighting rework (moonlight floor, moon-directional diffuse, blue cast).
-- **M15 — TBD**: candidates: visual polish (cutout leaves, underwater
-  skylight attenuation, stars, animated water), caves/biomes, inventory
-  UI, audio (needs an engine module; 1.12 .ogg store already surveyed).
+- **M15 — Caves + biomes** ✅: vanilla-1.12 worm caves (MapGenCaves port
+  with an exact java.util.Random clone, analytic ocean-breach test,
+  cave-aware tree gating via a carve mask), temperature/moisture climate
+  biomes (desert/plains/forest/snowy + new snowy-grass block), and
+  biome-driven topology (vanilla per-biome base/variation params blended
+  with the parabolic 5x5 kernel, ruggedness-ramped hills variants,
+  alpine snow line).
+- **M16 — TBD**: leading candidate: flora & decoration (cross-mesh +
+  cutout pass unlocking transparent leaves, then tall grass/flowers/dead
+  bush, then birch/spruce trees + cactus). Other candidates: inventory
+  UI, audio engine, animated water, underwater skylight attenuation.
 
 Each milestone lands as a vertical slice that runs; no big-bang integration.
 

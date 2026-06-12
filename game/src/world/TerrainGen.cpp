@@ -1,9 +1,13 @@
 #include "world/TerrainGen.h"
 
 #include <algorithm>
+#include <cmath>
+#include <memory>
+#include <unordered_map>
 
 #include <FastNoiseLite.h>
 
+#include "world/CaveGen.h"
 #include "world/Light.h" // kWorldHeightBlocks
 
 namespace vc {
@@ -15,10 +19,78 @@ namespace {
 // stands. Cell-based placement keeps trees naturally spaced and lets a
 // chunk enumerate exactly the cells whose canopy could reach it.
 constexpr int kTreeCell = 8;
-constexpr float kTreeChance = 0.45f;
 constexpr int kCanopyRadius = 2;
 // Beach band: columns this close to sea level get sand and no trees.
 constexpr int kBeachTop = TerrainGenerator::kSeaLevel + 2;
+
+// M15 biomes: two very-low-frequency climate fields (temperature and
+// moisture, ~300-block features) classify each column. Tree density and
+// the surface blocks follow the biome; the beach band overrides near sea
+// level.
+enum class Biome : uint8_t { Plains, Forest, Desert, Snowy };
+
+Biome ClassifyBiome(float temperature, float moisture) {
+    if (temperature > 0.65f && moisture < 0.40f) {
+        return Biome::Desert;
+    }
+    if (temperature < 0.32f) {
+        return Biome::Snowy;
+    }
+    if (moisture > 0.55f) {
+        return Biome::Forest;
+    }
+    return Biome::Plains;
+}
+
+float TreeChance(Biome biome) {
+    switch (biome) {
+    case Biome::Forest: return 0.85f;
+    case Biome::Plains: return 0.18f;
+    case Biome::Snowy: return 0.08f;
+    case Biome::Desert: return 0.0f;
+    }
+    return 0.0f;
+}
+
+// Topology, vanilla-style (ChunkGeneratorOverworld.generateHeightmap): each
+// biome contributes (baseHeight, heightVariation) in 1.12's units — desert/
+// plains 0.125/0.05 (flat), forest 0.1/0.2, taiga 0.2/0.2 for snowy. A
+// ruggedness field ramps cells toward the hills variants (extreme hills
+// 1.0/0.5; desert hills 0.45/0.3). Heights blend the params over a 5x5
+// neighborhood of 4-block biome cells with vanilla's parabolic kernel.
+struct BiomeParams {
+    float base;
+    float variation;
+};
+
+BiomeParams ParamsFor(Biome biome) {
+    switch (biome) {
+    case Biome::Desert: return {0.125f, 0.05f};
+    case Biome::Plains: return {0.125f, 0.05f};
+    case Biome::Forest: return {0.1f, 0.2f};
+    case Biome::Snowy: return {0.2f, 0.2f};
+    }
+    return {0.1f, 0.2f};
+}
+
+constexpr int kBiomeCell = 4; // blend resolution, like vanilla
+// Peaks above this get a snow cap regardless of climate (sandy excluded).
+constexpr int kSnowLine = 48;
+
+// 10 / sqrt(dx^2 + dz^2 + 0.2), vanilla's biomeWeights.
+const std::array<float, 25>& BiomeWeights() {
+    static const std::array<float, 25> weights = [] {
+        std::array<float, 25> w{};
+        for (int dz = -2; dz <= 2; ++dz) {
+            for (int dx = -2; dx <= 2; ++dx) {
+                w[static_cast<size_t>((dz + 2) * 5 + dx + 2)] =
+                    10.0f / std::sqrt(static_cast<float>(dx * dx + dz * dz) + 0.2f);
+            }
+        }
+        return w;
+    }();
+    return weights;
+}
 
 uint32_t Mix(uint32_t h) {
     h ^= h >> 16;
@@ -61,18 +133,29 @@ void SetIfAir(Chunk& chunk, const glm::ivec3& origin, int wx, int wy, int wz, Bl
 // Classic oak: trunk, two radius-2 leaf layers (minus corners) around the
 // trunk top, a 3x3 above, and a plus-shaped cap.
 void PlaceTree(Chunk& chunk, const glm::ivec3& origin, int tx, int ground, int tz, int trunk) {
-    // The dirt patch under the trunk (replaces the grass surface).
+    // The dirt patch under the trunk (replaces the grass/snowy surface).
     const int lx = tx - origin.x;
     const int ly = ground - origin.y;
     const int lz = tz - origin.z;
     if (lx >= 0 && lx < Chunk::kSize && ly >= 0 && ly < Chunk::kSize && lz >= 0 &&
-        lz < Chunk::kSize && chunk.Get(lx, ly, lz) == blocks::Grass) {
+        lz < Chunk::kSize &&
+        (chunk.Get(lx, ly, lz) == blocks::Grass || chunk.Get(lx, ly, lz) == blocks::SnowyGrass)) {
         chunk.Set(lx, ly, lz, blocks::Dirt);
     }
 
     const int top = ground + trunk;
     for (int wy = ground + 1; wy <= top; ++wy) {
-        SetIfAir(chunk, origin, tx, wy, tz, blocks::Log);
+        // Trunks grow through neighboring canopies (dense forests put
+        // leaves in the way before the trunk's own cell is visited).
+        const int wlx = tx - origin.x;
+        const int wly = wy - origin.y;
+        const int wlz = tz - origin.z;
+        if (wlx >= 0 && wlx < Chunk::kSize && wly >= 0 && wly < Chunk::kSize && wlz >= 0 &&
+            wlz < Chunk::kSize &&
+            (chunk.Get(wlx, wly, wlz) == blocks::Air ||
+             chunk.Get(wlx, wly, wlz) == blocks::Leaves)) {
+            chunk.Set(wlx, wly, wlz, blocks::Log);
+        }
     }
     for (int wy = top - 1; wy <= top; ++wy) {
         for (int dz = -kCanopyRadius; dz <= kCanopyRadius; ++dz) {
@@ -105,9 +188,75 @@ void TerrainGenerator::Generate(Chunk& chunk, const glm::ivec3& chunkCoord) cons
     noise.SetFractalOctaves(4);
     noise.SetFrequency(0.008f);
 
+    // Climate fields: smooth, unfractal, far lower frequency than terrain.
+    FastNoiseLite temperature(m_seed + 101);
+    temperature.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+    temperature.SetFrequency(0.0030f);
+    FastNoiseLite moisture(m_seed + 202);
+    moisture.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+    moisture.SetFrequency(0.0030f);
+    // Ruggedness ramps any biome toward its hills variant where it peaks.
+    FastNoiseLite rugged(m_seed + 303);
+    rugged.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+    rugged.SetFrequency(0.0035f);
+
+    const auto biomeAt = [&](int wx, int wz) {
+        const auto fx = static_cast<float>(wx);
+        const auto fz = static_cast<float>(wz);
+        return ClassifyBiome(temperature.GetNoise(fx, fz) * 0.5f + 0.5f,
+                             moisture.GetNoise(fx, fz) * 0.5f + 0.5f);
+    };
+
+    // Height params per 4-block biome cell, memoized — heightAt blends 25
+    // cells per column and columns repeat across trees/caves.
+    std::unordered_map<uint64_t, BiomeParams> cellCache;
+    const auto cellParams = [&](int cellX, int cellZ) {
+        const uint64_t key = (static_cast<uint64_t>(static_cast<uint32_t>(cellX)) << 32) |
+                             static_cast<uint32_t>(cellZ);
+        if (const auto it = cellCache.find(key); it != cellCache.end()) {
+            return it->second;
+        }
+        const auto fx = static_cast<float>(cellX * kBiomeCell + 2);
+        const auto fz = static_cast<float>(cellZ * kBiomeCell + 2);
+        const Biome biome = biomeAt(cellX * kBiomeCell + 2, cellZ * kBiomeCell + 2);
+        BiomeParams params = ParamsFor(biome);
+        const float r = rugged.GetNoise(fx, fz) * 0.5f + 0.5f;
+        const float hills = glm::smoothstep(0.60f, 0.85f, r);
+        const float hillBase = biome == Biome::Desert ? 0.45f : 1.0f;
+        const float hillVariation = biome == Biome::Desert ? 0.3f : 0.5f;
+        params.base = glm::mix(params.base, hillBase, hills);
+        params.variation = glm::mix(params.variation, hillVariation, hills);
+        cellCache.emplace(key, params);
+        return params;
+    };
+
+    // Vanilla's height blend: parabolic 5x5 kernel over biome cells, each
+    // weight divided by (base + 2) and HALVED when the neighbor is higher
+    // than the center cell — that asymmetry keeps cliff bases sharp.
     const auto heightAt = [&](int wx, int wz) {
-        return 24 + static_cast<int>(
-                        20.0f * noise.GetNoise(static_cast<float>(wx), static_cast<float>(wz)));
+        const int cellX = FloorDiv(wx, kBiomeCell);
+        const int cellZ = FloorDiv(wz, kBiomeCell);
+        const BiomeParams center = cellParams(cellX, cellZ);
+        const auto& weights = BiomeWeights();
+        float base = 0.0f;
+        float variation = 0.0f;
+        float total = 0.0f;
+        for (int dz = -2; dz <= 2; ++dz) {
+            for (int dx = -2; dx <= 2; ++dx) {
+                const BiomeParams p = cellParams(cellX + dx, cellZ + dz);
+                float w = weights[static_cast<size_t>((dz + 2) * 5 + dx + 2)] / (p.base + 2.0f);
+                if (p.base > center.base) {
+                    w *= 0.5f;
+                }
+                base += p.base * w;
+                variation += p.variation * w;
+                total += w;
+            }
+        }
+        base /= total;
+        variation /= total;
+        const float n = noise.GetNoise(static_cast<float>(wx), static_cast<float>(wz));
+        return 16 + static_cast<int>(base * 22.0f + n * (5.0f + variation * 34.0f));
     };
 
     const glm::ivec3 origin = chunkCoord * Chunk::kSize;
@@ -115,7 +264,10 @@ void TerrainGenerator::Generate(Chunk& chunk, const glm::ivec3& chunkCoord) cons
     for (int z = 0; z < Chunk::kSize; ++z) {
         for (int x = 0; x < Chunk::kSize; ++x) {
             const int height = heightAt(origin.x + x, origin.z + z);
-            const bool beach = height <= kBeachTop;
+            const Biome biome = biomeAt(origin.x + x, origin.z + z);
+            // Beach band overrides the biome near sea level (deserts are
+            // already sand; snowy shores stay sand too — close enough).
+            const bool sandy = height <= kBeachTop || biome == Biome::Desert;
 
             for (int y = 0; y < Chunk::kSize; ++y) {
                 const int wy = origin.y + y;
@@ -127,12 +279,14 @@ void TerrainGenerator::Generate(Chunk& chunk, const glm::ivec3& chunkCoord) cons
                     continue;
                 }
                 BlockId id = blocks::Stone;
-                if (beach) {
+                if (sandy) {
                     if (wy >= height - 2) {
                         id = blocks::Sand;
                     }
                 } else if (wy == height) {
-                    id = blocks::Grass;
+                    // Snowy climate, or an alpine cap on high hill peaks.
+                    id = (biome == Biome::Snowy || height >= kSnowLine) ? blocks::SnowyGrass
+                                                                        : blocks::Grass;
                 } else if (wy >= height - 3) {
                     id = blocks::Dirt;
                 }
@@ -140,6 +294,14 @@ void TerrainGenerator::Generate(Chunk& chunk, const glm::ivec3& chunkCoord) cons
             }
         }
     }
+
+    // Caves carve between fill and decoration (vanilla order). Same
+    // chunk-pure contract as the trees below: every chunk independently
+    // re-derives the tunnels that reach it. The mask records carved cells
+    // (chunk + skirt) so the tree gate below can veto candidates whose
+    // ground was opened — identically from every chunk sharing the tree.
+    auto mask = std::make_unique<caves::CarveMask>();
+    caves::Carve(chunk, chunkCoord, m_seed, heightAt, mask.get());
 
     // Decoration: every tree whose canopy can reach this chunk. Cells are
     // visited in the same (ascending) order from every chunk, so overlapping
@@ -151,11 +313,14 @@ void TerrainGenerator::Generate(Chunk& chunk, const glm::ivec3& chunkCoord) cons
 
     for (int cz = minCellZ; cz <= maxCellZ; ++cz) {
         for (int cx = minCellX; cx <= maxCellX; ++cx) {
-            if (Hash01(m_seed, cx, cz, 1) > kTreeChance) {
-                continue;
-            }
             const int tx = cx * kTreeCell + static_cast<int>(Hash(m_seed, cx, cz, 2) % kTreeCell);
             const int tz = cz * kTreeCell + static_cast<int>(Hash(m_seed, cx, cz, 3) % kTreeCell);
+            // Density follows the biome at the tree's own position, so the
+            // gate stays identical from every chunk that can see the tree.
+            const float chance = TreeChance(biomeAt(tx, tz));
+            if (chance <= 0.0f || Hash01(m_seed, cx, cz, 1) > chance) {
+                continue;
+            }
             const int ground = heightAt(tx, tz);
             if (ground <= kBeachTop) {
                 continue; // grass only — no beach or underwater trees
@@ -163,6 +328,9 @@ void TerrainGenerator::Generate(Chunk& chunk, const glm::ivec3& chunkCoord) cons
             const int trunk = 4 + static_cast<int>(Hash(m_seed, cx, cz, 4) % 3); // 4..6
             if (ground + trunk + 2 >= kWorldHeightBlocks) {
                 continue;
+            }
+            if (mask->Carved(tx - origin.x, ground - origin.y, tz - origin.z)) {
+                continue; // a cave opened the ground cell — no floating trees
             }
             PlaceTree(chunk, origin, tx, ground, tz, trunk);
         }
