@@ -120,6 +120,48 @@ int main() {
               "empty inventory reads back as present-but-empty (not absent)");
     }
     {
+        // Furnace block entities (M21): the furnaces.dat sidecar
+        // round-trips slots (incl. damage), burn, and cook progress;
+        // an empty set removes the file.
+        vc::WorldSave save(dir, 7);
+        Check(save.GetFurnaces().empty(), "pre-furnace save reads as no furnaces");
+        vc::WorldSave::FurnaceRecord a;
+        a.pos = {12, 5, -7};
+        a.id = {51, 1025, 52};
+        a.count = {3, 1, 2};
+        a.damage = {0, 37, 0};
+        a.burnTicks = 1234;
+        a.burnTotal = 1600;
+        a.cookTicks = 150;
+        vc::WorldSave::FurnaceRecord b;
+        b.pos = {-3, 0, 4};
+        save.SetFurnaces({a, b});
+        save.Flush(true);
+    }
+    {
+        vc::WorldSave save(dir, 7);
+        const auto& furnaces = save.GetFurnaces();
+        Check(furnaces.size() == 2, "furnaces reload from the sidecar");
+        Check(furnaces.size() == 2 && furnaces[0].pos == glm::ivec3(12, 5, -7) &&
+                  furnaces[0].id[0] == 51 && furnaces[0].count[0] == 3 &&
+                  furnaces[0].id[1] == 1025 && furnaces[0].damage[1] == 37 &&
+                  furnaces[0].id[2] == 52 && furnaces[0].count[2] == 2 &&
+                  furnaces[0].burnTicks == 1234 && furnaces[0].burnTotal == 1600 &&
+                  furnaces[0].cookTicks == 150,
+              "furnace slots/progress round-trip exactly");
+        Check(furnaces.size() == 2 && furnaces[1].pos == glm::ivec3(-3, 0, 4) &&
+                  furnaces[1].count[0] == 0 && furnaces[1].burnTicks == 0,
+              "empty furnace round-trips");
+        save.SetFurnaces({});
+        save.Flush(true);
+    }
+    {
+        vc::WorldSave save(dir, 7);
+        Check(save.GetFurnaces().empty(), "clearing furnaces removes them");
+        Check(!std::filesystem::exists(dir / "furnaces.dat"),
+              "empty furnace set deletes the sidecar");
+    }
+    {
         // M17/M18 saves wrote triples under the old "inventory" tag —
         // they must still parse (damage 0).
         std::ofstream out{dir / "level.dat"};

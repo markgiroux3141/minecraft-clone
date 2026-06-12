@@ -6,6 +6,7 @@
 
 #include "Inventory.h"
 #include "ui/Widgets.h"
+#include "world/Furnace.h"
 
 namespace vox {
 class UiRenderer;
@@ -28,6 +29,15 @@ public:
     static void Draw(vox::UiRenderer& ui, glm::vec2 screen, glm::vec2 mouse, bool leftClick,
                      bool rightClick, Inventory& inv, std::span<ItemStack> craft, int craftSize,
                      ItemStack& carried, ItemStack& thrown, const GuiTextures& tex);
+
+    // The furnace screen (M21): vanilla ContainerFurnace layout — input
+    // over fuel on the left, take-only output on the right, the flame and
+    // arrow overlays sized by the live FurnaceState (the world keeps
+    // ticking it while the screen is open).
+    static void DrawFurnace(vox::UiRenderer& ui, glm::vec2 screen, glm::vec2 mouse,
+                            bool leftClick, bool rightClick, Inventory& inv,
+                            FurnaceState& furnace, ItemStack& carried, ItemStack& thrown,
+                            const GuiTextures& tex);
 };
 
 } // namespace vc

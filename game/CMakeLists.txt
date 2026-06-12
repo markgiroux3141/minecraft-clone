@@ -31,9 +31,14 @@ add_executable(game
     src/world/Chunk.h
     src/world/ChunkMesher.cpp
     src/world/ChunkMesher.h
+    src/world/Furnace.cpp
+    src/world/Furnace.h
+    src/world/JavaRandom.h
     src/world/Light.h
     src/world/LightEngine.cpp
     src/world/LightEngine.h
+    src/world/OreGen.cpp
+    src/world/OreGen.h
     src/world/TerrainGen.cpp
     src/world/TerrainGen.h
     src/world/World.cpp
@@ -50,6 +55,7 @@ if(MSVC)
         src/world/CaveGen.cpp
         src/world/ChunkMesher.cpp
         src/world/LightEngine.cpp
+        src/world/OreGen.cpp
         src/world/TerrainGen.cpp
         PROPERTIES COMPILE_OPTIONS "$<$<CONFIG:Debug>:/O2>")
 endif()
@@ -75,6 +81,7 @@ add_executable(gentest
     src/world/Block.cpp
     src/world/CaveGen.cpp
     src/world/ChunkMesher.cpp
+    src/world/OreGen.cpp
     src/world/TerrainGen.cpp
 )
 target_include_directories(gentest PRIVATE src)

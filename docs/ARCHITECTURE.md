@@ -149,11 +149,15 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   ItemRenderer transform chains: 6-tick swing looped while digging,
   +-0.4-per-tick equip dip on slot change, drawn over a cleared depth
   buffer).
-- **M21 — Ores + furnace/smelting** (next, decided): coal/iron ore
-  worldgen (WorldGenMinable port, seam-deterministic), harvest tiers,
-  the furnace as the first block entity (per-block state, ticked,
-  persisted, GUI), coal fuel, iron ingots + iron tools. Details in
-  HANDOFF.md.
+- **M21 — Ores + furnace/smelting** ✅: coal/iron ore worldgen
+  (WorldGenMinable port, seam-deterministic 3x3 origin replay), pickaxe
+  harvest tiers (wood 0 / stone 1 / iron 2; iron ore needs stone+), the
+  furnace as the first block entity (World-owned position-keyed state,
+  ticked at 20 TPS, lit/unlit block-id swap, furnaces.dat sidecar
+  persistence, spill-on-break, vanilla GUI with flame/arrow progress),
+  smelting (iron ore -> ingot, sand -> new glass block, cobble ->
+  stone), coal/wood/stick fuels, and iron tools (efficiency 6,
+  250 uses).
 - **Backlog**: deeper world (kWorldHeightChunks 4 → 8), audio engine,
   torches, tall-grass wheat seeds (1/8 chance, BlockTallGrass — pairs
   with farming), animated water, lava, stars, world-list scrolling,

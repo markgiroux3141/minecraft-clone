@@ -142,6 +142,11 @@ void GameApp::OnInit() {
         m_guiTextures.craftingTable =
             vox::Texture2D::FromFile("mc/textures/gui/container/crafting_table.png");
     }
+    if (std::filesystem::exists(
+            vox::assets::Resolve("mc/textures/gui/container/furnace.png"))) {
+        m_guiTextures.furnace =
+            vox::Texture2D::FromFile("mc/textures/gui/container/furnace.png");
+    }
 
     m_skyShader = vox::Shader::FromFiles("shaders/sky.vert", "shaders/sky.frag");
     if (std::filesystem::exists(vox::assets::Resolve("mc/textures/environment/sun.png"))) {
@@ -397,11 +402,11 @@ void GameApp::ThrowItem(const vc::ItemStack& stack) {
     m_world->SpawnItem(origin, dir * 6.0f, stack.id, stack.count, 40, stack.damage);
 }
 
-void GameApp::OpenContainer(bool table) {
+void GameApp::OpenContainer(State container) {
     if (!m_world || m_state != State::Playing) {
         return;
     }
-    m_state = table ? State::Crafting : State::Inventory;
+    m_state = container;
     GetWindow().SetCursorCaptured(false);
     m_target.reset();
     m_digCell.reset();
@@ -537,8 +542,11 @@ void GameApp::HandleInput(double frameDt, int scroll) {
                 }
                 vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
                 const vc::ItemDef* tool = vc::ItemRegistry::Get().Find(hand.id);
+                // M21 tiers: the pickaxe must also reach the block's
+                // harvest level (iron ore wants stone+).
                 const bool canHarvest =
-                    !def.needsPickaxe || (tool && tool->tool == vc::ToolClass::Pickaxe);
+                    !def.needsPickaxe || (tool && tool->tool == vc::ToolClass::Pickaxe &&
+                                          tool->tier >= def.harvestLevel);
                 if (def.hardness <= 0.0f) {
                     m_digProgress = 1.0f; // plants: instant
                 } else {
@@ -603,7 +611,11 @@ void GameApp::HandleInput(double frameDt, int scroll) {
             m_world->GetBlock(m_target->block.x, m_target->block.y, m_target->block.z);
         if (targetId == vc::blocks::CraftingTable) {
             // Use beats place (vanilla, sans sneak): open the 3x3 grid.
-            OpenContainer(true);
+            OpenContainer(State::Crafting);
+            m_placeCooldown = kEditRepeatDelay;
+        } else if (targetId == vc::blocks::Furnace || targetId == vc::blocks::LitFurnace) {
+            m_openFurnace = m_target->block;
+            OpenContainer(State::Furnace);
             m_placeCooldown = kEditRepeatDelay;
         } else {
             const glm::ivec3 cell = m_target->block + m_target->normal;
@@ -686,12 +698,19 @@ void GameApp::DrawUi() {
         if (ContainerOpen()) {
             // Vanilla's darkened-world backdrop behind the container GUI.
             m_ui->DrawRect({0.0f, 0.0f}, screen, {0.06f, 0.06f, 0.06f, 0.75f});
-            const bool table = m_state == State::Crafting;
             vc::ItemStack thrown;
-            vc::InventoryScreen::Draw(*m_ui, screen, mouse, clicked, rightClicked, m_inventory,
-                                      std::span<vc::ItemStack>{m_craftGrid.data(),
-                                                               table ? size_t{9} : size_t{4}},
-                                      table ? 3 : 2, m_carried, thrown, m_guiTextures);
+            if (m_state == State::Furnace) {
+                vc::InventoryScreen::DrawFurnace(*m_ui, screen, mouse, clicked, rightClicked,
+                                                 m_inventory,
+                                                 m_world->FurnaceAt(m_openFurnace), m_carried,
+                                                 thrown, m_guiTextures);
+            } else {
+                const bool table = m_state == State::Crafting;
+                vc::InventoryScreen::Draw(
+                    *m_ui, screen, mouse, clicked, rightClicked, m_inventory,
+                    std::span<vc::ItemStack>{m_craftGrid.data(), table ? size_t{9} : size_t{4}},
+                    table ? 3 : 2, m_carried, thrown, m_guiTextures);
+            }
             if (!thrown.Empty()) {
                 ThrowItem(thrown);
             }
@@ -725,7 +744,7 @@ void GameApp::OnRender(double alpha, double frameDt) {
         if (ContainerOpen()) {
             CloseContainer();
         } else {
-            OpenContainer(false);
+            OpenContainer(State::Inventory);
         }
     }
     m_inventoryKeyWasDown = inventoryKey;

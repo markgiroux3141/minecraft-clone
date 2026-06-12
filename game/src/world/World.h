@@ -18,6 +18,7 @@
 
 #include "world/Chunk.h"
 #include "world/ChunkMesher.h"
+#include "world/Furnace.h"
 #include "world/Light.h"
 #include "world/LightEngine.h"
 #include "world/TerrainGen.h"
@@ -158,8 +159,9 @@ public:
 
     // Block-drop spawn, vanilla Block.spawnAsEntity: jittered to
     // cell + 0.25..0.75 with a small random scatter velocity. No-op when
-    // id is air or count <= 0.
-    void SpawnBlockDrop(const glm::ivec3& cell, uint16_t id, int count);
+    // id is air or count <= 0. damage rides along (furnace spills can
+    // hold worn tools).
+    void SpawnBlockDrop(const glm::ivec3& cell, uint16_t id, int count, int damage = 0);
     // Explicit spawn (player throws): pickupDelay 40 like vanilla's drops.
     void SpawnItem(const glm::vec3& pos, const glm::vec3& vel, uint16_t id, int count,
                    int pickupDelay, int damage = 0);
@@ -185,6 +187,13 @@ public:
             }
         }
     }
+
+    // Per-furnace block-entity state (M21), keyed by world position.
+    // Created empty on first access (RMB-open does it); ticked by Tick()
+    // while the chunk is loaded; spilled as drops and erased when the
+    // furnace block is replaced (see SetBlock). Persisted via the save
+    // store's furnaces.dat sidecar.
+    FurnaceState& FurnaceAt(const glm::ivec3& worldPos) { return m_furnaces[worldPos]; }
 
     // Packed light at a world position (sky 15 above the world, 0 when
     // unloaded/below). Used for entity lighting too.
@@ -359,6 +368,17 @@ private:
     std::priority_queue<BlockUpdate, std::vector<BlockUpdate>, LaterFirst> m_blockUpdates;
     std::vector<FallingBlock> m_fallingBlocks; // settled back into blocks in ~World
     std::vector<ItemEntity> m_itemEntities;    // not persisted (see ItemEntity)
+    // Furnace block entities by world position (main-thread, like the
+    // chunk map). Entries whose chunk is unloaded just idle in the map
+    // (tiny) and resume ticking when it streams back in.
+    std::unordered_map<glm::ivec3, FurnaceState, IVec3Hash> m_furnaces;
+
+    // One 20-TPS step of every loaded furnace: vanilla burn/cook rules
+    // plus the lit/unlit block swap (relight rides the normal edit path).
+    void TickFurnaces();
+    // Snapshot m_furnaces into the save store (autosave/quit companion to
+    // SaveEditedChunks).
+    void SaveFurnaces();
 
     // One tick of EntityItem physics for every dropped item (called from
     // Tick): move with axis-separated collision, drag, merge, despawn.

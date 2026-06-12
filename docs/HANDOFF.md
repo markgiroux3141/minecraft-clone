@@ -2,10 +2,11 @@
 
 Updated: 2026-06-12, written for a FRESH CONTEXT. M0-M20 are all done
 and USER-VERIFIED (M20 "perfect" after two follow-up fixes: arm
-orientation + mouse-wheel hotbar scroll). M21 is DECIDED with the
-user: ORES + FURNACE/SMELTING — see the M21 section at the bottom and
-start there. Read alongside `ARCHITECTURE.md` (layering rules,
-roadmap) and `CLAUDE.md` (build commands, conventions).
+orientation + mouse-wheel hotbar scroll). M21 (ORES +
+FURNACE/SMELTING) is CODE COMPLETE awaiting user verification — see
+its section at the bottom for what was built and what to test. Read
+alongside `ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md`
+(build commands, conventions).
 
 IMPORTANT RESOURCE: the user has Minecraft's Java source (MCP 9.40 =
 1.12) at `D:\Minecraft source code` — look up exact game dynamics there
@@ -874,83 +875,120 @@ fly-mode instant breaks also burst; particles fade out after a couple
 seconds; placing swings once; night: hand and chips dim with the
 world. Esc/pause freezes the swing mid-pose; resume continues.
 
-## Next: M21 — Ores + furnace/smelting (DECIDED with the user)
+## M21 — Ores + furnace/smelting (how it works)
 
-Agreed 2026-06-12 ("the next work is the smelting and ore"). Extends
-the survival ladder: coal for fuel/torches?, iron tier tools, and the
-first block with per-block STATE (the furnace) — that's the
-architectural centerpiece. Suggested scope, with vanilla references
-already looked up:
+CODE COMPLETE 2026-06-12, awaiting user verification. Build + gentest
++ savetest all pass; quick title-screen launch was clean (62-layer
+atlas, furnace.png loads, clean shutdown). NEW WORLD recommended for
+ore hunting (old saves regenerate unedited chunks with veins, but
+near-spawn chunks you've edited keep their pre-ore stone).
 
-- Ore worldgen (TerrainGen, after caves like vanilla): coal ore +
-  iron ore blocks. Vanilla defaults (ChunkGeneratorSettings.Factory):
-  coal 20 veins/chunk of size 17, y 0..128; iron 20 veins of size 9,
-  y 0..64. Our world is 64 tall (surface ~y19-44), so RESCALE like
-  the cave start heights were (M15): e.g. coal anywhere below
-  surface, iron biased low (say y < 32) to keep "dig deeper for
-  iron". Vein shape: WorldGenMinable (an angled ellipsoid swept
-  between two points — worth porting for the authentic vein feel; it
-  must be SEAM-DETERMINISTIC like trees/cactus, the per-chunk
-  replay + carve-mask pattern from M15/M16 is the template). Ores
-  only replace stone. gentest should grow: veins generate, are
-  deterministic across seams, and never replace non-stone.
-- New blocks: coal_ore, iron_ore (tiles append at 50+; BOTH texture
-  scripts + atlas layer order comment). needsPickaxe + Pickaxe class,
-  hardness 3.0 (vanilla both). Drops: coal ore -> coal ITEM (vanilla,
-  +instant); iron ore -> drops ITSELF (vanilla — must be smelted).
-  Furnace + lit_furnace blocks: hardness 3.5, lit variant emits
-  light 14 (vanilla 0.875*15 ≈ 13... use 13) and is a SEPARATE
-  appended block id (swap on state change like water flows). Front
-  face texture: furnace_front_off/_on (no orientation data yet — same
-  +X-facing limitation as the crafting table, fine).
-- New items: coal, iron_ingot (sprites items/coal.png,
-  items/iron_ingot.png), iron pickaxe/axe/shovel (efficiency 6.0,
-  durability 250 — vanilla ToolMaterial.IRON). Crafting: iron tools
-  from ingots (same patterns), 8 cobble ring -> furnace. Consider
-  TORCHES (coal+stick -> 4) as the killer coal use — needs a non-cube
-  block model + block light 14; could be its own follow-up if too
-  much.
-- Harvest TIERS (vanilla: iron ore needs a STONE pickaxe, harvest
-  level 1): needsPickaxe (bool) should become `harvestLevel` (0 =
-  wood pickaxe suffices, 1 = stone+) and ItemDef grows a tier field.
-  Small change, do it while touching the gating.
-- THE FURNACE (the real work) — first block entity:
-  - State: {input, fuel, output ItemStacks; burnTicks left,
-    burnTotal; cookTicks}. Vanilla TileEntityFurnace: cook time 200
-    ticks; fuel burn times via getItemBurnTime (coal 1600, planks
-    300, log 300, stick 100, crafting table/wood blocks 300). Smelt
-    recipes for now: iron_ore -> iron_ingot, sand -> ...glass? (no
-    glass block yet — could add, cheap, classic) — keep registry
-    extensible (FurnaceRecipes analog, tiny).
-  - Storage: World-owned `unordered_map<ivec3, FurnaceState>`
-    (main-thread, like the chunk map). Created on furnace place,
-    destroyed on break (contents SPILL as item drops — vanilla).
-    Ticked in World::Tick (only loaded chunks). Lit/unlit block swap
-    via SetBlock when burn starts/stops (relight just works).
-  - PERSISTENCE: new manifest section or (better) a sidecar file
-    `furnaces.dat` in the save dir — slot stacks + progress per
-    position. savetest grows a round-trip. Chunks with furnaces are
-    "edited" already (placed block), so regen never wipes one.
-  - GUI: gui/container/furnace.png (add to import COPIES),
-    ContainerFurnace slots: input (56,17), fuel (56,53), output
-    (116,35); flame + arrow progress overlays are in the sheet right
-    of the panel (vanilla draws sub-rects sized by progress —
-    UiRenderer::DrawImage handles it). InventoryScreen's craftSize
-    param pattern extends: probably a third mode or a small dedicated
-    FurnaceScreen sharing the slot helpers (slot click rules are
-    identical; output slot is take-only like the craft result).
-    GameApp: RMB on furnace -> open (like the crafting table); a
-    `State::Furnace` or generalize State::Crafting to carry the open
-    block's position (the GUI needs to know WHICH furnace).
-- Verify: build + savetest + gentest (ore checks), then the user
-  plays: find coal at any depth / iron low, mine iron ore with stone
-  pick (wooden pick: no drop), craft furnace, smelt with various
-  fuels (watch flame/arrow), pull ingots, craft iron tools (6x dig
-  speed, 250 uses), furnace keeps smelting with the GUI closed,
-  contents survive save/quit, breaking a furnace spills its slots.
+- Ore worldgen (world/OreGen.h/.cpp, called from TerrainGen right
+  after caves::Carve so veins never deposit into carved air): an
+  exact WorldGenMinable port — ellipsoid of sin-bulged radius swept
+  between two jittered endpoints, every random draw unconditional so
+  the sequence never diverges. Seam determinism via the M15 replay
+  pattern: each chunk replays the 3x3 origin chunks around it (max
+  vein reach ≈ 27 blocks from the origin corner < 32), origins seeded
+  with vanilla's population mix (ocx*341873128712 + ocz*132897987541
+  ^ seed), ascending visit order so overlapping veins resolve
+  identically everywhere. Veins ONLY replace stone. Densities
+  rescaled to our 64-tall world (OreParams in OreGen.cpp): coal 10
+  veins/chunk size 17 y2..47, iron 12 veins size 9 y2..27 ("dig
+  deeper for iron"). The JavaRandom clone moved from CaveGen.cpp to
+  world/JavaRandom.h (shared; grew NextDouble) — CaveGen includes it
+  now. gentest grew: coal+iron generate, iron stays below y32, ore
+  cells never sit in open space.
+- New blocks (tiles 50..56, appended in BOTH texture scripts): coal
+  ore (drop = coal ITEM — patched in items::RegisterDefaults since
+  item ids don't exist at block-registration time, same late-patch
+  pattern as stone->cobble), iron ore (drops itself, harvestLevel 1),
+  furnace + lit furnace (hardness 3.5, front +X like the crafting
+  table; lit emits light 13 and is a separate appended id swapped by
+  the burn state — relight rides the normal edit path), glass
+  (cutout cube like leaves; glass-on-glass interior faces show where
+  vanilla would cull them — accepted). BlockDef::drop is now
+  documented as a unified ItemId (uint16 fits both halves).
+- Harvest tiers: BlockDef grew `harvestLevel` (0/1/2), ItemDef grew
+  `tier` (wood 0, stone 1, iron 2). GameApp's canHarvest is now
+  pickaxe-in-hand AND tier >= harvestLevel; everything else (the /100
+  dig rate, no drop) unchanged. Iron ore is the only level-1 block.
+- New items (tiles 57..61): coal, iron ingot, iron pickaxe/axe/shovel
+  (efficiency 6.0, 250 uses — vanilla IRON). Recipes added: iron
+  tools (same patterns via the tools() helper), 8-cobble ring ->
+  furnace. 14 recipes total. Torches deferred (need a non-cube
+  model).
+- THE FURNACE (first block entity):
+  - `FurnaceState` (world/Furnace.h): input/fuel/output ItemStacks +
+    burnTicks/burnTotal/cookTicks. furnace::Tick() is a pure-state
+    port of TileEntityFurnace.update (cook 200 ticks; partial cook
+    decays -2/tick while unlit; fuel consumed only when a smelt can
+    start), returns "burning" and World swaps Furnace/LitFurnace ids
+    when that changes. Smelt registry (furnace::SmeltResult): iron
+    ore -> ingot, sand -> glass, cobble -> stone. Fuels
+    (furnace::BurnTime): coal 1600, planks/logs/crafting table 300,
+    wooden tools 200, stick 100.
+  - Storage: World-owned `m_furnaces` map (world pos -> state,
+    main-thread). Created lazily by World::FurnaceAt (RMB-open does
+    it). World::TickFurnaces (from Tick): skips furnaces whose chunk
+    is unloaded (state idles in the map), erases stale entries whose
+    loaded block isn't a furnace. SetBlock spills all three slots as
+    item drops (damage preserved — SpawnBlockDrop grew a damage
+    param) and erases the state when a furnace block is replaced by a
+    non-furnace id; the lit/unlit swap stays in the family so it
+    keeps state. Time does NOT pass for furnaces in unloaded chunks
+    or while paused (vanilla-ish enough).
+  - Persistence: `furnaces.dat` sidecar in the save dir (text, one
+    line per furnace: pos + 3x{id count damage} + burn/burnTotal/
+    cook). WorldSave::Get/SetFurnaces; SetFurnaces only marks dirty —
+    the debounced Flush writes it (furnaces change every tick while
+    burning, unlike the manifest setters). World::SaveEditedChunks
+    snapshots the map into the store, so the 30 s autosave and the
+    quit path both cover it; empty set deletes the file. savetest
+    grew a full round-trip (slots incl. tool damage, progress,
+    empty-furnace, file removal).
+  - GUI: InventoryScreen::DrawFurnace — vanilla ContainerFurnace
+    layout (input 56,17 / fuel 56,53 / output 116,35 take-only) over
+    gui/container/furnace.png (added to import COPIES; procedural
+    fallback draws the panel + orange burn / white cook bars). Flame
+    and arrow overlays are GuiFurnace's exact sub-rects at sheet
+    x176, sized by the LIVE state (the world keeps ticking it while
+    open). GameApp: State::Furnace joined the container states
+    (ContainerOpen covers it: E/Esc close, world ticks, physics run
+    input-less); RMB on a furnace stores m_openFurnace and opens.
+    OpenContainer(bool) became OpenContainer(State). Closing returns
+    only the cursor stack — furnace slots stay in the furnace.
+- Known M21 limits: no torches yet (coal's only use is fuel),
+  furnace front faces +X regardless of placement (same as the
+  crafting table), no charcoal/no XP, lit furnace sits in the
+  creative palette (placing it gives an always-lit furnace until
+  something opens/ticks it to unlit), no shift-click quick-move into
+  slots, no hopper-style automation (far future).
 
-Audio engine remains the post-M21 front-runner (dig/place sounds
-would complete the mining feel).
+What the user should test (NEW WORLD recommended): dig a cave or
+strip-mine — coal ore at any depth, iron only deep (y<28, i.e. well
+below the surface); coal ore with a wooden pick pops the coal ITEM
+(flat sprite); iron ore with a WOODEN pick: slow dig, NO drop; with a
+stone pick it drops the ore block itself. Craft a furnace (8 cobble
+ring in the 3x3), place it, RMB opens the GUI: ore in the top slot,
+coal (or planks/sticks) below -> flame lights, front texture glows,
+arrow sweeps ~10 s per item, ingots land in the output (take-only
+slot). Furnace keeps smelting with the GUI closed (watch the lit
+front + light it casts at night) and goes dark when fuel/input runs
+out. Smelt sand -> glass (place it — see-through cutout cube) and
+cobble -> stone. Iron tools from 2 sticks + 3 ingots: noticeably
+faster (6x) digging, durability bar wears over 250 uses. Break a
+loaded furnace mid-smelt -> contents spill as drops + the furnace
+block drops. Quit + reload mid-smelt -> slots, burn, and progress
+survive. An old M19/M20 world still loads fine (its furnaces.dat is
+just absent).
+
+## Next: audio engine (front-runner, NOT yet decided with the user)
+
+Dig/place sounds would complete the mining feel; the 1.12 .ogg
+hashed-store survey is in the M14 notes. Torches are the natural
+small M21 follow-up (coal+stick -> 4; needs a non-cube block model +
+block light 14). Confirm scope with the user first.
 
 Other backlog: deeper world (kWorldHeightChunks 4 -> 8, rebase
 topology + cave start heights — discussed 2026-06-12, deferred), audio

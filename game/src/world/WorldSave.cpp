@@ -80,6 +80,7 @@ WorldSave::WorldSave(std::filesystem::path dir, int defaultSeed)
                    ec.message());
     }
     ReadManifest(defaultSeed);
+    ReadFurnaces();
 
     for (const auto& entry : std::filesystem::directory_iterator(m_dir, ec)) {
         if (entry.is_regular_file() && entry.path().extension() == ".vxr") {
@@ -177,6 +178,58 @@ void WorldSave::SetInventory(std::vector<InventorySlot> slots) {
     WriteManifest();
 }
 
+void WorldSave::ReadFurnaces() {
+    std::ifstream in{m_dir / "furnaces.dat"};
+    if (!in) {
+        return;
+    }
+    std::string tag;
+    while (in >> tag && tag == "furnace") {
+        FurnaceRecord r;
+        if (!(in >> r.pos.x >> r.pos.y >> r.pos.z >> r.id[0] >> r.count[0] >> r.damage[0] >>
+              r.id[1] >> r.count[1] >> r.damage[1] >> r.id[2] >> r.count[2] >> r.damage[2] >>
+              r.burnTicks >> r.burnTotal >> r.cookTicks)) {
+            GAME_ERROR("Save: malformed furnaces.dat line; later furnaces dropped");
+            return;
+        }
+        m_furnaces.push_back(r);
+    }
+}
+
+void WorldSave::WriteFurnaces() const {
+    const auto path = m_dir / "furnaces.dat";
+    if (m_furnaces.empty()) {
+        std::error_code ec;
+        std::filesystem::remove(path, ec);
+        return;
+    }
+    const auto tmp = m_dir / "furnaces.dat.tmp";
+    {
+        std::ofstream out{tmp, std::ios::trunc};
+        for (const FurnaceRecord& r : m_furnaces) {
+            out << "furnace " << r.pos.x << ' ' << r.pos.y << ' ' << r.pos.z;
+            for (int slot = 0; slot < 3; ++slot) {
+                out << ' ' << r.id[slot] << ' ' << r.count[slot] << ' ' << r.damage[slot];
+            }
+            out << ' ' << r.burnTicks << ' ' << r.burnTotal << ' ' << r.cookTicks << '\n';
+        }
+        if (!out) {
+            GAME_ERROR("Save: failed writing {}", tmp.string());
+            return;
+        }
+    }
+    std::error_code ec;
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) {
+        GAME_ERROR("Save: failed replacing {} ({})", path.string(), ec.message());
+    }
+}
+
+void WorldSave::SetFurnaces(std::vector<FurnaceRecord> furnaces) {
+    m_furnaces = std::move(furnaces);
+    m_furnacesDirty = true;
+}
+
 void WorldSave::ReadRegionFile(const std::filesystem::path& path) {
     std::ifstream in{path, std::ios::binary};
     std::vector<uint8_t> file{std::istreambuf_iterator<char>(in),
@@ -263,7 +316,7 @@ void WorldSave::Put(const glm::ivec3& chunkCoord, const Chunk& chunk) {
 }
 
 void WorldSave::Flush(bool force) {
-    if (m_dirtyRegions.empty()) {
+    if (m_dirtyRegions.empty() && !m_furnacesDirty) {
         return;
     }
     const auto now = std::chrono::steady_clock::now();
@@ -274,8 +327,14 @@ void WorldSave::Flush(bool force) {
     for (const auto& region : m_dirtyRegions) {
         WriteRegionFile(region);
     }
-    GAME_INFO("Save: wrote {} region file(s)", m_dirtyRegions.size());
+    if (!m_dirtyRegions.empty()) {
+        GAME_INFO("Save: wrote {} region file(s)", m_dirtyRegions.size());
+    }
     m_dirtyRegions.clear();
+    if (m_furnacesDirty) {
+        WriteFurnaces();
+        m_furnacesDirty = false;
+    }
 }
 
 void WorldSave::WriteRegionFile(const glm::ivec2& region) const {

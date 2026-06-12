@@ -23,6 +23,8 @@ struct ItemDef {
     float efficiency = 1.0f; // dig-speed multiplier on matching blocks
     int maxDamage = 0;       // tool durability in uses; 0 = not damageable
     int maxStack = 64;       // tools stack to 1
+    int tier = 0; // pickaxe harvest tier vs BlockDef::harvestLevel (M21):
+                  // wood 0, stone 1, iron 2
 };
 
 class ItemRegistry {
@@ -55,6 +57,13 @@ extern ItemId WoodShovel;
 extern ItemId StonePickaxe;
 extern ItemId StoneAxe;
 extern ItemId StoneShovel;
+// M21: coal (fuel, from coal ore), iron ingot (smelted from iron ore),
+// and the iron tool tier.
+extern ItemId Coal;
+extern ItemId IronIngot;
+extern ItemId IronPickaxe;
+extern ItemId IronAxe;
+extern ItemId IronShovel;
 
 // Call after blocks::RegisterDefaults() (item sprites follow the block
 // tiles in the atlas).

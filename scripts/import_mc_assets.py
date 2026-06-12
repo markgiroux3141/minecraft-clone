@@ -38,6 +38,9 @@ COPIES = [
     # Crafting table panel (M19): same layout family, 3x3 grid + result.
     ("textures/gui/container/crafting_table.png",
      "textures/gui/container/crafting_table.png"),
+    # Furnace panel (M21): flame/arrow progress overlays sit right of the
+    # panel art at x 176.
+    ("textures/gui/container/furnace.png", "textures/gui/container/furnace.png"),
     # Celestial sheets: opaque with black backgrounds, drawn additively.
     ("textures/environment/sun.png", "textures/environment/sun.png"),
     ("textures/environment/moon_phases.png", "textures/environment/moon_phases.png"),
@@ -165,6 +168,20 @@ def build_atlas(mc: Path, out_path: Path) -> None:
         load_tile(items / "stone_pickaxe.png"),
         load_tile(items / "stone_axe.png"),
         load_tile(items / "stone_shovel.png"),
+        # M21: ores (50/51), furnace (52..55), glass (56 — cutout like
+        # leaves, interior alpha survives), then coal/iron item sprites.
+        load_tile(blocks / "coal_ore.png"),
+        load_tile(blocks / "iron_ore.png"),
+        load_tile(blocks / "furnace_front_off.png"),
+        load_tile(blocks / "furnace_front_on.png"),
+        load_tile(blocks / "furnace_side.png"),
+        load_tile(blocks / "furnace_top.png"),
+        load_tile(blocks / "glass.png"),
+        load_tile(items / "coal.png"),
+        load_tile(items / "iron_ingot.png"),
+        load_tile(items / "iron_pickaxe.png"),
+        load_tile(items / "iron_axe.png"),
+        load_tile(items / "iron_shovel.png"),
     ]
 
     strip = Image.new("RGBA", (TILE * len(tiles), TILE))

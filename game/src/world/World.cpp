@@ -104,7 +104,23 @@ bool FaceSlabDiffers(const ChunkLight& a, const ChunkLight& b, int axis, int sid
 World::World(int defaultSeed, std::filesystem::path saveDir)
     : m_save(std::move(saveDir), defaultSeed), m_generator(m_save.Seed()),
       m_meshPool(ChunkVertexLayout(), kQuadPattern, 4, kInitialPoolVertices),
-      m_lastAutosave(std::chrono::steady_clock::now()) {}
+      m_lastAutosave(std::chrono::steady_clock::now()) {
+    // Furnace block entities saved with the world; slots holding ids from
+    // a newer build than this one are dropped rather than crashing.
+    for (const auto& r : m_save.GetFurnaces()) {
+        FurnaceState state;
+        ItemStack* slots[3] = {&state.input, &state.fuel, &state.output};
+        for (int slot = 0; slot < 3; ++slot) {
+            if (ItemExists(r.id[slot]) && r.count[slot] > 0) {
+                *slots[slot] = {r.id[slot], r.count[slot], std::max(r.damage[slot], 0)};
+            }
+        }
+        state.burnTicks = std::max(r.burnTicks, 0);
+        state.burnTotal = std::max(r.burnTotal, 0);
+        state.cookTicks = std::clamp(r.cookTicks, 0, furnace::kCookTicks);
+        m_furnaces.emplace(r.pos, state);
+    }
+}
 
 World::~World() {
     // Blocks still in flight settle instantly so they persist.
@@ -130,6 +146,27 @@ void World::SaveEditedChunks() {
             entry.edited = false;
         }
     }
+    SaveFurnaces();
+}
+
+void World::SaveFurnaces() {
+    std::vector<WorldSave::FurnaceRecord> records;
+    records.reserve(m_furnaces.size());
+    for (const auto& [pos, state] : m_furnaces) {
+        WorldSave::FurnaceRecord r;
+        r.pos = pos;
+        const ItemStack* slots[3] = {&state.input, &state.fuel, &state.output};
+        for (int slot = 0; slot < 3; ++slot) {
+            r.id[slot] = slots[slot]->id;
+            r.count[slot] = slots[slot]->count;
+            r.damage[slot] = slots[slot]->damage;
+        }
+        r.burnTicks = state.burnTicks;
+        r.burnTotal = state.burnTotal;
+        r.cookTicks = state.cookTicks;
+        records.push_back(r);
+    }
+    m_save.SetFurnaces(std::move(records));
 }
 
 BlockId World::GetBlock(int wx, int wy, int wz) const {
@@ -157,8 +194,23 @@ void World::SetBlock(const glm::ivec3& worldPos, BlockId id) {
     }
     ChunkEntry& entry = it->second;
     const glm::ivec3 local{worldPos.x & 15, worldPos.y & 15, worldPos.z & 15};
-    if (entry.blocks->Get(local.x, local.y, local.z) == id) {
+    const BlockId oldId = entry.blocks->Get(local.x, local.y, local.z);
+    if (oldId == id) {
         return;
+    }
+
+    // A furnace replaced by anything that isn't a furnace (the lit/unlit
+    // swap stays in the family) spills its slots as drops and loses its
+    // block-entity state — vanilla's breakBlock behavior.
+    const auto isFurnace = [](BlockId b) { return b == blocks::Furnace || b == blocks::LitFurnace; };
+    if (isFurnace(oldId) && !isFurnace(id)) {
+        if (const auto furnaceIt = m_furnaces.find(worldPos); furnaceIt != m_furnaces.end()) {
+            for (const ItemStack* slot : {&furnaceIt->second.input, &furnaceIt->second.fuel,
+                                          &furnaceIt->second.output}) {
+                SpawnBlockDrop(worldPos, slot->id, slot->count, slot->damage);
+            }
+            m_furnaces.erase(furnaceIt);
+        }
     }
 
     // Copy-on-write: in-flight snapshots keep the old chunk alive.
@@ -339,7 +391,34 @@ void World::Tick() {
         ++i;
     }
 
+    TickFurnaces();
     TickItemEntities();
+}
+
+void World::TickFurnaces() {
+    for (auto it = m_furnaces.begin(); it != m_furnaces.end();) {
+        const glm::ivec3 pos = it->first;
+        const BlockId at = GetBlock(pos.x, pos.y, pos.z);
+        if (at != blocks::Furnace && at != blocks::LitFurnace) {
+            const glm::ivec3 cc{pos.x >> 4, pos.y >> 4, pos.z >> 4};
+            const auto chunkIt = m_chunks.find(cc);
+            if (chunkIt != m_chunks.end() && chunkIt->second.blocks) {
+                // Loaded chunk, no furnace block: stale state (the spill
+                // path normally erases it first) — drop it.
+                it = m_furnaces.erase(it);
+                continue;
+            }
+            ++it; // chunk not loaded — idle until it streams back in
+            continue;
+        }
+        const bool burning = furnace::Tick(it->second);
+        if (burning != (at == blocks::LitFurnace)) {
+            // Lit/unlit swap; same family, so SetBlock keeps the state.
+            // Emission 13 relights through the normal edit path.
+            SetBlock(pos, burning ? blocks::LitFurnace : blocks::Furnace);
+        }
+        ++it;
+    }
 }
 
 namespace {
@@ -360,7 +439,7 @@ constexpr int kItemMergeMax = 64;       // == kMaxStackSize (Inventory.h)
 
 } // namespace
 
-void World::SpawnBlockDrop(const glm::ivec3& cell, uint16_t id, int count) {
+void World::SpawnBlockDrop(const glm::ivec3& cell, uint16_t id, int count, int damage) {
     // Vanilla Block.spawnAsEntity: jitter into the middle half of the cell;
     // EntityItem's constructor adds the small scatter velocity (b/tick
     // 0.2 up, +-0.1 sideways -> b/s at 20 TPS).
@@ -368,7 +447,7 @@ void World::SpawnBlockDrop(const glm::ivec3& cell, uint16_t id, int count) {
                         static_cast<float>(cell.y) + 0.25f + ItemRand01() * 0.5f,
                         static_cast<float>(cell.z) + 0.25f + ItemRand01() * 0.5f};
     const glm::vec3 vel{(ItemRand01() - 0.5f) * 4.0f, 4.0f, (ItemRand01() - 0.5f) * 4.0f};
-    SpawnItem(pos, vel, id, count, 10);
+    SpawnItem(pos, vel, id, count, 10, damage);
 }
 
 void World::SpawnItem(const glm::vec3& pos, const glm::vec3& vel, uint16_t id, int count,

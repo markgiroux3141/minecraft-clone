@@ -4,6 +4,7 @@
 // chunk regenerates which part of it — seam bugs show up as floating
 // leaves or truncated trunks. Exits 0 on pass, 1 on the first failure.
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <unordered_map>
@@ -184,6 +185,46 @@ int main() {
     }
     Check(caveAir > 0, "caves actually carve");
     Check(noOceanBreach, "carved air never touches worldgen water");
+
+    // Ores (M21): coal and iron veins generate, iron stays in the low
+    // band (the "dig deeper" rule), and every ore cell is buried like the
+    // stone it replaced — an ore floating in air or water would mean the
+    // carve/ore order or the stone-only predicate broke.
+    {
+        size_t coal = 0;
+        size_t iron = 0;
+        int ironMaxY = 0;
+        bool oreInStone = true;
+        for (int wz = lo; wz < hi; ++wz) {
+            for (int wx = lo; wx < hi; ++wx) {
+                for (int wy = 1; wy < vc::kWorldHeightBlocks - 1; ++wy) {
+                    const vc::BlockId id = blockAt(wx, wy, wz);
+                    if (id != vc::blocks::CoalOre && id != vc::blocks::IronOre) {
+                        continue;
+                    }
+                    id == vc::blocks::CoalOre ? ++coal : ++iron;
+                    if (id == vc::blocks::IronOre) {
+                        ironMaxY = std::max(ironMaxY, wy);
+                    }
+                    // Veins only replace stone, so an ore cell must touch
+                    // at least one solid neighbor on every axis pair —
+                    // cheap proxy: it can't be fully surrounded by air.
+                    bool buried = false;
+                    constexpr int kD[6][3] = {{1, 0, 0},  {-1, 0, 0}, {0, 1, 0},
+                                              {0, -1, 0}, {0, 0, 1},  {0, 0, -1}};
+                    for (const auto& d : kD) {
+                        const vc::BlockId n = blockAt(wx + d[0], wy + d[1], wz + d[2]);
+                        buried |= n != vc::blocks::Air && n != vc::blocks::Water;
+                    }
+                    oreInStone &= buried;
+                }
+            }
+        }
+        Check(coal > 0, "coal veins actually generate");
+        Check(iron > 0, "iron veins actually generate");
+        Check(ironMaxY < 32, "iron stays in the deep band");
+        Check(oreInStone, "ore cells sit in terrain, not open space");
+    }
 
     // Bedrock floor: solid at y0, ragged only through y4, nowhere else —
     // neither players (unbreakable) nor caves (not replaceable) can open

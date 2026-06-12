@@ -35,17 +35,20 @@ protected:
 private:
     // Title/world-select (no world, free cursor), captured-cursor gameplay,
     // the pause menu (free cursor, sim frozen), or a container screen —
-    // inventory with the 2x2 grid, or a crafting table's 3x3 (free
-    // cursor, world keeps ticking, player physics run input-less).
-    enum class State : uint8_t { Title, Playing, Paused, Inventory, Crafting };
+    // inventory with the 2x2 grid, a crafting table's 3x3, or an open
+    // furnace (free cursor, world keeps ticking, player physics run
+    // input-less).
+    enum class State : uint8_t { Title, Playing, Paused, Inventory, Crafting, Furnace };
 
     void SetPaused(bool paused);
     bool ContainerOpen() const {
-        return m_state == State::Inventory || m_state == State::Crafting;
+        return m_state == State::Inventory || m_state == State::Crafting ||
+               m_state == State::Furnace;
     }
-    void OpenContainer(bool table); // Playing -> Inventory/Crafting
+    void OpenContainer(State container); // Playing -> Inventory/Crafting/Furnace
     // Returns craft-grid contents + the carried stack to the inventory
     // (overflow thrown), re-arms the edit guards, back to Playing.
+    // (Furnace slots stay in the furnace — its state lives in the world.)
     void CloseContainer();
     void RefreshWorldList();
     // Loads (or creates) saves/<name>; defaultSeed only matters for a brand
@@ -110,6 +113,7 @@ private:
     std::array<vc::ItemStack, 9> m_craftGrid;
     vc::GuiTextures m_guiTextures; // null members = placeholder look
     size_t m_hotbarSlot = 0;
+    glm::ivec3 m_openFurnace{0}; // which furnace State::Furnace is showing
 
     // Occlusion culling (cave culling) is on by default; O toggles it for
     // comparing drawn-chunk counts and spotting false culling.

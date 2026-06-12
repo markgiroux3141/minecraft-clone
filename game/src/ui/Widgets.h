@@ -23,6 +23,7 @@ struct GuiTextures {
     std::shared_ptr<vox::Texture2D> widgets; // gui/widgets.png — hotbar, buttons
     std::shared_ptr<vox::Texture2D> inventory;     // gui/container/inventory.png (M17)
     std::shared_ptr<vox::Texture2D> craftingTable; // gui/container/crafting_table.png (M19)
+    std::shared_ptr<vox::Texture2D> furnace;       // gui/container/furnace.png (M21)
 };
 
 inline constexpr glm::vec4 kUiText{1.0f, 1.0f, 1.0f, 0.95f};

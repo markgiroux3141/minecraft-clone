@@ -27,6 +27,11 @@ constexpr glm::vec2 kPlayerCraftPos{98.0f, 18.0f};
 constexpr glm::vec2 kPlayerResultPos{154.0f, 28.0f};
 constexpr glm::vec2 kTableCraftPos{30.0f, 17.0f};
 constexpr glm::vec2 kTableResultPos{124.0f, 35.0f};
+// ContainerFurnace: input over fuel on the left, output on the right;
+// GuiFurnace's flame/arrow overlays live right of the panel in the sheet.
+constexpr glm::vec2 kFurnaceInputPos{56.0f, 17.0f};
+constexpr glm::vec2 kFurnaceFuelPos{56.0f, 53.0f};
+constexpr glm::vec2 kFurnaceOutputPos{116.0f, 35.0f};
 constexpr float kPanelGap = 4.0f; // between the palette and inventory panels
 
 constexpr int kPaletteColumns = 9;
@@ -257,6 +262,129 @@ void InventoryScreen::Draw(vox::UiRenderer& ui, glm::vec2 screen, glm::vec2 mous
     if (click && !carried.Empty() &&
         (table || !Hover(mouse, paletteOrigin, paletteSize * s)) &&
         !Hover(mouse, panelOrigin, kPanelSize * s)) {
+        thrown = carried;
+        carried = {};
+    }
+
+    if (!carried.Empty()) {
+        DrawItemStack(ui, mouse - glm::vec2(8.0f * s), s, carried);
+    } else if (!tooltip.empty()) {
+        const float textScale = UiTextScale(ui, s);
+        const glm::vec2 size = ui.MeasureText(tooltip, textScale);
+        const glm::vec2 pos = mouse + glm::vec2(12.0f * s, -12.0f * s);
+        ui.DrawRect(pos - glm::vec2(3.0f * s), size + glm::vec2(6.0f * s), kTooltipFill);
+        ShadowedText(ui, pos, tooltip, textScale);
+    }
+}
+
+void InventoryScreen::DrawFurnace(vox::UiRenderer& ui, glm::vec2 screen, glm::vec2 mouse,
+                                  bool leftClick, bool rightClick, Inventory& inv,
+                                  FurnaceState& furnace, ItemStack& carried, ItemStack& thrown,
+                                  const GuiTextures& tex) {
+    const float s = GuiScale(screen);
+    const bool click = leftClick || rightClick;
+    std::string tooltip;
+
+    const glm::vec2 panelOrigin{std::floor((screen.x - kPanelSize.x * s) * 0.5f),
+                                std::floor((screen.y - kPanelSize.y * s) * 0.5f)};
+
+    if (tex.furnace) {
+        ui.DrawImage(tex.furnace, panelOrigin, kPanelSize * s, {0.0f, 0.0f}, kPanelSize);
+    } else {
+        ui.DrawRect(panelOrigin - glm::vec2(s), kPanelSize * s + glm::vec2(2.0f * s),
+                    kPanelFrame);
+        ui.DrawRect(panelOrigin, kPanelSize * s, kPanelFill);
+        ui.DrawText(panelOrigin + glm::vec2(60.0f * s, 6.0f * s), "Furnace", UiTextScale(ui, s),
+                    kTitleColor);
+        for (size_t i = 0; i < Inventory::kSize; ++i) {
+            ui.DrawRect(panelOrigin + SlotPos(i) * s, glm::vec2(16.0f * s), kSlotFill);
+        }
+        for (const glm::vec2 pos : {kFurnaceInputPos, kFurnaceFuelPos, kFurnaceOutputPos}) {
+            ui.DrawRect(panelOrigin + pos * s, glm::vec2(16.0f * s), kSlotFill);
+        }
+    }
+
+    // Progress overlays, GuiFurnace's sub-rects: the flame climbs 13px
+    // with burn time left, the arrow sweeps 24px with cook progress. The
+    // sheet keeps both right of the panel art at x 176.
+    const int flame = furnace.burnTicks > 0
+                          ? furnace.burnTicks * 13 / std::max(furnace.burnTotal, 1)
+                          : -1;
+    const int arrow = furnace.cookTicks * 24 / furnace::kCookTicks;
+    if (tex.furnace) {
+        if (flame >= 0) {
+            ui.DrawImage(tex.furnace,
+                         panelOrigin + glm::vec2(56.0f, 36.0f + 12.0f - static_cast<float>(flame)) * s,
+                         glm::vec2(14.0f, static_cast<float>(flame + 1)) * s,
+                         {176.0f, 12.0f - static_cast<float>(flame)},
+                         {14.0f, static_cast<float>(flame + 1)});
+        }
+        if (arrow > 0) {
+            ui.DrawImage(tex.furnace, panelOrigin + glm::vec2(79.0f, 34.0f) * s,
+                         glm::vec2(static_cast<float>(arrow + 1), 16.0f) * s, {176.0f, 14.0f},
+                         {static_cast<float>(arrow + 1), 16.0f});
+        }
+    } else {
+        if (flame >= 0) {
+            ui.DrawRect(panelOrigin + glm::vec2(57.0f, 36.0f + 12.0f - static_cast<float>(flame)) * s,
+                        glm::vec2(12.0f, static_cast<float>(flame + 1)) * s,
+                        {0.95f, 0.55f, 0.12f, 1.0f});
+        }
+        if (arrow > 0) {
+            ui.DrawRect(panelOrigin + glm::vec2(79.0f, 40.0f) * s,
+                        glm::vec2(static_cast<float>(arrow), 4.0f) * s,
+                        {0.95f, 0.95f, 0.95f, 1.0f});
+        }
+    }
+
+    // Inventory and the input/fuel slots take normal clicks; the output
+    // slot is take-only (vanilla SlotFurnaceOutput).
+    const auto doSlot = [&](ItemStack& stack, glm::vec2 pos) {
+        DrawItemStack(ui, pos, s, stack);
+        if (Hover(mouse, pos, glm::vec2(16.0f * s))) {
+            ui.DrawRect(pos, glm::vec2(16.0f * s), kHoverHighlight);
+            if (!stack.Empty()) {
+                tooltip = ItemName(stack.id);
+            }
+            if (click) {
+                ClickSlot(stack, carried, rightClick);
+            }
+        }
+    };
+    for (size_t i = 0; i < Inventory::kSize; ++i) {
+        doSlot(inv.Slot(i), panelOrigin + SlotPos(i) * s);
+    }
+    doSlot(furnace.input, panelOrigin + kFurnaceInputPos * s);
+    doSlot(furnace.fuel, panelOrigin + kFurnaceFuelPos * s);
+
+    {
+        ItemStack& out = furnace.output;
+        const glm::vec2 pos = panelOrigin + kFurnaceOutputPos * s;
+        DrawItemStack(ui, pos, s, out);
+        if (Hover(mouse, pos, glm::vec2(16.0f * s))) {
+            ui.DrawRect(pos, glm::vec2(16.0f * s), kHoverHighlight);
+            if (!out.Empty()) {
+                tooltip = ItemName(out.id);
+            }
+            if (click && !out.Empty()) {
+                if (carried.Empty()) {
+                    carried = out;
+                    out = {};
+                } else if (SameKind(carried, out)) {
+                    const int moved = std::min(out.count, ItemMaxStack(out.id) - carried.count);
+                    carried.count += std::max(moved, 0);
+                    out.count -= std::max(moved, 0);
+                    if (out.count == 0) {
+                        out = {};
+                    }
+                }
+            }
+        }
+    }
+
+    // A click outside the panel throws the carried stack, like the other
+    // container screens.
+    if (click && !carried.Empty() && !Hover(mouse, panelOrigin, kPanelSize * s)) {
         thrown = carried;
         carried = {};
     }

@@ -342,6 +342,71 @@ def tool_sprite(head_color, salt):
 
 WOOD_HEAD = (157, 127, 78)
 STONE_HEAD = (125, 125, 125)
+IRON_HEAD = (222, 222, 226)
+
+
+def ore(fleck, salt):
+    # Stone with clustered ore flecks (2x2-ish blobs on a hash gate).
+    def pixel(x, y):
+        if hash01(x // 2, y // 2, salt) > 0.78:
+            return speckle(fleck, x, y, salt, 12)
+        return speckle(STONE, x, y, 0)
+
+    return pixel
+
+
+coal_ore = ore((38, 38, 38), 50)
+iron_ore = ore((216, 175, 147), 51)
+
+
+def furnace_side(x, y):
+    # Cobble-ish body with darker top/bottom caps.
+    if y < 1 or y >= 15:
+        return speckle((62, 62, 62), x, y, 52, 8)
+    return speckle((104, 104, 104), x, y, 52, 14)
+
+
+def furnace_top(x, y):
+    return speckle((118, 118, 118), x, y, 53, 12)
+
+
+def furnace_front(lit):
+    def pixel(x, y):
+        # The mouth: a dark opening in the lower half, glowing when lit.
+        if 4 <= x <= 11 and 8 <= y <= 13:
+            if lit:
+                hot = hash01(x, y, 55) * 0.5 + 0.5
+                return (int(255 * hot), int(140 * hot), int(28 * hot))
+            return speckle((28, 28, 28), x, y, 54, 6)
+        return furnace_side(x, y)
+
+    return pixel
+
+
+def glass(x, y):
+    # White frame + sparse interior glints; everything else transparent
+    # (cutout, like leaves).
+    if x in (0, 15) or y in (0, 15):
+        return speckle((216, 230, 234), x, y, 56, 6)
+    if (x + y) % 7 == 0 and hash01(x, y, 56) > 0.7:
+        return (236, 248, 250, 255)
+    return (0, 0, 0, 0)
+
+
+def coal_sprite(x, y):
+    # A jagged black lump.
+    if (x - 8) ** 2 + (y - 8) ** 2 <= 24 and hash01(x, y, 57) > 0.15:
+        return speckle((42, 42, 42), x, y, 57, 14)
+    return (0, 0, 0, 0)
+
+
+def iron_ingot_sprite(x, y):
+    # A flat trapezoid bar with a highlight ridge.
+    if 2 <= x <= 13 and 6 <= y <= 11:
+        if y == 6 or x in (2, 13):
+            return speckle((238, 238, 242), x, y, 58, 4)
+        return speckle((198, 198, 205), x, y, 58, 8)
+    return (0, 0, 0, 0)
 
 
 # Layer index in the texture array == position in this list.
@@ -353,7 +418,13 @@ TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top,
          planks, crafting_table_top, crafting_table_side, crafting_table_front,
          stick_sprite,
          tool_sprite(WOOD_HEAD, 35), tool_sprite(WOOD_HEAD, 36), tool_sprite(WOOD_HEAD, 37),
-         tool_sprite(STONE_HEAD, 38), tool_sprite(STONE_HEAD, 39), tool_sprite(STONE_HEAD, 40)]
+         tool_sprite(STONE_HEAD, 38), tool_sprite(STONE_HEAD, 39), tool_sprite(STONE_HEAD, 40),
+         # M21: ores (50/51), furnace (52 front off / 53 front on / 54 side /
+         # 55 top), glass (56), then the item sprites (57..61).
+         coal_ore, iron_ore, furnace_front(False), furnace_front(True), furnace_side,
+         furnace_top, glass,
+         coal_sprite, iron_ingot_sprite,
+         tool_sprite(IRON_HEAD, 59), tool_sprite(IRON_HEAD, 60), tool_sprite(IRON_HEAD, 61)]
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:

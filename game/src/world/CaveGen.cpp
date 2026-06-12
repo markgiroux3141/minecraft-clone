@@ -4,6 +4,7 @@
 #include <cmath>
 #include <numbers>
 
+#include "world/JavaRandom.h"
 #include "world/Light.h" // kWorldHeightBlocks
 #include "world/TerrainGen.h"
 
@@ -11,56 +12,14 @@ namespace vc::caves {
 
 namespace {
 
+using vc::JavaRandom;
+
 // Origin-chunk radius checked around the target chunk; tunnels can wander
 // up to range*16-16 blocks, which is why every chunk must replay the
 // tunnels of a 17x17 chunk neighborhood.
 constexpr int kRange = 8;
 
 constexpr float kPi = std::numbers::pi_v<float>;
-
-// Exact clone of java.util.Random's LCG. The carver's shapes live in this
-// generator's draw sequence (and tunnels re-seed children via NextLong),
-// so a faithful port needs the real thing, not a stand-in PRNG.
-class JavaRandom {
-public:
-    explicit JavaRandom(int64_t seed) { SetSeed(seed); }
-
-    void SetSeed(int64_t seed) {
-        m_state = (static_cast<uint64_t>(seed) ^ 0x5DEECE66DULL) & kMask;
-    }
-
-    int32_t NextInt(int32_t bound) {
-        if ((bound & -bound) == bound) { // power of two
-            return static_cast<int32_t>(
-                (static_cast<int64_t>(bound) * Next(31)) >> 31);
-        }
-        while (true) {
-            const int32_t bits = static_cast<int32_t>(Next(31));
-            const int32_t value = bits % bound;
-            // Java's int-overflow rejection test, done in 64-bit.
-            if (static_cast<int64_t>(bits) - value + (bound - 1) <= INT32_MAX) {
-                return value;
-            }
-        }
-    }
-
-    int64_t NextLong() {
-        const auto hi = static_cast<int64_t>(static_cast<int32_t>(Next(32)));
-        return (hi << 32) + static_cast<int32_t>(Next(32));
-    }
-
-    float NextFloat() { return static_cast<float>(Next(24)) / static_cast<float>(1 << 24); }
-
-private:
-    static constexpr uint64_t kMask = (1ULL << 48) - 1;
-
-    uint32_t Next(int bits) {
-        m_state = (m_state * 0x5DEECE66DULL + 0xBULL) & kMask;
-        return static_cast<uint32_t>(m_state >> (48 - bits));
-    }
-
-    uint64_t m_state = 0;
-};
 
 struct Carver {
     Chunk& chunk;

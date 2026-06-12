@@ -9,6 +9,7 @@
 
 #include "world/CaveGen.h"
 #include "world/Light.h" // kWorldHeightBlocks
+#include "world/OreGen.h"
 
 namespace vc {
 
@@ -354,6 +355,10 @@ void TerrainGenerator::Generate(Chunk& chunk, const glm::ivec3& chunkCoord) cons
     // ground was opened — identically from every chunk sharing the tree.
     auto mask = std::make_unique<caves::CarveMask>();
     caves::Carve(chunk, chunkCoord, m_seed, heightAt, mask.get());
+
+    // Ore veins after the carve (carved cells are air, so veins never
+    // deposit into open caves — vanilla's generation/population order).
+    ores::Place(chunk, chunkCoord, m_seed);
 
     // Decoration: every tree whose canopy can reach this chunk. Cells are
     // visited in the same (ascending) order from every chunk, so overlapping

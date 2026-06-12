@@ -49,6 +49,11 @@ BlockId Bedrock = 0;
 BlockId Cobblestone = 0;
 BlockId Planks = 0;
 BlockId CraftingTable = 0;
+BlockId CoalOre = 0;
+BlockId IronOre = 0;
+BlockId Furnace = 0;
+BlockId LitFurnace = 0;
+BlockId Glass = 0;
 
 namespace {
 
@@ -219,6 +224,52 @@ void RegisterDefaults() {
     craftingTable.toolClass = ToolClass::Axe;
     CraftingTable = registry.Register(std::move(craftingTable));
 
+    // M21 ores (tiles 50/51, after the M19 item sprites at 43..49).
+    // Vanilla hardness 3.0 for both. Coal's drop is the coal ITEM, whose
+    // id doesn't exist yet — items::RegisterDefaults patches it in. Iron
+    // ore drops itself (smelt it) and needs a stone-tier pickaxe.
+    BlockDef coalOre = BlockDef::Uniform("coal ore", 50);
+    coalOre.hardness = 3.0f;
+    coalOre.toolClass = ToolClass::Pickaxe;
+    coalOre.needsPickaxe = true;
+    CoalOre = registry.Register(std::move(coalOre));
+
+    BlockDef ironOre = BlockDef::Uniform("iron ore", 51);
+    ironOre.hardness = 3.0f;
+    ironOre.toolClass = ToolClass::Pickaxe;
+    ironOre.needsPickaxe = true;
+    ironOre.harvestLevel = 1; // vanilla: stone pickaxe or better
+    IronOre = registry.Register(std::move(ironOre));
+
+    // M21 furnace (tiles 52 front off / 53 front on / 54 side / 55 top):
+    // front faces +X like the crafting table (no orientation data yet).
+    // The lit variant is a separate id (swap on burn state) and emits
+    // light 13 (vanilla 0.875 luminance); it drops the unlit furnace.
+    const auto furnaceDef = [](std::string name, uint16_t front) {
+        BlockDef def = BlockDef::Uniform(std::move(name), 54);
+        def.faceTiles[static_cast<size_t>(BlockFace::PosY)] = 55;
+        def.faceTiles[static_cast<size_t>(BlockFace::NegY)] = 55;
+        def.faceTiles[static_cast<size_t>(BlockFace::PosX)] = front;
+        def.hardness = 3.5f;
+        def.toolClass = ToolClass::Pickaxe;
+        def.needsPickaxe = true;
+        return def;
+    };
+    Furnace = registry.Register(furnaceDef("furnace", 52));
+    BlockDef litFurnace = furnaceDef("lit furnace", 53);
+    litFurnace.emission = 13;
+    LitFurnace = registry.Register(std::move(litFurnace));
+
+    // M21 glass (tile 56): smelted from sand; alpha-tested cutout cube
+    // like leaves (so glass-on-glass interior faces show — vanilla culls
+    // them, close enough). Vanilla: drops nothing.
+    BlockDef glass = BlockDef::Uniform("glass", 56);
+    glass.opaque = false;
+    glass.cutout = true;
+    glass.hardness = 0.3f;
+    glass.drop = blocks::Air;
+    Glass = registry.Register(std::move(glass));
+
     // M18 drop table (vanilla-ish; cross-references resolve here, after
     // every id exists). Leaves/tall grass/dead bush already drop nothing.
     registry.EditDef(Stone).drop = Cobblestone;
@@ -226,6 +277,7 @@ void RegisterDefaults() {
     registry.EditDef(SnowyGrass).drop = Dirt;
     registry.EditDef(TallGrass).drop = Air; // no seeds/shears yet
     registry.EditDef(DeadBush).drop = Air;
+    registry.EditDef(LitFurnace).drop = Furnace;
 
     GAME_INFO("Registered {} block types", registry.Count());
 }

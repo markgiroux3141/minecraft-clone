@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
@@ -22,6 +23,8 @@ namespace vc {
 //                             plus optional tagged lines in any order:
 //                             "player x y z yaw pitch fly" (M10), "time t"
 //                             (M11), "inventory n {slot id count}*n" (M17)
+//   <dir>/furnaces.dat        text sidecar, one furnace block entity per
+//                             line (M21) — see FurnaceRecord
 //   <dir>/r.<rx>.<rz>.vxr     region file covering 32x32 chunk columns:
 //     uint32 magic "VXR1", uint32 chunkCount,
 //     chunkCount x { int32 cx, cy, cz; uint32 blobSize },
@@ -79,6 +82,23 @@ public:
     // Rewrites the manifest immediately, like SetPlayerState (quit-path).
     void SetInventory(std::vector<InventorySlot> slots);
 
+    // Furnace block entities (M21), persisted in a furnaces.dat sidecar
+    // (text, one furnace per line) — they change every tick while burning,
+    // so unlike the manifest setters this only marks the store dirty and
+    // the debounced Flush writes the file.
+    struct FurnaceRecord {
+        glm::ivec3 pos{0};
+        // input, fuel, output as {id, count, damage} triples.
+        std::array<uint16_t, 3> id{};
+        std::array<int, 3> count{};
+        std::array<int, 3> damage{};
+        int burnTicks = 0;
+        int burnTotal = 0;
+        int cookTicks = 0;
+    };
+    const std::vector<FurnaceRecord>& GetFurnaces() const { return m_furnaces; }
+    void SetFurnaces(std::vector<FurnaceRecord> furnaces);
+
     // Null when the chunk was never saved. Invalidated by the next Put.
     const std::vector<uint8_t>* FindBlob(const glm::ivec3& chunkCoord) const;
 
@@ -117,12 +137,16 @@ private:
     void WriteManifest() const;
     void ReadRegionFile(const std::filesystem::path& path);
     void WriteRegionFile(const glm::ivec2& region) const;
+    void ReadFurnaces();
+    void WriteFurnaces() const;
 
     std::filesystem::path m_dir;
     int m_seed = 0;
     std::optional<PlayerState> m_player;
     std::optional<int64_t> m_worldTime;
     std::optional<std::vector<InventorySlot>> m_inventory;
+    std::vector<FurnaceRecord> m_furnaces;
+    bool m_furnacesDirty = false;
     std::unordered_map<glm::ivec2, RegionChunks, IVec2Hash> m_regions;
     std::unordered_set<glm::ivec2, IVec2Hash> m_dirtyRegions;
     size_t m_count = 0;
