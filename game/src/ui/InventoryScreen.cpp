@@ -6,21 +6,27 @@
 
 #include "vox/renderer/UiRenderer.h"
 
+#include "Crafting.h"
 #include "ui/Hud.h" // GuiScale
 
 namespace vc {
 
 namespace {
 
-// gui/container/inventory.png layout (ContainerPlayer's slot grid): main
-// 9x3 at (8 + c*18, 84 + r*18), hotbar row at (8 + c*18, 142), 16px slot
-// interiors on an 18px pitch. The armor/crafting regions stay inert art
-// until their milestones (M19 crafting).
+// Container art layouts, straight from the vanilla containers:
+// ContainerPlayer's 2x2 at (98, 18) with the result at (154, 28);
+// ContainerWorkbench's 3x3 at (30, 17) with the result at (124, 35).
+// Both share the main grid at (8, 84) and the hotbar row at (8, 142),
+// 16px slot interiors on an 18px pitch.
 constexpr glm::vec2 kPanelSize{176.0f, 166.0f};
 constexpr float kSlotPitch = 18.0f;
 constexpr float kSlotsX = 8.0f;
 constexpr float kGridY = 84.0f;
 constexpr float kHotbarY = 142.0f;
+constexpr glm::vec2 kPlayerCraftPos{98.0f, 18.0f};
+constexpr glm::vec2 kPlayerResultPos{154.0f, 28.0f};
+constexpr glm::vec2 kTableCraftPos{30.0f, 17.0f};
+constexpr glm::vec2 kTableResultPos{124.0f, 35.0f};
 constexpr float kPanelGap = 4.0f; // between the palette and inventory panels
 
 constexpr int kPaletteColumns = 9;
@@ -49,14 +55,20 @@ bool Hover(glm::vec2 mouse, glm::vec2 pos, glm::vec2 size) {
            mouse.y < pos.y + size.y;
 }
 
+bool SameKind(const ItemStack& a, const ItemStack& b) {
+    return a.id == b.id && a.damage == b.damage;
+}
+
 // Vanilla PICKUP rules. Left: pick up / place all / merge / swap. Right:
-// pick up the larger half / place one / swap on mismatch.
+// pick up the larger half / place one / swap on mismatch. Stacks merge
+// only when id AND damage match, capped at the item's own max.
 void ClickSlot(ItemStack& slot, ItemStack& carried, bool right) {
     if (!right) {
-        if (!carried.Empty() && carried.id == slot.id) {
-            const int moved = std::min(carried.count, kMaxStackSize - slot.count);
-            slot.count += moved;
-            carried.count -= moved;
+        if (!carried.Empty() && SameKind(carried, slot)) {
+            const int moved =
+                std::min(carried.count, ItemMaxStack(slot.id) - slot.count);
+            slot.count += std::max(moved, 0);
+            carried.count -= std::max(moved, 0);
             if (carried.count == 0) {
                 carried = {};
             }
@@ -67,35 +79,39 @@ void ClickSlot(ItemStack& slot, ItemStack& carried, bool right) {
     }
     if (carried.Empty()) {
         if (!slot.Empty()) {
-            carried = {slot.id, (slot.count + 1) / 2};
+            carried = {slot.id, (slot.count + 1) / 2, slot.damage};
             slot.count -= carried.count;
             if (slot.count == 0) {
                 slot = {};
             }
         }
-    } else if (slot.Empty() || (slot.id == carried.id && slot.count < kMaxStackSize)) {
+    } else if (slot.Empty() ||
+               (SameKind(slot, carried) && slot.count < ItemMaxStack(slot.id))) {
         if (slot.Empty()) {
-            slot = {carried.id, 0};
+            slot = {carried.id, 0, carried.damage};
         }
         ++slot.count;
         if (--carried.count == 0) {
             carried = {};
         }
-    } else if (slot.id != carried.id) {
+    } else if (!SameKind(slot, carried)) {
         std::swap(slot, carried);
     }
 }
 
-// Every placeable block: all registrations except air and the internal
-// flowing-water levels (the source block stands in for water).
-std::vector<BlockId> PaletteIds() {
-    std::vector<BlockId> ids;
-    const auto& registry = BlockRegistry::Get();
-    for (BlockId id = 1; id < static_cast<BlockId>(registry.Count()); ++id) {
-        const uint8_t level = registry.Def(id).liquidLevel;
+// Every obtainable thing: blocks (minus air and the internal flowing-water
+// levels) followed by the registry items (sticks, tools).
+std::vector<ItemId> PaletteIds() {
+    std::vector<ItemId> ids;
+    const auto& blockRegistry = BlockRegistry::Get();
+    for (BlockId id = 1; id < static_cast<BlockId>(blockRegistry.Count()); ++id) {
+        const uint8_t level = blockRegistry.Def(id).liquidLevel;
         if (level == 0 || level == 8) {
             ids.push_back(id);
         }
+    }
+    for (size_t i = 0; i < ItemRegistry::Get().Count(); ++i) {
+        ids.push_back(static_cast<ItemId>(kFirstItemId + i));
     }
     return ids;
 }
@@ -103,83 +119,143 @@ std::vector<BlockId> PaletteIds() {
 } // namespace
 
 void InventoryScreen::Draw(vox::UiRenderer& ui, glm::vec2 screen, glm::vec2 mouse, bool leftClick,
-                           bool rightClick, Inventory& inv, ItemStack& carried, ItemStack& thrown,
+                           bool rightClick, Inventory& inv, std::span<ItemStack> craft,
+                           int craftSize, ItemStack& carried, ItemStack& thrown,
                            const GuiTextures& tex) {
     const float s = GuiScale(screen);
-    const std::vector<BlockId> palette = PaletteIds();
-    const auto paletteRows =
-        static_cast<float>((palette.size() + kPaletteColumns - 1) / kPaletteColumns);
-    const glm::vec2 paletteSize{kPanelSize.x,
-                                kPaletteTitleBand + paletteRows * kSlotPitch + kPaletteBottomPad};
-
-    // The palette sits above the inventory panel; center the pair.
-    const float totalHeight = (paletteSize.y + kPanelGap + kPanelSize.y) * s;
-    const glm::vec2 paletteOrigin{std::floor((screen.x - kPanelSize.x * s) * 0.5f),
-                                  std::floor((screen.y - totalHeight) * 0.5f)};
-    const glm::vec2 panelOrigin = paletteOrigin + glm::vec2(0.0f, (paletteSize.y + kPanelGap) * s);
-
+    const bool table = craftSize == 3;
     const bool click = leftClick || rightClick;
     std::string tooltip;
 
-    // Palette panel (always procedural — there is no vanilla art for it).
-    ui.DrawRect(paletteOrigin - glm::vec2(s), paletteSize * s + glm::vec2(2.0f * s), kPanelFrame);
-    ui.DrawRect(paletteOrigin, paletteSize * s, kPanelFill);
-    ui.DrawText(paletteOrigin + glm::vec2(8.0f * s, 6.0f * s), "Blocks", UiTextScale(ui, s),
-                kTitleColor);
-    for (size_t i = 0; i < palette.size(); ++i) {
-        const glm::vec2 pos =
-            paletteOrigin + glm::vec2(kSlotsX + static_cast<float>(i % kPaletteColumns) *
-                                                    kSlotPitch,
-                                      kPaletteTitleBand +
-                                          static_cast<float>(i / kPaletteColumns) * kSlotPitch) *
-                                s;
-        ui.DrawRect(pos, glm::vec2(16.0f * s), kSlotFill);
-        DrawItemStack(ui, pos, s, {palette[i], 1});
-        if (Hover(mouse, pos, glm::vec2(16.0f * s))) {
-            ui.DrawRect(pos, glm::vec2(16.0f * s), kHoverHighlight);
-            tooltip = BlockRegistry::Get().Def(palette[i]).name;
-            // The palette is the free creative source: left grabs a full
-            // stack (replacing whatever was carried), right adds one.
-            if (leftClick) {
-                carried = {palette[i], kMaxStackSize};
-            } else if (rightClick) {
-                if (carried.id == palette[i] && !carried.Empty()) {
-                    carried.count = std::min(carried.count + 1, kMaxStackSize);
-                } else {
-                    carried = {palette[i], 1};
+    // The player screen carries the creative palette above the panel; the
+    // crafting table is just the panel. Center the stack either way.
+    const std::vector<ItemId> palette = table ? std::vector<ItemId>{} : PaletteIds();
+    const auto paletteRows = static_cast<float>(
+        (palette.size() + kPaletteColumns - 1) / kPaletteColumns);
+    const glm::vec2 paletteSize{
+        kPanelSize.x, table ? 0.0f
+                            : kPaletteTitleBand + paletteRows * kSlotPitch + kPaletteBottomPad};
+    const float aboveHeight = table ? 0.0f : (paletteSize.y + kPanelGap);
+    const float totalHeight = (aboveHeight + kPanelSize.y) * s;
+    const glm::vec2 paletteOrigin{std::floor((screen.x - kPanelSize.x * s) * 0.5f),
+                                  std::floor((screen.y - totalHeight) * 0.5f)};
+    const glm::vec2 panelOrigin = paletteOrigin + glm::vec2(0.0f, aboveHeight * s);
+
+    if (!table) {
+        // Palette panel (always procedural — there is no vanilla art for it).
+        ui.DrawRect(paletteOrigin - glm::vec2(s), paletteSize * s + glm::vec2(2.0f * s),
+                    kPanelFrame);
+        ui.DrawRect(paletteOrigin, paletteSize * s, kPanelFill);
+        ui.DrawText(paletteOrigin + glm::vec2(8.0f * s, 6.0f * s), "Blocks & items",
+                    UiTextScale(ui, s), kTitleColor);
+        for (size_t i = 0; i < palette.size(); ++i) {
+            const glm::vec2 pos =
+                paletteOrigin +
+                glm::vec2(kSlotsX + static_cast<float>(i % kPaletteColumns) * kSlotPitch,
+                          kPaletteTitleBand +
+                              static_cast<float>(i / kPaletteColumns) * kSlotPitch) *
+                    s;
+            ui.DrawRect(pos, glm::vec2(16.0f * s), kSlotFill);
+            DrawItemStack(ui, pos, s, {palette[i], 1});
+            if (Hover(mouse, pos, glm::vec2(16.0f * s))) {
+                ui.DrawRect(pos, glm::vec2(16.0f * s), kHoverHighlight);
+                tooltip = ItemName(palette[i]);
+                // The palette is the free creative source: left grabs a
+                // full stack (replacing whatever was carried), right adds
+                // one.
+                const int grab = std::min(kMaxStackSize, ItemMaxStack(palette[i]));
+                if (leftClick) {
+                    carried = {palette[i], grab};
+                } else if (rightClick) {
+                    if (carried.id == palette[i] && !carried.Empty()) {
+                        carried.count = std::min(carried.count + 1, grab);
+                    } else {
+                        carried = {palette[i], 1};
+                    }
                 }
             }
         }
     }
 
-    // Inventory panel.
-    if (tex.inventory) {
-        ui.DrawImage(tex.inventory, panelOrigin, kPanelSize * s, {0.0f, 0.0f}, kPanelSize);
+    // Container panel.
+    const auto& panelTex = table ? tex.craftingTable : tex.inventory;
+    const glm::vec2 craftPos = table ? kTableCraftPos : kPlayerCraftPos;
+    const glm::vec2 resultPos = table ? kTableResultPos : kPlayerResultPos;
+    if (panelTex) {
+        ui.DrawImage(panelTex, panelOrigin, kPanelSize * s, {0.0f, 0.0f}, kPanelSize);
     } else {
-        ui.DrawRect(panelOrigin - glm::vec2(s), kPanelSize * s + glm::vec2(2.0f * s), kPanelFrame);
+        ui.DrawRect(panelOrigin - glm::vec2(s), kPanelSize * s + glm::vec2(2.0f * s),
+                    kPanelFrame);
         ui.DrawRect(panelOrigin, kPanelSize * s, kPanelFill);
         for (size_t i = 0; i < Inventory::kSize; ++i) {
             ui.DrawRect(panelOrigin + SlotPos(i) * s, glm::vec2(16.0f * s), kSlotFill);
         }
+        for (int i = 0; i < craftSize * craftSize; ++i) {
+            const glm::vec2 pos =
+                craftPos + glm::vec2(static_cast<float>(i % craftSize),
+                                     static_cast<float>(i / craftSize)) *
+                               kSlotPitch;
+            ui.DrawRect(panelOrigin + pos * s, glm::vec2(16.0f * s), kSlotFill);
+        }
+        ui.DrawRect(panelOrigin + resultPos * s, glm::vec2(16.0f * s), kSlotFill);
     }
-    for (size_t i = 0; i < Inventory::kSize; ++i) {
-        const glm::vec2 pos = panelOrigin + SlotPos(i) * s;
-        DrawItemStack(ui, pos, s, inv.Slot(i));
+
+    // A regular interactive slot (inventory and craft cells alike).
+    const auto doSlot = [&](ItemStack& stack, glm::vec2 pos) {
+        DrawItemStack(ui, pos, s, stack);
         if (Hover(mouse, pos, glm::vec2(16.0f * s))) {
             ui.DrawRect(pos, glm::vec2(16.0f * s), kHoverHighlight);
-            if (!inv.Slot(i).Empty()) {
-                tooltip = BlockRegistry::Get().Def(inv.Slot(i).id).name;
+            if (!stack.Empty()) {
+                tooltip = ItemName(stack.id);
             }
             if (click) {
-                ClickSlot(inv.Slot(i), carried, rightClick);
+                ClickSlot(stack, carried, rightClick);
+            }
+        }
+    };
+    for (size_t i = 0; i < Inventory::kSize; ++i) {
+        doSlot(inv.Slot(i), panelOrigin + SlotPos(i) * s);
+    }
+    for (int i = 0; i < craftSize * craftSize; ++i) {
+        const glm::vec2 pos = craftPos + glm::vec2(static_cast<float>(i % craftSize),
+                                                   static_cast<float>(i / craftSize)) *
+                                             kSlotPitch;
+        doSlot(craft[static_cast<size_t>(i)], panelOrigin + pos * s);
+    }
+
+    // Result slot: shows the recipe match; clicking crafts into the
+    // cursor (vanilla: only when it fits) and consumes one per grid cell.
+    const ItemStack result = Recipes::Match(craft, craftSize);
+    const glm::vec2 resultDraw = panelOrigin + resultPos * s;
+    DrawItemStack(ui, resultDraw, s, result);
+    if (Hover(mouse, resultDraw, glm::vec2(16.0f * s))) {
+        ui.DrawRect(resultDraw, glm::vec2(16.0f * s), kHoverHighlight);
+        if (!result.Empty()) {
+            tooltip = ItemName(result.id);
+        }
+        if (click && !result.Empty()) {
+            const bool fits =
+                carried.Empty() || (SameKind(carried, result) &&
+                                    carried.count + result.count <= ItemMaxStack(result.id));
+            if (fits) {
+                if (carried.Empty()) {
+                    carried = result;
+                } else {
+                    carried.count += result.count;
+                }
+                for (ItemStack& cell : craft) {
+                    if (!cell.Empty() && --cell.count <= 0) {
+                        cell = {};
+                    }
+                }
             }
         }
     }
 
-    // A click outside both panels throws the carried stack (vanilla): the
+    // A click outside the panels throws the carried stack (vanilla): the
     // caller spawns it as an item entity in front of the player.
     if (click && !carried.Empty() &&
-        !Hover(mouse, paletteOrigin, paletteSize * s) &&
+        (table || !Hover(mouse, paletteOrigin, paletteSize * s)) &&
         !Hover(mouse, panelOrigin, kPanelSize * s)) {
         thrown = carried;
         carried = {};

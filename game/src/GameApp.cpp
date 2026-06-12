@@ -16,6 +16,8 @@
 #include "vox/renderer/Renderer.h"
 #include "vox/renderer/Texture.h"
 
+#include "Crafting.h"
+#include "Item.h"
 #include "ui/Hud.h"
 #include "ui/InventoryScreen.h"
 #include "ui/PauseMenu.h"
@@ -107,6 +109,8 @@ void GameApp::OnInit() {
     vox::Renderer::SetClearColor(0.45f, 0.70f, 1.00f); // placeholder sky
 
     vc::blocks::RegisterDefaults();
+    vc::items::RegisterDefaults();
+    vc::Recipes::RegisterDefaults();
 
     m_chunkShader = vox::Shader::FromFiles("shaders/chunk.vert", "shaders/chunk.frag");
     m_blockTextures =
@@ -132,6 +136,11 @@ void GameApp::OnInit() {
             vox::assets::Resolve("mc/textures/gui/container/inventory.png"))) {
         m_guiTextures.inventory =
             vox::Texture2D::FromFile("mc/textures/gui/container/inventory.png");
+    }
+    if (std::filesystem::exists(
+            vox::assets::Resolve("mc/textures/gui/container/crafting_table.png"))) {
+        m_guiTextures.craftingTable =
+            vox::Texture2D::FromFile("mc/textures/gui/container/crafting_table.png");
     }
 
     m_skyShader = vox::Shader::FromFiles("shaders/sky.vert", "shaders/sky.frag");
@@ -193,6 +202,28 @@ void GameApp::OnInit() {
         m_entityCube->SetIndexBuffer(std::make_shared<vox::IndexBuffer>(
             indices.data(), static_cast<uint32_t>(indices.size())));
     }
+    {
+        // Flat sprite quad for non-block item drops (sticks, tools) —
+        // same vertex layout/shader as the cube, centered on z, both
+        // sides shown (the entity pass draws with culling off).
+        constexpr float quadVerts[] = {
+            0, 0, 0.5f, 0, 0, 1, 0, 0, 0, //
+            1, 0, 0.5f, 0, 0, 1, 1, 0, 0, //
+            1, 1, 0.5f, 0, 0, 1, 1, 1, 0, //
+            0, 1, 0.5f, 0, 0, 1, 0, 1, 0,
+        };
+        constexpr uint32_t quadIndices[] = {0, 1, 2, 2, 3, 0};
+        auto quadBuffer = std::make_shared<vox::VertexBuffer>(
+            quadVerts, static_cast<uint32_t>(sizeof(quadVerts)));
+        quadBuffer->SetLayout({{vox::ShaderDataType::Float3, "a_position"},
+                               {vox::ShaderDataType::Float3, "a_normal"},
+                               {vox::ShaderDataType::Float2, "a_uv"},
+                               {vox::ShaderDataType::Float, "a_face"}});
+        m_itemQuad = std::make_shared<vox::VertexArray>();
+        m_itemQuad->AddVertexBuffer(std::move(quadBuffer));
+        m_itemQuad->SetIndexBuffer(std::make_shared<vox::IndexBuffer>(
+            quadIndices, static_cast<uint32_t>(std::size(quadIndices))));
+    }
 
     m_outlineShader = vox::Shader::FromFiles("shaders/outline.vert", "shaders/outline.frag");
     constexpr float corners[] = {
@@ -247,14 +278,14 @@ void GameApp::EnterWorld(const std::string& name, int defaultSeed) {
 
     m_inventory.Clear();
     m_carried = {};
+    m_craftGrid.fill({});
     m_hotbarSlot = 0;
     if (const auto& saved = m_world->SaveStore().GetInventory()) {
-        const auto& registry = vc::BlockRegistry::Get();
         for (const auto& s : *saved) {
             if (s.slot >= 0 && static_cast<size_t>(s.slot) < vc::Inventory::kSize &&
-                s.id < registry.Count() && s.count > 0) {
+                vc::ItemExists(s.id) && s.count > 0) {
                 m_inventory.Slot(static_cast<size_t>(s.slot)) = {
-                    s.id, std::min(s.count, vc::kMaxStackSize)};
+                    s.id, std::min(s.count, vc::ItemMaxStack(s.id)), std::max(s.damage, 0)};
             }
         }
     } else {
@@ -304,24 +335,29 @@ void GameApp::PersistPlayerState() {
     m_world->SaveStore().SetWorldTime(static_cast<int64_t>(m_worldTime));
     m_world->SaveStore().SetPlayerState({m_player.Position(), m_player.Yaw(), m_player.Pitch(),
                                          m_player.GetMode() == Player::Mode::Fly});
-    // Merge any carried stack back first — the only quit path that can have
-    // one in flight is the window X while the inventory screen is open.
+    // Merge any carried stack and craft-grid contents back first — the
+    // only quit path that can have them in flight is the window X while a
+    // container screen is open.
     m_inventory.Add(m_carried);
     m_carried = {};
+    for (vc::ItemStack& cell : m_craftGrid) {
+        m_inventory.Add(cell);
+        cell = {};
+    }
     std::vector<vc::WorldSave::InventorySlot> slots;
     for (size_t i = 0; i < vc::Inventory::kSize; ++i) {
         const vc::ItemStack& stack = m_inventory.Slot(i);
         if (!stack.Empty()) {
-            slots.push_back({static_cast<int>(i), stack.id, stack.count});
+            slots.push_back({static_cast<int>(i), stack.id, stack.count, stack.damage});
         }
     }
     m_world->SaveStore().SetInventory(std::move(slots));
 }
 
 void GameApp::OnTick(double dt) {
-    // The inventory screen doesn't pause the world (vanilla): block updates
+    // Container screens don't pause the world (vanilla): block updates
     // run and the player keeps falling/floating, just without movement keys.
-    if (m_world && (m_state == State::Playing || m_state == State::Inventory)) {
+    if (m_world && (m_state == State::Playing || ContainerOpen())) {
         m_player.Tick(*m_world, dt, m_state == State::Playing);
         m_world->Tick(); // scheduled block updates (falling sand, water flow)
 
@@ -331,8 +367,9 @@ void GameApp::OnTick(double dt) {
         const glm::vec3 reach{Player::kHalfWidth + 1.0f, 0.5f, Player::kHalfWidth + 1.0f};
         m_world->PickupItems(feet - reach,
                              feet + glm::vec3{0.0f, Player::kHeight, 0.0f} + reach,
-                             [&](vc::BlockId id, int count) {
-                                 const vc::ItemStack leftover = m_inventory.Add({id, count});
+                             [&](uint16_t id, int count, int damage) {
+                                 const vc::ItemStack leftover =
+                                     m_inventory.Add({id, count, damage});
                                  return count - leftover.count;
                              });
 
@@ -345,37 +382,46 @@ void GameApp::OnTick(double dt) {
     ++m_totalTicks;
 }
 
-void GameApp::ThrowItem(vc::BlockId id, int count) {
-    if (!m_world || id == vc::blocks::Air || count <= 0) {
+void GameApp::ThrowItem(const vc::ItemStack& stack) {
+    if (!m_world || stack.Empty()) {
         return;
     }
     // Vanilla dropItem: from just below the eye, 0.3 b/tick (6 b/s) along
     // the look; 40-tick pickup delay so it isn't vacuumed straight back.
     const glm::vec3 dir = m_camera.Forward();
     const glm::vec3 origin = m_camera.Position() + glm::vec3{0.0f, -0.3f, 0.0f} + dir * 0.3f;
-    m_world->SpawnItem(origin, dir * 6.0f, id, count, 40);
+    m_world->SpawnItem(origin, dir * 6.0f, stack.id, stack.count, 40, stack.damage);
 }
 
-void GameApp::SetInventoryOpen(bool open) {
-    if (!m_world || (m_state == State::Inventory) == open ||
-        (open && m_state != State::Playing)) {
+void GameApp::OpenContainer(bool table) {
+    if (!m_world || m_state != State::Playing) {
         return;
     }
-    if (open) {
-        m_state = State::Inventory;
-        GetWindow().SetCursorCaptured(false);
-        m_target.reset();
-        m_digCell.reset();
-        m_digProgress = 0.0f;
+    m_state = table ? State::Crafting : State::Inventory;
+    GetWindow().SetCursorCaptured(false);
+    m_target.reset();
+    m_digCell.reset();
+    m_digProgress = 0.0f;
+}
+
+void GameApp::CloseContainer() {
+    if (!ContainerOpen()) {
         return;
     }
-    // Whatever is still on the cursor goes back to the bag; if the bag is
-    // full, the leftover is thrown at the player's feet (M18).
-    const vc::ItemStack leftover = m_inventory.Add(m_carried);
+    // Cursor stack and craft-grid contents go back to the bag (vanilla's
+    // clearContainer); whatever doesn't fit is thrown at the feet.
+    vc::ItemStack leftover = m_inventory.Add(m_carried);
     if (!leftover.Empty()) {
-        ThrowItem(leftover.id, leftover.count);
+        ThrowItem(leftover);
     }
     m_carried = {};
+    for (vc::ItemStack& cell : m_craftGrid) {
+        leftover = m_inventory.Add(cell);
+        if (!leftover.Empty()) {
+            ThrowItem(leftover);
+        }
+        cell = {};
+    }
     m_state = State::Playing;
     GetWindow().SetCursorCaptured(true);
     // Same guard as unpausing: buttons held through the closing click must
@@ -450,9 +496,12 @@ void GameApp::HandleInput(double frameDt) {
         m_digProgress = 0.0f;
     } else if (breakDown && m_target) {
         // Survival dig (vanilla PlayerControllerMP.onPlayerDamageBlock):
-        // damage accrues at digSpeed / hardness / 30 per tick — bare-hand
-        // digSpeed 1, x1/5 with the head underwater, x1/5 airborne. The
-        // shared cooldown doubles as the 5-tick post-break hit delay.
+        // damage accrues at digSpeed / hardness / 30 per tick — the
+        // matching tool multiplies digSpeed by its efficiency (wood 2x,
+        // stone 4x), head underwater and airborne each x1/5. Pickaxe-
+        // gated blocks (stone family) use /100 instead of /30 and drop
+        // nothing without one. The shared cooldown doubles as the 5-tick
+        // post-break hit delay.
         const vc::BlockId targetId =
             m_world->GetBlock(m_target->block.x, m_target->block.y, m_target->block.z);
         const vc::BlockDef& def = vc::BlockRegistry::Get().Def(targetId);
@@ -465,10 +514,18 @@ void GameApp::HandleInput(double frameDt) {
                 m_digProgress = 0.0f;
             }
             if (m_breakCooldown == 0.0) {
+                vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
+                const vc::ItemDef* tool = vc::ItemRegistry::Get().Find(hand.id);
+                const bool canHarvest =
+                    !def.needsPickaxe || (tool && tool->tool == vc::ToolClass::Pickaxe);
                 if (def.hardness <= 0.0f) {
                     m_digProgress = 1.0f; // plants: instant
                 } else {
                     float digSpeed = 1.0f;
+                    if (tool && tool->tool != vc::ToolClass::None &&
+                        tool->tool == def.toolClass) {
+                        digSpeed = tool->efficiency;
+                    }
                     if (EyeInWater()) {
                         digSpeed *= 0.2f;
                     }
@@ -476,12 +533,21 @@ void GameApp::HandleInput(double frameDt) {
                         digSpeed *= 0.2f;
                     }
                     // Per-second form of the per-tick formula (x20 TPS).
-                    m_digProgress +=
-                        static_cast<float>(frameDt) * digSpeed / (def.hardness * 1.5f);
+                    m_digProgress += static_cast<float>(frameDt) * digSpeed /
+                                     (def.hardness * (canHarvest ? 1.5f : 5.0f));
                 }
                 if (m_digProgress >= 1.0f) {
                     m_world->SetBlock(m_target->block, vc::blocks::Air);
-                    m_world->SpawnBlockDrop(m_target->block, def.ResolveDrop(targetId), 1);
+                    if (canHarvest) {
+                        m_world->SpawnBlockDrop(m_target->block, def.ResolveDrop(targetId), 1);
+                    }
+                    // Tools wear one use per broken block (vanilla: any
+                    // block with hardness > 0) and break at zero.
+                    if (tool && tool->maxDamage > 0 && def.hardness > 0.0f) {
+                        if (++hand.damage >= tool->maxDamage) {
+                            hand = {};
+                        }
+                    }
                     m_digCell.reset();
                     m_digProgress = 0.0f;
                     m_breakCooldown = kEditRepeatDelay; // vanilla blockHitDelay (5 ticks)
@@ -500,7 +566,7 @@ void GameApp::HandleInput(double frameDt) {
     if (dropKey && (!m_dropKeyWasDown || m_dropCooldown == 0.0)) {
         vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
         if (!hand.Empty()) {
-            ThrowItem(hand.id, 1);
+            ThrowItem({hand.id, 1, hand.damage});
             if (--hand.count <= 0) {
                 hand = {};
             }
@@ -511,15 +577,23 @@ void GameApp::HandleInput(double frameDt) {
 
     const bool placeDown = vox::Input::IsMouseButtonDown(vox::MouseButton::Right);
     if (placeDown && m_target && (!m_placeWasDown || m_placeCooldown == 0.0)) {
-        const glm::ivec3 cell = m_target->block + m_target->normal;
-        vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
-        if (!hand.Empty() && !m_world->IsSolid(cell.x, cell.y, cell.z) &&
-            !m_player.Intersects(cell)) {
-            m_world->SetBlock(cell, hand.id);
-            if (--hand.count <= 0) {
-                hand = {};
-            }
+        const vc::BlockId targetId =
+            m_world->GetBlock(m_target->block.x, m_target->block.y, m_target->block.z);
+        if (targetId == vc::blocks::CraftingTable) {
+            // Use beats place (vanilla, sans sneak): open the 3x3 grid.
+            OpenContainer(true);
             m_placeCooldown = kEditRepeatDelay;
+        } else {
+            const glm::ivec3 cell = m_target->block + m_target->normal;
+            vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
+            if (!hand.Empty() && vc::IsBlockItem(hand.id) &&
+                !m_world->IsSolid(cell.x, cell.y, cell.z) && !m_player.Intersects(cell)) {
+                m_world->SetBlock(cell, static_cast<vc::BlockId>(hand.id));
+                if (--hand.count <= 0) {
+                    hand = {};
+                }
+                m_placeCooldown = kEditRepeatDelay;
+            }
         }
     }
     m_placeWasDown = placeDown;
@@ -586,14 +660,17 @@ void GameApp::DrawUi() {
         }
     } else {
         vc::Hud::Draw(*m_ui, screen, m_inventory.Hotbar(), m_hotbarSlot, m_guiTextures);
-        if (m_state == State::Inventory) {
+        if (ContainerOpen()) {
             // Vanilla's darkened-world backdrop behind the container GUI.
             m_ui->DrawRect({0.0f, 0.0f}, screen, {0.06f, 0.06f, 0.06f, 0.75f});
+            const bool table = m_state == State::Crafting;
             vc::ItemStack thrown;
             vc::InventoryScreen::Draw(*m_ui, screen, mouse, clicked, rightClicked, m_inventory,
-                                      m_carried, thrown, m_guiTextures);
+                                      std::span<vc::ItemStack>{m_craftGrid.data(),
+                                                               table ? size_t{9} : size_t{4}},
+                                      table ? 3 : 2, m_carried, thrown, m_guiTextures);
             if (!thrown.Empty()) {
-                ThrowItem(thrown.id, thrown.count);
+                ThrowItem(thrown);
             }
         } else if (m_state == State::Paused) {
             const auto action = vc::PauseMenu::Draw(*m_ui, screen, mouse, clicked, m_guiTextures);
@@ -611,18 +688,22 @@ void GameApp::DrawUi() {
 void GameApp::OnRender(double alpha, double frameDt) {
     const bool escapeDown = vox::Input::IsKeyDown(vox::Key::Escape);
     if (escapeDown && !m_escapeWasDown) {
-        if (m_state == State::Inventory) {
-            SetInventoryOpen(false);
+        if (ContainerOpen()) {
+            CloseContainer();
         } else {
             SetPaused(m_state == State::Playing); // no-op on the title screen
         }
     }
     m_escapeWasDown = escapeDown;
 
-    // E opens/closes the inventory screen (only over a live, unpaused world).
+    // E opens the inventory / closes any container screen.
     const bool inventoryKey = vox::Input::IsKeyDown(vox::Key::E);
     if (inventoryKey && !m_inventoryKeyWasDown) {
-        SetInventoryOpen(m_state == State::Playing);
+        if (ContainerOpen()) {
+            CloseContainer();
+        } else {
+            OpenContainer(false);
+        }
     }
     m_inventoryKeyWasDown = inventoryKey;
 
@@ -639,8 +720,7 @@ void GameApp::OnRender(double alpha, double frameDt) {
 
     if (m_world) {
         const double dayFraction = std::fmod(
-            (m_worldTime + (m_state == State::Playing || m_state == State::Inventory ? alpha
-                                                                                     : 0.0)) /
+            (m_worldTime + (m_state == State::Playing || ContainerOpen() ? alpha : 0.0)) /
                 kDayTicks,
             1.0);
         const DayNight dayNight = ComputeDayNight(static_cast<float>(dayFraction));
@@ -778,20 +858,31 @@ void GameApp::OnRender(double alpha, double frameDt) {
             }
 
             for (const auto& item : items) {
-                // Vanilla item presentation: a quarter-scale block that
-                // hovers (sin, ~3 s period) and spins (~6 s per turn).
+                // Vanilla item presentation: hovers (sin, ~3 s period)
+                // and spins (~6 s per turn). Block drops are quarter-
+                // scale mini cubes; registry items (sticks, tools) are
+                // flat alpha-tested sprite quads.
                 const glm::vec3 pos =
                     glm::mix(item.prevPos, item.pos, static_cast<float>(alpha));
                 const float t = static_cast<float>(item.age) + static_cast<float>(alpha);
                 const float bob = std::sin(t * 0.1f + item.phase) * 0.1f + 0.1f;
-                setFaceLayers(vc::BlockRegistry::Get().Def(item.id).faceTiles);
+                const bool block = vc::IsBlockItem(item.id);
+                if (block) {
+                    setFaceLayers(vc::BlockRegistry::Get().Def(item.id).faceTiles);
+                } else {
+                    std::array<uint16_t, 6> spriteTiles;
+                    spriteTiles.fill(vc::ItemIconTile(item.id));
+                    setFaceLayers(spriteTiles);
+                }
+                const float scale = block ? 0.25f : 0.4f;
                 setCellLight({static_cast<int>(std::floor(pos.x)),
                               static_cast<int>(std::floor(pos.y + 0.125f)),
                               static_cast<int>(std::floor(pos.z))});
-                m_entityShader->SetFloat3("u_center", pos + glm::vec3{0.0f, 0.125f + bob, 0.0f});
-                m_entityShader->SetFloat("u_scale", 0.25f);
+                m_entityShader->SetFloat3("u_center",
+                                          pos + glm::vec3{0.0f, scale * 0.5f + bob, 0.0f});
+                m_entityShader->SetFloat("u_scale", scale);
                 m_entityShader->SetFloat("u_yaw", t * 0.05f + item.phase);
-                vox::Renderer::DrawIndexed(*m_entityCube);
+                vox::Renderer::DrawIndexed(block ? *m_entityCube : *m_itemQuad);
             }
 
             if (crackStage >= 0) {
@@ -858,7 +949,7 @@ void GameApp::OnRender(double alpha, double frameDt) {
                 m_frameCount, m_tickCount, pos.x, pos.y, pos.z, clockMinutes / 60,
                 clockMinutes % 60,
                 m_player.GetMode() == Player::Mode::Fly ? "fly" : "walk",
-                vc::BlockRegistry::Get().Def(m_inventory.Slot(m_hotbarSlot).id).name,
+                vc::ItemName(m_inventory.Slot(m_hotbarSlot).id),
                 m_world->LoadedChunkCount(), m_chunksDrawn, m_chunksWithMesh,
                 m_world->PendingMeshCount(), m_world->JobsInFlight(),
                 static_cast<double>(m_trianglesLoaded) / 1e6,

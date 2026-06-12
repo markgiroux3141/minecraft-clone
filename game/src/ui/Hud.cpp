@@ -76,7 +76,7 @@ void DrawPlaceholderHotbar(vox::UiRenderer& ui, glm::vec2 screen, float s,
 void DrawSelectedName(vox::UiRenderer& ui, glm::vec2 screen, float s,
                       std::span<const ItemStack> hotbar, size_t selectedSlot, float barTop) {
     const float textScale = UiTextScale(ui, s);
-    const std::string& name = BlockRegistry::Get().Def(hotbar[selectedSlot].id).name;
+    const std::string& name = ItemName(hotbar[selectedSlot].id);
     const glm::vec2 size = ui.MeasureText(name, textScale);
     const glm::vec2 textPos{std::floor((screen.x - size.x) * 0.5f), barTop - size.y - 4.0f * s};
     ui.DrawText(textPos + glm::vec2(textScale), name, textScale, {0.0f, 0.0f, 0.0f, 0.6f});

@@ -4,19 +4,22 @@
 #include <cstddef>
 #include <span>
 
-#include "world/Block.h"
+#include "Item.h"
 
 namespace vc {
 
-// A stack of one block type. Blocks are the only item kind until the
-// survival milestones grow a separate item registry (tools, M19).
+// A stack of one item kind (block or registry item, see Item.h). damage
+// is tool wear (0 for everything else); stacks only merge when both id
+// and damage match, and tools stack to 1 anyway.
 struct ItemStack {
-    BlockId id = blocks::Air;
+    ItemId id = blocks::Air;
     int count = 0;
+    int damage = 0;
 
     bool Empty() const { return id == blocks::Air || count <= 0; }
 };
 
+// Global ceiling (per-item limits via ItemMaxStack can only be lower).
 inline constexpr int kMaxStackSize = 64;
 
 // The player's slots, vanilla InventoryPlayer layout: 0..8 are the hotbar,

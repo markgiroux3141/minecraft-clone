@@ -63,14 +63,17 @@ public:
     const std::optional<int64_t>& GetWorldTime() const { return m_worldTime; }
     void SetWorldTime(int64_t ticks);
 
-    // Player inventory (M17), also in the manifest: non-empty slots only,
-    // one "inventory <n> <slot> <id> <count>..." line. Absent in saves
-    // that predate it (the game grants the legacy starter hotbar); an
-    // empty inventory persists as "inventory 0".
+    // Player inventory (M17), also in the manifest: non-empty slots only.
+    // Written as "inventory2 <n> <slot> <id> <count> <damage>..." since
+    // M19 (tool durability); the M17/M18 "inventory" triple form is still
+    // read (damage 0). Absent in saves that predate both (the game grants
+    // the legacy starter hotbar); an empty inventory persists as
+    // "inventory2 0".
     struct InventorySlot {
         int slot = 0;
         uint16_t id = 0;
         int count = 0;
+        int damage = 0;
     };
     const std::optional<std::vector<InventorySlot>>& GetInventory() const { return m_inventory; }
     // Rewrites the manifest immediately, like SetPlayerState (quit-path).

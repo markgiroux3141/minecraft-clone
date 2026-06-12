@@ -35,6 +35,9 @@ COPIES = [
     ("textures/gui/widgets.png", "textures/gui/widgets.png"),
     # Survival inventory panel (M17): 176x166 at (0,0) in a 256x256 sheet.
     ("textures/gui/container/inventory.png", "textures/gui/container/inventory.png"),
+    # Crafting table panel (M19): same layout family, 3x3 grid + result.
+    ("textures/gui/container/crafting_table.png",
+     "textures/gui/container/crafting_table.png"),
     # Celestial sheets: opaque with black backgrounds, drawn additively.
     ("textures/environment/sun.png", "textures/environment/sun.png"),
     ("textures/environment/moon_phases.png", "textures/environment/moon_phases.png"),
@@ -91,6 +94,7 @@ def flattened(img: Image.Image) -> Image.Image:
 
 def build_atlas(mc: Path, out_path: Path) -> None:
     blocks = mc / "textures" / "blocks"
+    items = mc / "textures" / "items"
     grass_tint = colormap_tint(mc / "textures" / "colormap" / "grass.png")
     foliage_tint = colormap_tint(mc / "textures" / "colormap" / "foliage.png")
 
@@ -146,6 +150,19 @@ def build_atlas(mc: Path, out_path: Path) -> None:
         # stages (kFirstCrackTile in Block.h).
         load_tile(blocks / "cobblestone.png"),
         *[crack_cutout(load_tile(blocks / f"destroy_stage_{i}.png")) for i in range(10)],
+        # M19 crafting: planks + crafting table (39..42), then the item
+        # sprites (43..49 — tiles in Item.cpp's RegisterDefaults).
+        load_tile(blocks / "planks_oak.png"),
+        load_tile(blocks / "crafting_table_top.png"),
+        load_tile(blocks / "crafting_table_side.png"),
+        load_tile(blocks / "crafting_table_front.png"),
+        load_tile(items / "stick.png"),
+        load_tile(items / "wood_pickaxe.png"),
+        load_tile(items / "wood_axe.png"),
+        load_tile(items / "wood_shovel.png"),
+        load_tile(items / "stone_pickaxe.png"),
+        load_tile(items / "stone_axe.png"),
+        load_tile(items / "stone_shovel.png"),
     ]
 
     strip = Image.new("RGBA", (TILE * len(tiles), TILE))

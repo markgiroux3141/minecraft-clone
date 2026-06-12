@@ -1,6 +1,7 @@
 #include "ui/Widgets.h"
 
 #include <algorithm>
+#include <cmath>
 
 #include "vox/renderer/UiRenderer.h"
 
@@ -55,11 +56,20 @@ void DrawItemStack(vox::UiRenderer& ui, glm::vec2 pos, float s, const ItemStack&
     if (stack.Empty()) {
         return;
     }
-    // Side face: for grass that's the fringe tile, more recognizable than
-    // plain green from the top.
-    const uint16_t layer =
-        BlockRegistry::Get().Def(stack.id).faceTiles[static_cast<size_t>(BlockFace::PosX)];
-    ui.DrawAtlasTile(pos, glm::vec2(16.0f * s), layer);
+    ui.DrawAtlasTile(pos, glm::vec2(16.0f * s), ItemIconTile(stack.id));
+
+    // Damaged tools show vanilla's durability bar (13x2 at (2,13) inside
+    // the icon, green -> red as it wears) instead of a count.
+    const ItemDef* item = ItemRegistry::Get().Find(stack.id);
+    if (item && item->maxDamage > 0 && stack.damage > 0) {
+        const float remain =
+            1.0f - static_cast<float>(stack.damage) / static_cast<float>(item->maxDamage);
+        ui.DrawRect(pos + glm::vec2(2.0f, 13.0f) * s, glm::vec2(13.0f, 2.0f) * s,
+                    {0.0f, 0.0f, 0.0f, 1.0f});
+        ui.DrawRect(pos + glm::vec2(2.0f, 13.0f) * s,
+                    glm::vec2(std::round(13.0f * remain), 1.0f) * s,
+                    {1.0f - remain, remain, 0.0f, 1.0f});
+    }
     if (stack.count > 1) {
         // Vanilla anchors the count's bottom-right one pixel proud of the
         // icon (right edge x+17, bottom y+17 with the 8px font).

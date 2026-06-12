@@ -360,7 +360,7 @@ constexpr int kItemMergeMax = 64;       // == kMaxStackSize (Inventory.h)
 
 } // namespace
 
-void World::SpawnBlockDrop(const glm::ivec3& cell, BlockId id, int count) {
+void World::SpawnBlockDrop(const glm::ivec3& cell, uint16_t id, int count) {
     // Vanilla Block.spawnAsEntity: jitter into the middle half of the cell;
     // EntityItem's constructor adds the small scatter velocity (b/tick
     // 0.2 up, +-0.1 sideways -> b/s at 20 TPS).
@@ -371,14 +371,15 @@ void World::SpawnBlockDrop(const glm::ivec3& cell, BlockId id, int count) {
     SpawnItem(pos, vel, id, count, 10);
 }
 
-void World::SpawnItem(const glm::vec3& pos, const glm::vec3& vel, BlockId id, int count,
-                      int pickupDelay) {
+void World::SpawnItem(const glm::vec3& pos, const glm::vec3& vel, uint16_t id, int count,
+                      int pickupDelay, int damage) {
     if (id == blocks::Air || count <= 0) {
         return;
     }
     ItemEntity item;
     item.id = id;
     item.count = count;
+    item.damage = damage;
     item.pos = pos;
     item.prevPos = pos;
     item.vel = vel;
@@ -483,7 +484,8 @@ void World::TickItemEntities() {
         if (crossedCell || item.age % 25 == 0) {
             for (size_t j = m_itemEntities.size(); j-- > i + 1;) {
                 ItemEntity& other = m_itemEntities[j];
-                if (other.id != item.id || item.count + other.count > kItemMergeMax ||
+                if (other.id != item.id || other.damage != item.damage ||
+                    item.count + other.count > kItemMergeMax ||
                     std::abs(other.pos.x - item.pos.x) > 0.5f ||
                     std::abs(other.pos.y - item.pos.y) > 0.5f ||
                     std::abs(other.pos.z - item.pos.z) > 0.5f) {

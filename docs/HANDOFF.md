@@ -1,9 +1,11 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-12, M17 USER-VERIFIED ("looks great"); M18 (Survival
-II: mining feel) CODE COMPLETE — builds clean, gentest/savetest pass,
-startup launch sanity-checked; AWAITING USER VERIFICATION, see the M18
-section for what to test. M19 (crafting) is next once verified. Read
+Updated: 2026-06-12. M17 USER-VERIFIED; M18 user-verified in essence
+("really good") with the crack-overlay blend fixed on feedback
+(crumble blend — see M18 section). M19 (Survival III: crafting) CODE
+COMPLETE — builds clean, savetest/gentest pass, startup sanity-checked;
+AWAITING USER VERIFICATION, see the M19 section. Decided with the
+user: tool durability INCLUDED, vanilla pickaxe gating INCLUDED. Read
 alongside `ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md`
 (build commands, conventions).
 
@@ -41,11 +43,13 @@ Quit. In game the cursor is captured: WASD move, mouse look, Space jump
 (walk) or rise (fly), LeftShift sink (fly), LeftControl sprint/boost,
 F toggles walk/fly, O toggles occlusion culling (debug), T fast-forwards
 world time (debug), LMB hold-to-break in walk (crack overlay, drops pop
-out as item entities and vacuum into the inventory) / instant pop in fly
-(creative-style, no drops), RMB place (consumes one), Q tosses one from
-the hand, 1..9 select the hotbar slot, E opens/closes the inventory
-screen (slots + a creative block palette; clicking outside the panels
-throws the carried stack; new worlds start with the legacy kit:
+out as item entities and vacuum into the inventory; tools dig faster,
+stone needs a pickaxe to drop) / instant pop in fly (creative-style, no
+drops), RMB place (consumes one) or use a crafting table (opens its
+3x3), Q tosses one from the hand, 1..9 select the hotbar slot, E
+opens/closes the inventory screen (slots + 2x2 craft grid + a creative
+palette of all blocks AND items; clicking outside the panels throws the
+carried stack; new worlds start with the legacy kit:
 stone/dirt/grass/glowstone/sand/log/leaves/water x64, slot 9 empty).
 In water: W swims toward the look
 direction, Space swims up (breach kick at the surface). Esc pauses
@@ -729,14 +733,85 @@ flower with water flow / falling sand -> it pops as a drop. Inventory
 screen: click outside the panels -> stack lands in front of you. Items
 despawn after 5 min; quit+reload clears ground items (known limit).
 
-## Next: M19 — Survival III: crafting
+## M19 — Survival III: crafting (how it works)
 
-The survival arc's last leg (agreed 2026-06-12): recipe registry, 2x2
-player grid + crafting table 3x3 (gui/container/crafting_table.png),
-tools as items — tool dig-speed multipliers hook into M18's hardness
-path (EntityPlayer.getDigSpeed/getStrVsBlock), plus ItemStack growing
-a notion of non-block items. Vanilla references: CraftingManager,
-Container/InventoryPlayer, ItemTool/ItemPickaxe.
+CODE COMPLETE 2026-06-12, awaiting user verification. Decided with the
+user: tool durability IN (vanilla uses: wood 59, stone 131), pickaxe
+gating IN (stone family drops nothing bare-handed).
+
+- Item id space (game/src/Item.h/.cpp): `ItemId` (uint16) — ids <
+  kFirstItemId (1024) ARE BlockIds; above sit ItemRegistry entries
+  (stick + wood/stone pickaxe/axe/shovel, sprite tiles 43..49).
+  APPEND-ONLY like blocks (ids persist in level.dat). Helpers span both
+  halves: ItemName/ItemIconTile/ItemMaxStack/ItemExists/IsBlockItem.
+  `ItemDef{tile, tool, efficiency, maxDamage, maxStack}` — tools stack
+  to 1.
+- New blocks: planks (tile 39, hardness 2, axe-class; crafted from any
+  log) and crafting table (tiles 40 top/41 side/42 front, planks
+  bottom, hardness 2.5). Tiles in BOTH texture scripts; GUI sheet
+  crafting_table.png joined the import COPIES.
+- BlockDef grew `toolClass` (Pickaxe: stone/cobble/sandstone; Shovel:
+  dirt/grass/snowy/sand; Axe: logs/planks/table) and `needsPickaxe`
+  (the stone trio). Cactus deliberately None (vanilla).
+- ItemStack grew `damage`; merges everywhere (Inventory::Add, slot
+  clicks, item-entity merge) require id AND damage equal and cap at
+  ItemMaxStack. Manifest format: "inventory2 n {slot id count damage}"
+  written; M17/M18 "inventory" triples still parse (savetest covers
+  both + an item id with damage).
+- Recipes (game/src/Crafting.h/.cpp): shaped (anchored anywhere in the
+  grid, horizontal mirror, per-cell ingredient ALTERNATIVES — "any
+  log") + shapeless (greedy multiset). Starter set (10): any log->4
+  planks, 2 planks->4 sticks, 2x2 planks->table, 2x2 sand->sandstone,
+  {planks|cobble} x {pickaxe MMM/.S./.S., axe MM/MS/.S + mirror,
+  shovel M/S/S}. Recipes::Match(grid span, gridSize) returns the
+  result for the UI preview and the craft click.
+- InventoryScreen now draws BOTH containers (craft span + craftSize
+  param): 2 = player screen (inventory.png, vanilla 2x2 at (98,18),
+  result (154,28), palette panel above — palette now lists items too),
+  3 = crafting table (crafting_table.png, 3x3 at (30,17), result
+  (124,35), no palette). Result click crafts into the cursor (only if
+  it fits) and consumes one per non-empty cell. Durability bar in
+  DrawItemStack (vanilla 13x2 at (2,13), green->red, shown when
+  damaged).
+- GameApp: State::Crafting joined Inventory as a "container" state
+  (shared OpenContainer/CloseContainer; close returns craft grid +
+  cursor to the bag, overflow thrown; window-X persist path merges
+  them too). RMB on a crafting table opens it (use beats place, no
+  sneak modifier). m_craftGrid is one 9-cell array; the 2x2 uses the
+  first 4 cells row-major.
+- Tools in the dig path (HandleInput): digSpeed = efficiency (2/4)
+  when hand tool class == block toolClass; canHarvest = !needsPickaxe
+  || pickaxe in hand — gated blocks use /100 (hardness*5 seconds) and
+  drop NOTHING when !canHarvest. Tools wear 1 per broken block with
+  hardness > 0 and vanish at maxDamage. Throws/Q preserve damage
+  (ItemEntity carries it).
+- Non-block item drops render as flat alpha-tested sprite quads
+  (m_itemQuad, same entity shader, scale 0.4) instead of mini cubes.
+- Known M19 limits: no shift-click quick-move, no furnace/smelting (no
+  ores — the natural M20: ore worldgen + iron tier + furnace), no
+  recipe book, sticks/tools can sit in the hotbar but place nothing
+  (correct), the result slot gives one craft per click (no drag/shift
+  mass-craft), no tool-break sound/flash (audio backlog), crafting
+  table front texture faces +X regardless of placement (no block
+  orientation data yet).
+
+What the user should test (no new world needed): punch a log (slowish
+~3 s bare-handed) -> E -> log in the 2x2 -> planks appear in the
+result -> craft repeatedly; planks->sticks; 2x2 planks->crafting
+table; place it, RMB opens the 3x3; craft a wooden pickaxe (MMM/.S./
+.S.) and axe/shovel incl. the mirrored axe; stone WITHOUT a pickaxe:
+slow dig (~7.5 s) and NO drop; with the wooden pick ~1.1 s and
+cobble drops; stone tools from cobble; durability bar appears after
+the first use, tool vanishes at 0 (wood 59 uses); damaged tool
+thrown with Q keeps its bar when picked up; quit/reload preserves
+damage; sticks render as flat sprites when tossed; old M17/M18 world
+loads its inventory intact.
+
+## Next: M20 candidates
+
+Ores + furnace/smelting (iron tier, coal, makes durability matter) is
+the natural continuation; alternatives: block-break particles + audio
+("game feel" pair), deeper world, lava. User decides.
 
 Other backlog: deeper world (kWorldHeightChunks 4 -> 8, rebase
 topology + cave start heights — discussed 2026-06-12, deferred), audio

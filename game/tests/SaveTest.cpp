@@ -5,6 +5,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 
 #include "vox/core/Log.h"
 
@@ -92,7 +93,7 @@ int main() {
         Check(!save.GetInventory().has_value(), "pre-inventory manifest reads as absent");
         save.SetWorldTime(13337);
         save.SetPlayerState({{1234.5f, 70.25f, -8.125f}, 123.5f, -45.0f, true});
-        save.SetInventory({{0, 1, 64}, {8, 9, 1}, {35, 20, 17}});
+        save.SetInventory({{0, 1, 64, 0}, {8, 1025, 1, 37}, {35, 20, 17, 0}});
     }
     {
         vc::WorldSave save(dir, 7);
@@ -104,10 +105,10 @@ int main() {
         Check(save.GetWorldTime() == 13337, "world time round-trips");
         const auto& inv = save.GetInventory();
         Check(inv.has_value() && inv->size() == 3 && (*inv)[0].slot == 0 && (*inv)[0].id == 1 &&
-                  (*inv)[0].count == 64 && (*inv)[1].slot == 8 && (*inv)[1].id == 9 &&
-                  (*inv)[1].count == 1 && (*inv)[2].slot == 35 && (*inv)[2].id == 20 &&
-                  (*inv)[2].count == 17,
-              "inventory round-trips exactly");
+                  (*inv)[0].count == 64 && (*inv)[0].damage == 0 && (*inv)[1].slot == 8 &&
+                  (*inv)[1].id == 1025 && (*inv)[1].count == 1 && (*inv)[1].damage == 37 &&
+                  (*inv)[2].slot == 35 && (*inv)[2].id == 20 && (*inv)[2].count == 17,
+              "inventory (incl. item ids + tool damage) round-trips exactly");
         Check(save.Seed() == 42, "seed survives the manifest rewrite");
         Check(save.SavedChunkCount() == 4, "chunks survive the manifest rewrite");
         save.SetInventory({});
@@ -117,6 +118,18 @@ int main() {
         const auto& inv = save.GetInventory();
         Check(inv.has_value() && inv->empty(),
               "empty inventory reads back as present-but-empty (not absent)");
+    }
+    {
+        // M17/M18 saves wrote triples under the old "inventory" tag —
+        // they must still parse (damage 0).
+        std::ofstream out{dir / "level.dat"};
+        out << "voxcraft-save 1\nseed 42\ninventory 1 3 7 12\n";
+        out.close();
+        vc::WorldSave save(dir, 7);
+        const auto& inv = save.GetInventory();
+        Check(inv.has_value() && inv->size() == 1 && (*inv)[0].slot == 3 && (*inv)[0].id == 7 &&
+                  (*inv)[0].count == 12 && (*inv)[0].damage == 0,
+              "legacy triple-form inventory tag still parses");
     }
 
     std::filesystem::remove_all(dir);

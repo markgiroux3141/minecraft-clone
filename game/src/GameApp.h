@@ -32,12 +32,19 @@ protected:
 
 private:
     // Title/world-select (no world, free cursor), captured-cursor gameplay,
-    // the pause menu (free cursor, sim frozen), or the inventory screen
-    // (free cursor, world keeps ticking, player physics run input-less).
-    enum class State : uint8_t { Title, Playing, Paused, Inventory };
+    // the pause menu (free cursor, sim frozen), or a container screen —
+    // inventory with the 2x2 grid, or a crafting table's 3x3 (free
+    // cursor, world keeps ticking, player physics run input-less).
+    enum class State : uint8_t { Title, Playing, Paused, Inventory, Crafting };
 
     void SetPaused(bool paused);
-    void SetInventoryOpen(bool open);
+    bool ContainerOpen() const {
+        return m_state == State::Inventory || m_state == State::Crafting;
+    }
+    void OpenContainer(bool table); // Playing -> Inventory/Crafting
+    // Returns craft-grid contents + the carried stack to the inventory
+    // (overflow thrown), re-arms the edit guards, back to Playing.
+    void CloseContainer();
     void RefreshWorldList();
     // Loads (or creates) saves/<name>; defaultSeed only matters for a brand
     // new save — an existing manifest's seed wins.
@@ -49,8 +56,8 @@ private:
     bool EyeInWater() const;
     void DrawTargetOutline();
     void DrawUi(); // HUD + menus; may change state (menu clicks)
-    // Tosses an item entity forward from the eye (Q key, inventory throws).
-    void ThrowItem(vc::BlockId id, int count);
+    // Tosses an item entity forward from the eye (Q key, container throws).
+    void ThrowItem(const vc::ItemStack& stack);
 
     vox::PerspectiveCamera m_camera;
     Player m_player{m_camera};
@@ -73,9 +80,11 @@ private:
     std::shared_ptr<vox::Texture2D> m_moonTexture;
     double m_worldTime = 0.0; // ticks; one day/night cycle per kDayTicks
 
-    // Falling-block entities: one textured unit cube, drawn per entity.
+    // Entity cubes (falling blocks, block drops, crack overlay) and the
+    // flat sprite quad for non-block item drops (sticks, tools).
     std::shared_ptr<vox::Shader> m_entityShader;
     std::shared_ptr<vox::VertexArray> m_entityCube;
+    std::shared_ptr<vox::VertexArray> m_itemQuad;
 
     // Frustum-surviving chunks for the frame's multi-draws (reused scratch):
     // opaque front-to-back, then water back-to-front in the blended pass.
@@ -86,9 +95,12 @@ private:
     std::unique_ptr<vox::UiRenderer> m_ui;
 
     // Player items (M17): hotbar = inventory slots 0..8, keys 1..9 select;
-    // m_carried rides the mouse while the inventory screen is open.
+    // m_carried rides the mouse while a container screen is open. The
+    // craft grid (M19) is row-major: the 2x2 player grid uses the first
+    // 4 cells, the table all 9; contents return to the bag on close.
     vc::Inventory m_inventory;
     vc::ItemStack m_carried;
+    std::array<vc::ItemStack, 9> m_craftGrid;
     vc::GuiTextures m_guiTextures; // null members = placeholder look
     size_t m_hotbarSlot = 0;
 

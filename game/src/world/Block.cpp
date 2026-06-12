@@ -47,6 +47,8 @@ BlockId Cactus = 0;
 BlockId Sandstone = 0;
 BlockId Bedrock = 0;
 BlockId Cobblestone = 0;
+BlockId Planks = 0;
+BlockId CraftingTable = 0;
 
 namespace {
 
@@ -65,6 +67,7 @@ BlockDef LogDef(std::string name, uint16_t sideTile, uint16_t topTile) {
     def.faceTiles[static_cast<size_t>(BlockFace::PosY)] = topTile;
     def.faceTiles[static_cast<size_t>(BlockFace::NegY)] = topTile;
     def.hardness = 2.0f; // vanilla BlockLog
+    def.toolClass = ToolClass::Axe;
     return def;
 }
 
@@ -90,29 +93,35 @@ void RegisterDefaults() {
     // 0 stone, 1 dirt, 2 grass side, 3 grass top, 4 glowstone, 5 sand,
     // 6 log side, 7 log top, 8 leaves. Existing save blobs store BlockIds,
     // so only APPEND registrations — never reorder.
-    // M18 hardness values are vanilla's (Block.registerBlocks).
+    // M18 hardness values are vanilla's (Block.registerBlocks); M19 tool
+    // classes/pickaxe gating follow vanilla's materials.
     BlockDef stone = BlockDef::Uniform("stone", 0);
     stone.hardness = 1.5f;
+    stone.toolClass = ToolClass::Pickaxe;
+    stone.needsPickaxe = true;
     Stone = registry.Register(std::move(stone));
 
     BlockDef dirt = BlockDef::Uniform("dirt", 1);
     dirt.hardness = 0.5f;
+    dirt.toolClass = ToolClass::Shovel;
     Dirt = registry.Register(std::move(dirt));
 
     BlockDef grass = BlockDef::Uniform("grass", 2);
     grass.faceTiles[static_cast<size_t>(BlockFace::PosY)] = 3;
     grass.faceTiles[static_cast<size_t>(BlockFace::NegY)] = 1;
     grass.hardness = 0.6f;
+    grass.toolClass = ToolClass::Shovel;
     Grass = registry.Register(std::move(grass));
 
     BlockDef glowstone = BlockDef::Uniform("glowstone", 4);
     glowstone.emission = 15;
-    glowstone.hardness = 0.3f;
+    glowstone.hardness = 0.3f; // vanilla glass material: no tool, no gating
     Glowstone = registry.Register(std::move(glowstone));
 
     BlockDef sand = BlockDef::Uniform("sand", 5);
     sand.gravity = true;
     sand.hardness = 0.5f;
+    sand.toolClass = ToolClass::Shovel;
     Sand = registry.Register(std::move(sand));
 
     Log = registry.Register(LogDef("log", 6, 7));
@@ -148,6 +157,7 @@ void RegisterDefaults() {
     snowyGrass.faceTiles[static_cast<size_t>(BlockFace::PosY)] = 10;
     snowyGrass.faceTiles[static_cast<size_t>(BlockFace::NegY)] = 1;
     snowyGrass.hardness = 0.6f;
+    snowyGrass.toolClass = ToolClass::Shovel;
     SnowyGrass = registry.Register(std::move(snowyGrass));
 
     // M16 plants (appended after SnowyGrass): cross-meshed, alpha-tested,
@@ -166,6 +176,7 @@ void RegisterDefaults() {
     SpruceLeaves = registry.Register(LeavesDef("spruce leaves", 21));
     BlockDef cactus = LogDef("cactus", 22, 23);
     cactus.hardness = 0.4f; // vanilla (LogDef defaulted it to wood's 2.0)
+    cactus.toolClass = ToolClass::None; // vanilla cactus material: no tool
     Cactus = registry.Register(std::move(cactus));
 
     // M16: sandstone (tiles 24 side / 25 top / 26 bottom) — the vanilla
@@ -174,6 +185,8 @@ void RegisterDefaults() {
     sandstone.faceTiles[static_cast<size_t>(BlockFace::PosY)] = 25;
     sandstone.faceTiles[static_cast<size_t>(BlockFace::NegY)] = 26;
     sandstone.hardness = 0.8f;
+    sandstone.toolClass = ToolClass::Pickaxe;
+    sandstone.needsPickaxe = true;
     Sandstone = registry.Register(std::move(sandstone));
 
     // M16: bedrock world floor (tile 27) — solid at y0, ragged through
@@ -183,10 +196,28 @@ void RegisterDefaults() {
     Bedrock = registry.Register(std::move(bedrock));
 
     // M18: cobblestone (tile 28) — never generated, exists as stone's
-    // mining drop. Crack overlay tiles follow at kFirstCrackTile (29).
+    // mining drop. Crack overlay tiles follow at kFirstCrackTile (29..38).
     BlockDef cobble = BlockDef::Uniform("cobblestone", 28);
     cobble.hardness = 2.0f;
+    cobble.toolClass = ToolClass::Pickaxe;
+    cobble.needsPickaxe = true;
     Cobblestone = registry.Register(std::move(cobble));
+
+    // M19: planks (tile 39) — crafted from any log, the wooden-tool
+    // material; crafting table (tiles 40 top / 41 side / 42 front, planks
+    // underneath) — RMB on it opens the 3x3 grid.
+    BlockDef planks = BlockDef::Uniform("planks", 39);
+    planks.hardness = 2.0f;
+    planks.toolClass = ToolClass::Axe;
+    Planks = registry.Register(std::move(planks));
+
+    BlockDef craftingTable = BlockDef::Uniform("crafting table", 41);
+    craftingTable.faceTiles[static_cast<size_t>(BlockFace::PosY)] = 40;
+    craftingTable.faceTiles[static_cast<size_t>(BlockFace::NegY)] = 39;
+    craftingTable.faceTiles[static_cast<size_t>(BlockFace::PosX)] = 42;
+    craftingTable.hardness = 2.5f;
+    craftingTable.toolClass = ToolClass::Axe;
+    CraftingTable = registry.Register(std::move(craftingTable));
 
     // M18 drop table (vanilla-ish; cross-references resolve here, after
     // every id exists). Leaves/tall grass/dead bush already drop nothing.

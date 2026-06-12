@@ -21,7 +21,8 @@ namespace vc {
 struct GuiTextures {
     std::shared_ptr<vox::Texture2D> icons;   // gui/icons.png — crosshair
     std::shared_ptr<vox::Texture2D> widgets; // gui/widgets.png — hotbar, buttons
-    std::shared_ptr<vox::Texture2D> inventory; // gui/container/inventory.png — M17 panel
+    std::shared_ptr<vox::Texture2D> inventory;     // gui/container/inventory.png (M17)
+    std::shared_ptr<vox::Texture2D> craftingTable; // gui/container/crafting_table.png (M19)
 };
 
 inline constexpr glm::vec4 kUiText{1.0f, 1.0f, 1.0f, 0.95f};

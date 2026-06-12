@@ -284,12 +284,76 @@ def crack_stage(stage):
     return pixel
 
 
+PLANK = (157, 127, 78)
+
+
+def planks(x, y):
+    # Horizontal boards (4px rows) with dark seams and butt joints.
+    if y % 4 == 0 or (x == (y // 4 * 7) % 16):
+        return speckle((110, 86, 50), x, y, 30, 8)
+    return speckle(PLANK, x, y, 30, 10)
+
+
+def crafting_table_top(x, y):
+    # Planks with a dark tool-grid border.
+    if x in (0, 15) or y in (0, 15) or (3 < x < 12 and 3 < y < 12 and (x % 4 == 0 or y % 4 == 0)):
+        return speckle((74, 56, 34), x, y, 31, 8)
+    return speckle(PLANK, x, y, 31, 8)
+
+
+def crafting_table_side(x, y):
+    # Planks with a saw + hammer silhouette blob.
+    if 4 <= x <= 11 and 5 <= y <= 10 and hash01(x, y, 32) > 0.5:
+        return speckle((58, 44, 28), x, y, 32, 8)
+    return planks(x, y)
+
+
+def crafting_table_front(x, y):
+    if 5 <= x <= 10 and 4 <= y <= 11 and hash01(x, y, 33) > 0.45:
+        return speckle((58, 44, 28), x, y, 33, 8)
+    return planks(x, y)
+
+
+STICK = (104, 82, 50)
+
+
+def stick_sprite(x, y):
+    # Diagonal stick from bottom-left to upper-right, 2px thick.
+    d = (15 - y) - x
+    if -1 <= d <= 1 and 2 <= x <= 12:
+        return speckle(STICK, x, y, 34, 10)
+    return (0, 0, 0, 0)
+
+
+def tool_sprite(head_color, salt):
+    # Generic placeholder tool: diagonal stick handle + a material-colored
+    # head blob in the upper-right (shape detail comes from the real
+    # assets; this just reads as "a tool of that material").
+    def pixel(x, y):
+        d = (15 - y) - x
+        if -1 <= d <= 1 and 1 <= x <= 9:
+            return speckle(STICK, x, y, salt, 10)
+        if (x - 11) ** 2 + (y - 4) ** 2 <= 11:
+            return speckle(head_color, x, y, salt, 12)
+        return (0, 0, 0, 0)
+
+    return pixel
+
+
+WOOD_HEAD = (157, 127, 78)
+STONE_HEAD = (125, 125, 125)
+
+
 # Layer index in the texture array == position in this list.
 TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top, leaves, water,
          snow, grass_side_snowed, tall_grass, dandelion, poppy, dead_bush,
          birch_side, birch_top, birch_leaves, spruce_side, spruce_top, spruce_leaves,
          cactus_side, cactus_top, sandstone_side, sandstone_top, sandstone_bottom, bedrock,
-         cobblestone] + [crack_stage(i) for i in range(10)]
+         cobblestone] + [crack_stage(i) for i in range(10)] + [
+         planks, crafting_table_top, crafting_table_side, crafting_table_front,
+         stick_sprite,
+         tool_sprite(WOOD_HEAD, 35), tool_sprite(WOOD_HEAD, 36), tool_sprite(WOOD_HEAD, 37),
+         tool_sprite(STONE_HEAD, 38), tool_sprite(STONE_HEAD, 39), tool_sprite(STONE_HEAD, 40)]
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:

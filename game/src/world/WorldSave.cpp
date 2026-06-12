@@ -118,13 +118,15 @@ void WorldSave::ReadManifest(int defaultSeed) {
                 if (in >> ticks) {
                     m_worldTime = ticks;
                 }
-            } else if (tag == "inventory") {
+            } else if (tag == "inventory" || tag == "inventory2") {
+                const bool withDamage = tag == "inventory2";
                 size_t n = 0;
                 if (in >> n) {
                     std::vector<InventorySlot> slots;
                     slots.reserve(n);
                     InventorySlot s;
-                    while (slots.size() < n && in >> s.slot >> s.id >> s.count) {
+                    while (slots.size() < n && in >> s.slot >> s.id >> s.count &&
+                           (!withDamage || in >> s.damage)) {
                         slots.push_back(s);
                     }
                     if (slots.size() == n) {
@@ -152,9 +154,9 @@ void WorldSave::WriteManifest() const {
             << m_player->pitch << ' ' << (m_player->fly ? 1 : 0) << '\n';
     }
     if (m_inventory) {
-        out << "inventory " << m_inventory->size();
+        out << "inventory2 " << m_inventory->size();
         for (const InventorySlot& s : *m_inventory) {
-            out << ' ' << s.slot << ' ' << s.id << ' ' << s.count;
+            out << ' ' << s.slot << ' ' << s.id << ' ' << s.count << ' ' << s.damage;
         }
         out << '\n';
     }

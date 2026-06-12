@@ -131,8 +131,16 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   drop table (stone -> new cobblestone block, grass -> dirt,
   leaves/tall grass -> nothing), Q-throw and inventory-screen throws.
   Fly mode breaks instantly and drops nothing (creative-style).
-- **M19 — Survival III: crafting**: recipe registry, 2x2 + 3x3 grids,
-  tools as items.
+- **M19 — Survival III: crafting** ✅: unified item-id space (blocks
+  < 1024, ItemRegistry above — sticks + wood/stone pickaxe/axe/shovel),
+  shaped/shapeless recipe registry (translation + mirror, ingredient
+  alternatives), the 2x2 grid + result in the inventory screen and a
+  placeable crafting-table block whose RMB opens the 3x3
+  (gui/container/crafting_table.png), new planks block, tools hooking
+  M18's dig path (efficiency 2x/4x on matching blocks, vanilla pickaxe
+  gating: stone family digs /100 and drops nothing bare-handed) with
+  durability (59/131 uses, vanilla bar, persisted per stack), and flat
+  sprite rendering for non-block item drops.
 - **Backlog**: deeper world (kWorldHeightChunks 4 → 8), audio engine,
   block-break particles (vanilla has them for EVERY block, not just
   glass: hit chips at the dig face + a 64-chip destroy burst textured

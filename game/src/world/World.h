@@ -145,8 +145,9 @@ public:
     // interpolated like FallingBlock. NOT persisted — drops vanish on
     // save/quit (they'd despawn within minutes anyway).
     struct ItemEntity {
-        BlockId id;
+        uint16_t id; // unified item id (block or registry item, see Item.h)
         int count;
+        int damage = 0;         // tool wear rides along (M19)
         glm::vec3 pos, prevPos; // bottom-center of the cube
         glm::vec3 vel;          // blocks/s
         int age = 0;
@@ -158,13 +159,14 @@ public:
     // Block-drop spawn, vanilla Block.spawnAsEntity: jittered to
     // cell + 0.25..0.75 with a small random scatter velocity. No-op when
     // id is air or count <= 0.
-    void SpawnBlockDrop(const glm::ivec3& cell, BlockId id, int count);
+    void SpawnBlockDrop(const glm::ivec3& cell, uint16_t id, int count);
     // Explicit spawn (player throws): pickupDelay 40 like vanilla's drops.
-    void SpawnItem(const glm::vec3& pos, const glm::vec3& vel, BlockId id, int count,
-                   int pickupDelay);
+    void SpawnItem(const glm::vec3& pos, const glm::vec3& vel, uint16_t id, int count,
+                   int pickupDelay, int damage = 0);
     // Items overlapping box min/max (caller grows the player AABB by
     // vanilla's 1.0/0.5/1.0 pickup reach) whose delay has expired.
-    // take(id, count) returns how many fit; fully-taken items are removed.
+    // take(id, count, damage) returns how many fit; fully-taken items are
+    // removed.
     template <typename Fn> void PickupItems(const glm::vec3& boxMin, const glm::vec3& boxMax, Fn&& take) {
         for (size_t i = 0; i < m_itemEntities.size();) {
             ItemEntity& item = m_itemEntities[i];
@@ -175,7 +177,7 @@ public:
                 ++i;
                 continue;
             }
-            item.count -= take(item.id, item.count);
+            item.count -= take(item.id, item.count, item.damage);
             if (item.count <= 0) {
                 m_itemEntities.erase(m_itemEntities.begin() + static_cast<ptrdiff_t>(i));
             } else {

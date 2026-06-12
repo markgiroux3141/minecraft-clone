@@ -1,8 +1,12 @@
 add_executable(game
+    src/Crafting.cpp
+    src/Crafting.h
     src/GameApp.cpp
     src/GameApp.h
     src/Inventory.cpp
     src/Inventory.h
+    src/Item.cpp
+    src/Item.h
     src/Main.cpp
     src/Player.cpp
     src/Player.h
