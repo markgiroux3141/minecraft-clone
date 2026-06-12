@@ -1,11 +1,11 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-12, end of M15 (caves user-verified in-game; biome
-SURFACES user-verified; biome TOPOLOGY committed but NOT yet flown by
-the user — verify that first thing next session). M16 is TBD with the
-user; flora & decoration is the discussed favorite (see the backlog at
-the bottom). Read alongside `ARCHITECTURE.md` (layering rules, roadmap)
-and `CLAUDE.md` (build commands, conventions).
+Updated: 2026-06-12, end of M16 (flora & decoration — code complete,
+all tests green, NOT yet user-verified in-game). TWO things await the
+user's eyes: the M15 biome TOPOLOGY (committed last session, never
+flown) and all of M16 (leaves/plants/trees/cactus — test in a NEW
+world). Read alongside `ARCHITECTURE.md` (layering rules, roadmap) and
+`CLAUDE.md` (build commands, conventions).
 
 IMPORTANT RESOURCE: the user has Minecraft's Java source (MCP 9.40 =
 1.12) at `D:\Minecraft source code` — look up exact game dynamics there
@@ -16,7 +16,8 @@ distribution (user's explicit call).
 
 ## Where the project stands
 
-M0–M15 are done (M15 topology pending the user's in-game look):
+M0–M16 are done (M15 topology + all of M16 pending the user's in-game
+look):
 - Engine (`engine/src/vox/`, namespace `vox`): fixed-timestep app loop
   (20 TPS + interpolated render), GLFW window/input (incl. cursor capture),
   GL 4.6 renderer facade with DSA abstractions (Shader, Buffer/VertexArray,
@@ -346,9 +347,9 @@ Stage 3 — LOD shell:
   distance fog (320..500 outside, 2..28 deep blue underwater). Title
   bar shows the in-world clock.
 - Deferred for a future block-update milestone: water flow + falling
-  sand (need per-block metadata + scheduled ticks), water-attenuated
-  skylight (sea floor reads bright), lowered water surface, cutout
-  leaves, moon/stars.
+  sand (landed in M13), water-attenuated skylight + cutout leaves
+  (landed in M16), lowered water surface (M13), moon (M14) / stars
+  (still open).
 
 ## M12 perf polish (how it works)
 
@@ -506,26 +507,72 @@ World.
   produces multiple biomes (spread 5x5 column sample over +-64 chunks),
   snowy grass sits on dirt. Run it after touching TerrainGen/CaveGen.
 
-## Next: M16 — TBD (decide with the user)
+## M16 flora & decoration (how it works)
 
-Leading candidate (discussed 2026-06-12, user interest): flora &
-decoration —
-- Stage 1: cross-mesh (two diagonal quads) + cutout pass (alpha-test
-  discard in chunk.frag, non-greedy emission, non-opaque/non-solid
-  blocks). Also unlocks transparent CUTOUT LEAVES (drop the
-  dark-backdrop bake in import_mc_assets.py when it lands).
-- Stage 2: tall grass / flowers / dead bush (biome-driven density;
-  tallgrass.png is grayscale — bake the plains grass tint at import
-  like grass_top).
-- Stage 3: birch + spruce trees (new log/leaves pairs — APPEND-only
-  block registration, grow both atlas scripts in sync; conical spruce
-  in snowy, birch mixed into forests) + cactus (desert, sand-only, 1-3
-  tall; full cube first pass, vanilla's 14/16 inset later).
+Three commits: 37156b7 (stage 1), 084ef24 (stage 2), 0481e5f (stage 3).
+Old saves: M16 changed worldgen again (plants, tree species, cactus) —
+unedited chunks regenerate with new rules; test in a NEW world.
 
-Other backlog: inventory UI (gui/container/ sheets present; DrawImage
-ready), audio engine (1.12 .ogg hashed store surveyed — see M14 notes),
-flow-animated water (16x512 strip), underwater skylight attenuation,
-stars, world-list scrolling, settings screen.
+- Cutout pass (stage 1): NO new mesh stream — cutout blocks live in the
+  regular opaque/alpha-tested stream and chunk.frag unconditionally
+  discards alpha < 0.5 (solid tiles are 255, water ~0.66, so only real
+  holes drop; classic-MC approach). `BlockDef::cutout` cubes (leaves)
+  greedy-mesh normally but emit every face against a non-opaque
+  neighbor INCLUDING leaf-on-leaf (vanilla "fancy"; the coplanar
+  opposite-winding pairs resolve by backface culling). Box-filtered
+  mips push leaf alpha toward the tile's ~0.65 coverage, so distant
+  canopies fill in solid rather than eroding — no special mip handling.
+  Both atlas scripts now keep real leaf alpha (backdrop bake removed).
+- Light opacity (stage 1): `BlockDef::lightOpacity` (0..15, ignored
+  when opaque) — LightEngine's volume stores per-cell opacity; any
+  opacity > 0 ends the direct straight-down sky beam, and BFS spread
+  into a cell costs max(1, opacity). Leaves 1 (soft tree shade), water
+  3 (vanilla; skylight now fades with depth — the old "sea floor reads
+  bright" wart is gone). World.cpp's instant SetBlock light patch is
+  untouched (approximate by design).
+- Cross plants (stage 2): `BlockDef::cross` + `replaceable`; tall
+  grass / dandelion / poppy / dead bush (tiles 12-15). The mesher emits
+  per cell (after liquids): an X of two diagonal corner-to-corner
+  planes, EACH with both windings (16 verts), AO 3, the cell's own
+  light, +Y normal (flat sun response), into the alpha-tested stream.
+  Interactions: RaycastBlocks hits solid OR cross (plants targetable,
+  never collide); water pours/spreads into replaceable cells (crushes
+  plants); falling sand detaches over them and crushes on landing;
+  ProcessBlockUpdate pops plants without their soil (earth for
+  grass/flowers, sand for dead bush). LOD downsample skips cross blocks
+  (sub-cell noise at distance).
+- Worldgen plants (stage 2): per-column hash gates (salt 5; species
+  pick salt 6) after trees in TerrainGenerator::Generate — chunk-local,
+  so seam-deterministic for free; carve-mask veto like trees. Density:
+  plains grass 10% / flowers 1.2%, forest 6% / 0.6%, snowy surfaces
+  (biome or alpine cap) sparse grass 2% only, beaches bare.
+- Tree species (stage 3): TreeSpecies{Oak,Birch,Spruce} — PlaceTree
+  takes species; per-species log/leaves ids; trunks grow through ANY
+  leaf type. Birch (tiles 16-18, vanilla fixed tint 0x80A755) replaces
+  25% of forest oaks (salt 7), trunk 5-7. Spruce (19-21, tint
+  0x619961) in snowy biome and on snowline caps, trunk 6-8, conical
+  canopy (single tip, alternating radius-1/2 layers) still within
+  kCanopyRadius=2 and top+2 — the cell-enumeration and height guards
+  rely on that. Oak unchanged (4-6).
+- Cactus (stage 3): full opaque cube (tiles 22/23; import bakes the
+  texture's transparent 14/16-inset margin opaque over the body color —
+  the real inset model is backlog). Desert sand, 0.5% of columns (salts
+  5/8), 1-3 tall, placed in the plant loop; the column is derived
+  purely from (wx, wz, height) so vertical-seam chunks regenerate it
+  identically (the loop accepts ly down to -2 for that). Block update
+  pops segments without sand/cactus below. No adjacent-solid rule, no
+  damage (no item/damage systems yet).
+- gentest grew: plants generate + sit on proper soil (incl. cactus on
+  sand/cactus), and the trunk/leaf checks are generic over all three
+  log/leaf species.
+
+## Next: M17 — TBD (decide with the user)
+
+Backlog: inventory UI (gui/container/ sheets present; DrawImage ready),
+audio engine (1.12 .ogg hashed store surveyed — see M14 notes),
+flow-animated water (16x512 strip), stars, world-list scrolling,
+settings screen, vanilla's 14/16 cactus inset + touch damage, plants
+in the hotbar (slots are full — needs inventory UI or slot rethink).
 
 ## How to verify (UPDATED working agreement)
 

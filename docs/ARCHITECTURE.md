@@ -107,10 +107,16 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   biome-driven topology (vanilla per-biome base/variation params blended
   with the parabolic 5x5 kernel, ruggedness-ramped hills variants,
   alpine snow line).
-- **M16 — TBD**: leading candidate: flora & decoration (cross-mesh +
-  cutout pass unlocking transparent leaves, then tall grass/flowers/dead
-  bush, then birch/spruce trees + cactus). Other candidates: inventory
-  UI, audio engine, animated water, underwater skylight attenuation.
+- **M16 — Flora & decoration** ✅: alpha-tested cutout pass inside the
+  existing opaque stream (transparent "fancy" leaves; per-block light
+  opacity adds canopy shade and depth-faded underwater skylight),
+  cross-meshed plants (tall grass, dandelion, poppy, dead bush —
+  biome-scattered, raycast-targetable, crushed by water/sand, popped by
+  support ticks), and tree species (birch in forests, conical spruce in
+  snow and on alpine caps, 1-3-tall cactus columns on desert sand).
+- **M17 — TBD**: candidates: inventory UI, audio engine, animated
+  water, stars, world-list scrolling, settings screen, vanilla's 14/16
+  cactus inset.
 
 Each milestone lands as a vertical slice that runs; no big-bang integration.
 
