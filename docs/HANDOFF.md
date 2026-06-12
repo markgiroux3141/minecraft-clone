@@ -562,6 +562,15 @@ unedited chunks regenerate with new rules; test in a NEW world.
   VANILLA-ACCURATE (BlockFalling only reacts to onBlockAdded /
   neighborChanged; generation writes raw chunk data, no updates), the
   band just makes it rare. Tiles 24/25/26 (side/top/bottom).
+- Bedrock (post-stage-3 user request, tile 27): vanilla's rule — bedrock
+  wherever y <= nextInt(5) (solid y0, ragged through y4; hash salts
+  10+wy). `BlockDef::unbreakable` guards the break edit in GameApp (no
+  hardness system); NOT in the carver's replaceable set. The user dug
+  through the old 1-block floor into the void — that's closed now. The
+  world is still only 64 blocks tall (surface ~y19-44): a deeper,
+  vanilla-proportioned underground (raise kWorldHeightChunks, rebase
+  topology, rescale cave start heights) was offered and deferred — a
+  real M17 candidate.
 - Cactus (stage 3): full opaque cube (tiles 22/23; import bakes the
   texture's transparent 14/16-inset margin opaque over the body color —
   the real inset model is backlog). Desert sand, 0.5% of columns (salts
@@ -576,11 +585,14 @@ unedited chunks regenerate with new rules; test in a NEW world.
 
 ## Next: M17 — TBD (decide with the user)
 
-Backlog: inventory UI (gui/container/ sheets present; DrawImage ready),
-audio engine (1.12 .ogg hashed store surveyed — see M14 notes),
-flow-animated water (16x512 strip), stars, world-list scrolling,
-settings screen, vanilla's 14/16 cactus inset + touch damage, plants
-in the hotbar (slots are full — needs inventory UI or slot rethink).
+Backlog: deeper world (kWorldHeightChunks 4 -> 8, rebase topology +
+cave start heights — discussed with the user 2026-06-12, deferred),
+inventory UI (gui/container/ sheets present; DrawImage ready), audio
+engine (1.12 .ogg hashed store surveyed — see M14 notes), flow-animated
+water (16x512 strip), lava (cave floors below y10 in vanilla), stars,
+world-list scrolling, settings screen, vanilla's 14/16 cactus inset +
+touch damage, plants in the hotbar (slots are full — needs inventory
+UI or slot rethink).
 
 ## How to verify (UPDATED working agreement)
 

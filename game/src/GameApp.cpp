@@ -340,7 +340,11 @@ void GameApp::HandleInput(double frameDt) {
 
     const bool breakDown = vox::Input::IsMouseButtonDown(vox::MouseButton::Left);
     if (breakDown && m_target && (!m_breakWasDown || m_breakCooldown == 0.0)) {
-        m_world->SetBlock(m_target->block, vc::blocks::Air);
+        const vc::BlockId targetId =
+            m_world->GetBlock(m_target->block.x, m_target->block.y, m_target->block.z);
+        if (!vc::BlockRegistry::Get().Def(targetId).unbreakable) {
+            m_world->SetBlock(m_target->block, vc::blocks::Air);
+        }
         m_breakCooldown = kEditRepeatDelay;
     }
     m_breakWasDown = breakDown;

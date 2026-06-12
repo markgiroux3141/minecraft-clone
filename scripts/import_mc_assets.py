@@ -124,6 +124,7 @@ def build_atlas(mc: Path, out_path: Path) -> None:
         load_tile(blocks / "sandstone_normal.png"),
         load_tile(blocks / "sandstone_top.png"),
         load_tile(blocks / "sandstone_bottom.png"),
+        load_tile(blocks / "bedrock.png"),
     ]
 
     strip = Image.new("RGBA", (TILE * len(tiles), TILE))

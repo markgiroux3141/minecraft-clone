@@ -255,11 +255,18 @@ def sandstone_bottom(x, y):
     return speckle((201, 190, 147), x, y, 27, 10)
 
 
+def bedrock(x, y):
+    # Harsh dark/light gray blotches.
+    if hash01(x // 2, y // 2, 28) > 0.5:
+        return speckle((40, 40, 40), x, y, 28, 18)
+    return speckle((110, 110, 110), x, y, 28, 22)
+
+
 # Layer index in the texture array == position in this list.
 TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top, leaves, water,
          snow, grass_side_snowed, tall_grass, dandelion, poppy, dead_bush,
          birch_side, birch_top, birch_leaves, spruce_side, spruce_top, spruce_leaves,
-         cactus_side, cactus_top, sandstone_side, sandstone_top, sandstone_bottom]
+         cactus_side, cactus_top, sandstone_side, sandstone_top, sandstone_bottom, bedrock]
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:

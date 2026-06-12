@@ -26,6 +26,8 @@ struct BlockDef {
                               // (tall grass, flowers — destroyed, not blocking)
     bool liquid = false;  // meshed into the blended pass; liquid-liquid faces cull
     bool gravity = false; // falls when unsupported (block-update ticks)
+    bool unbreakable = false; // the break edit refuses it (bedrock; no
+                              // hardness system, so a simple guard)
     // Skylight attenuation for non-opaque blocks, 0..15: blocks direct
     // (straight-down) sky and costs max(1, lightOpacity) per propagation
     // step. Ignored when opaque (opaque always blocks fully). Leaves 1,
@@ -89,6 +91,7 @@ extern BlockId Cactus; // needs sand (or more cactus) underfoot
 // so caves under deserts/beaches mostly expose sandstone ceilings instead
 // of floating sand (Biome.generateBiomeTerrain's sand->sandstone rule).
 extern BlockId Sandstone;
+extern BlockId Bedrock; // unbreakable world floor (solid y0, ragged y1-4)
 
 void RegisterDefaults();
 

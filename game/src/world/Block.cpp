@@ -45,6 +45,7 @@ BlockId SpruceLog = 0;
 BlockId SpruceLeaves = 0;
 BlockId Cactus = 0;
 BlockId Sandstone = 0;
+BlockId Bedrock = 0;
 
 namespace {
 
@@ -156,6 +157,12 @@ void RegisterDefaults() {
     sandstone.faceTiles[static_cast<size_t>(BlockFace::PosY)] = 25;
     sandstone.faceTiles[static_cast<size_t>(BlockFace::NegY)] = 26;
     Sandstone = registry.Register(std::move(sandstone));
+
+    // M16: bedrock world floor (tile 27) — solid at y0, ragged through
+    // y4 (vanilla's rand.nextInt(5) rule); the break edit refuses it.
+    BlockDef bedrock = BlockDef::Uniform("bedrock", 27);
+    bedrock.unbreakable = true;
+    Bedrock = registry.Register(std::move(bedrock));
 
     GAME_INFO("Registered {} block types", registry.Count());
 }

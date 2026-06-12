@@ -185,6 +185,24 @@ int main() {
     Check(caveAir > 0, "caves actually carve");
     Check(noOceanBreach, "carved air never touches worldgen water");
 
+    // Bedrock floor: solid at y0, ragged only through y4, nowhere else —
+    // neither players (unbreakable) nor caves (not replaceable) can open
+    // the void below the world.
+    {
+        bool floorSolid = true;
+        bool bedrockBounded = true;
+        for (int wz = lo; wz < hi; ++wz) {
+            for (int wx = lo; wx < hi; ++wx) {
+                floorSolid &= blockAt(wx, 0, wz) == vc::blocks::Bedrock;
+                for (int wy = 5; wy < vc::kWorldHeightBlocks; ++wy) {
+                    bedrockBounded &= blockAt(wx, wy, wz) != vc::blocks::Bedrock;
+                }
+            }
+        }
+        Check(floorSolid, "bedrock floor is solid at y0");
+        Check(bedrockBounded, "no bedrock above y4");
+    }
+
     // Biomes (M15): sample columns ~512 blocks apart; the climate fields
     // (~300-block features) must produce more than one surface family over
     // a 2-km span. Also: snowy surfaces always sit on dirt (not stone).

@@ -317,6 +317,17 @@ void TerrainGenerator::Generate(Chunk& chunk, const glm::ivec3& chunkCoord) cons
                     chunk.Set(x, y, z, blocks::Water);
                     continue;
                 }
+                // Bedrock floor first (vanilla: bedrock wherever
+                // y <= rand.nextInt(5) — solid at 0, raggedly thinning
+                // through 4). Unbreakable, and not in the carver's
+                // replaceable set, so neither players nor caves open the
+                // void below the world.
+                if (wy <= 4 &&
+                    wy <= static_cast<int>(
+                              Hash(m_seed, origin.x + x, origin.z + z, 10 + wy) % 5)) {
+                    chunk.Set(x, y, z, blocks::Bedrock);
+                    continue;
+                }
                 BlockId id = blocks::Stone;
                 if (sandy) {
                     if (wy >= height - 2) {
