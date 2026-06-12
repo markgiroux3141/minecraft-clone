@@ -13,9 +13,15 @@ constexpr glm::vec4 kShadow{0.0f, 0.0f, 0.0f, 0.45f};
 constexpr glm::vec4 kSlotBg{0.0f, 0.0f, 0.0f, 0.55f};
 constexpr glm::vec4 kSlotFrame{0.55f, 0.55f, 0.55f, 0.85f};
 
-void DrawCrosshair(vox::UiRenderer& ui, glm::vec2 screen, float s) {
+void DrawCrosshair(vox::UiRenderer& ui, glm::vec2 screen, float s, const GuiTextures& tex) {
     // Integer center so the cross lands on whole pixels.
     const glm::vec2 c{std::floor(screen.x * 0.5f), std::floor(screen.y * 0.5f)};
+    if (tex.icons) {
+        // icons.png crosshair, drawn at MC's -7,-7 offset. (Vanilla uses an
+        // inverted blend; plain alpha here — may wash out on pale blocks.)
+        ui.DrawImage(tex.icons, c - 7.0f * s, glm::vec2(16.0f * s), {0.0f, 0.0f}, {16.0f, 16.0f});
+        return;
+    }
     const float half = 5.0f * s;
     const float t = s;
     // Soft dark backing one pixel proud keeps it visible over bright blocks.
@@ -27,8 +33,32 @@ void DrawCrosshair(vox::UiRenderer& ui, glm::vec2 screen, float s) {
     ui.DrawRect({c.x - t * 0.5f, c.y - half}, {t, 2.0f * half}, kWhite);
 }
 
-void DrawHotbar(vox::UiRenderer& ui, glm::vec2 screen, float s,
-                std::span<const BlockId> hotbar, size_t selectedSlot) {
+// widgets.png layout: hotbar background 182x22 at (0,0) — 1px border, nine
+// 20px slots; selection frame 24x22 at (0,22), drawn one pixel proud.
+void DrawMcHotbar(vox::UiRenderer& ui, glm::vec2 screen, float s,
+                  std::span<const BlockId> hotbar, size_t selectedSlot, const GuiTextures& tex) {
+    const glm::vec2 origin{std::floor((screen.x - 182.0f * s) * 0.5f), screen.y - 22.0f * s};
+    ui.DrawImage(tex.widgets, origin, {182.0f * s, 22.0f * s}, {0.0f, 0.0f}, {182.0f, 22.0f});
+    ui.DrawImage(tex.widgets,
+                 origin + glm::vec2((static_cast<float>(selectedSlot) * 20.0f - 1.0f) * s,
+                                    -1.0f * s),
+                 {24.0f * s, 22.0f * s}, {0.0f, 22.0f}, {24.0f, 22.0f});
+
+    const auto& registry = BlockRegistry::Get();
+    const size_t slots = std::min(hotbar.size(), size_t{9});
+    for (size_t i = 0; i < slots; ++i) {
+        if (hotbar[i] == blocks::Air) {
+            continue;
+        }
+        const uint16_t layer =
+            registry.Def(hotbar[i]).faceTiles[static_cast<size_t>(BlockFace::PosX)];
+        ui.DrawAtlasTile(origin + glm::vec2((3.0f + static_cast<float>(i) * 20.0f) * s, 3.0f * s),
+                         glm::vec2(16.0f * s), layer);
+    }
+}
+
+void DrawPlaceholderHotbar(vox::UiRenderer& ui, glm::vec2 screen, float s,
+                           std::span<const BlockId> hotbar, size_t selectedSlot) {
     const float slot = 22.0f * s; // 16x16 icon + 3px border each side, pre-scale
     const float gap = 2.0f * s;
     const auto count = static_cast<float>(hotbar.size());
@@ -52,14 +82,14 @@ void DrawHotbar(vox::UiRenderer& ui, glm::vec2 screen, float s,
             ui.DrawAtlasTile(pos + glm::vec2(3.0f * s), glm::vec2(16.0f * s), layer);
         }
     }
+}
 
-    // Selected block name, shadowed, centered above the bar. The font's 17 px
-    // cells are ~2x Minecraft's 8 px glyphs, so text runs one scale behind.
-    const float textScale = std::max(1.0f, s - 1.0f);
-    const std::string& name = registry.Def(hotbar[selectedSlot]).name;
+void DrawSelectedName(vox::UiRenderer& ui, glm::vec2 screen, float s,
+                      std::span<const BlockId> hotbar, size_t selectedSlot, float barTop) {
+    const float textScale = UiTextScale(ui, s);
+    const std::string& name = BlockRegistry::Get().Def(hotbar[selectedSlot]).name;
     const glm::vec2 size = ui.MeasureText(name, textScale);
-    const glm::vec2 textPos{std::floor((screen.x - size.x) * 0.5f),
-                            origin.y - size.y - 4.0f * s};
+    const glm::vec2 textPos{std::floor((screen.x - size.x) * 0.5f), barTop - size.y - 4.0f * s};
     ui.DrawText(textPos + glm::vec2(textScale), name, textScale, {0.0f, 0.0f, 0.0f, 0.6f});
     ui.DrawText(textPos, name, textScale, kWhite);
 }
@@ -72,11 +102,23 @@ float GuiScale(glm::vec2 screen) {
 }
 
 void Hud::Draw(vox::UiRenderer& ui, glm::vec2 screen, std::span<const BlockId> hotbar,
-               size_t selectedSlot) {
+               size_t selectedSlot, const GuiTextures& tex) {
     const float s = GuiScale(screen);
-    DrawCrosshair(ui, screen, s);
-    if (!hotbar.empty()) {
-        DrawHotbar(ui, screen, s, hotbar, selectedSlot);
+    DrawCrosshair(ui, screen, s, tex);
+    if (hotbar.empty()) {
+        return;
+    }
+    const bool named = hotbar[selectedSlot] != blocks::Air; // empty hand: no label
+    if (tex.widgets) {
+        DrawMcHotbar(ui, screen, s, hotbar, selectedSlot, tex);
+        if (named) {
+            DrawSelectedName(ui, screen, s, hotbar, selectedSlot, screen.y - 22.0f * s);
+        }
+    } else {
+        DrawPlaceholderHotbar(ui, screen, s, hotbar, selectedSlot);
+        if (named) {
+            DrawSelectedName(ui, screen, s, hotbar, selectedSlot, screen.y - 28.0f * s);
+        }
     }
 }
 

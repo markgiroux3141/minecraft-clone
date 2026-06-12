@@ -20,6 +20,7 @@ constexpr uint32_t kMaxQuads = 4096;
 constexpr float kModeSolid = 0.0f;
 constexpr float kModeFont = 1.0f;
 constexpr float kModeAtlas = 2.0f;
+constexpr float kModeImage = 3.0f;
 
 // The vertex layout and sampler contract live with the batcher, so the shader
 // is embedded rather than shipped as an asset the game could drift from.
@@ -52,6 +53,7 @@ in vec4 v_color;
 
 uniform sampler2D u_font;
 uniform sampler2DArray u_atlas;
+uniform sampler2D u_image;
 
 out vec4 o_color;
 
@@ -62,6 +64,8 @@ void main() {
         color *= textureLod(u_font, v_uvw.xy, 0.0);
     } else if (mode == 2) {
         color *= textureLod(u_atlas, v_uvw, 0.0);
+    } else if (mode == 3) {
+        color *= textureLod(u_image, v_uvw.xy, 0.0);
     }
     o_color = color;
 }
@@ -74,6 +78,7 @@ UiRenderer::UiRenderer() {
     m_shader->Bind();
     m_shader->SetInt("u_font", 0);
     m_shader->SetInt("u_atlas", 1);
+    m_shader->SetInt("u_image", 2);
 
     m_vertexBuffer =
         std::make_shared<VertexBuffer>(static_cast<uint32_t>(kMaxQuads * 4 * sizeof(Vertex)));
@@ -108,7 +113,7 @@ UiRenderer::UiRenderer() {
 UiRenderer::~UiRenderer() = default;
 
 void UiRenderer::SetFont(std::shared_ptr<Texture2D> texture, uint32_t columns, uint32_t rows,
-                         char firstChar) {
+                         char firstChar, bool proportional) {
     VOX_ASSERT(columns > 0 && rows > 0, "font grid must be non-empty");
     m_font = std::move(texture);
     m_fontColumns = columns;
@@ -116,6 +121,44 @@ void UiRenderer::SetFont(std::shared_ptr<Texture2D> texture, uint32_t columns, u
     m_fontFirstChar = firstChar;
     m_glyphSize = {static_cast<float>(m_font->Width() / columns),
                    static_cast<float>(m_font->Height() / rows)};
+
+    m_advances.assign(static_cast<size_t>(columns) * rows, m_glyphSize.x);
+    if (!proportional) {
+        return;
+    }
+
+    // Scan each cell's alpha for its rightmost inked column (glyphs sit at
+    // the cell's left edge). The texture was uploaded bottom-row-first, but
+    // column extents don't care about vertical order — only the cell-row
+    // index needs flipping.
+    const uint32_t width = m_font->Width();
+    const uint32_t height = m_font->Height();
+    const auto cellW = static_cast<uint32_t>(m_glyphSize.x);
+    const auto cellH = static_cast<uint32_t>(m_glyphSize.y);
+    std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * 4);
+    glGetTextureImage(m_font->RendererId(), 0, GL_RGBA, GL_UNSIGNED_BYTE,
+                      static_cast<GLsizei>(pixels.size()), pixels.data());
+
+    for (uint32_t row = 0; row < m_fontRows; ++row) {
+        for (uint32_t col = 0; col < m_fontColumns; ++col) {
+            const uint32_t x0 = col * cellW;
+            const uint32_t y0 = height - (row + 1) * cellH; // flipped rows
+            int inked = -1;
+            for (int x = static_cast<int>(cellW) - 1; x >= 0 && inked < 0; --x) {
+                for (uint32_t y = 0; y < cellH; ++y) {
+                    const size_t at =
+                        (static_cast<size_t>(y0 + y) * width + x0 + static_cast<uint32_t>(x)) * 4;
+                    if (pixels[at + 3] != 0) {
+                        inked = x;
+                        break;
+                    }
+                }
+            }
+            // Inked glyphs get a 1px gap; empty cells (space) half a cell.
+            m_advances[static_cast<size_t>(row) * m_fontColumns + col] =
+                inked >= 0 ? static_cast<float>(inked + 2) : m_glyphSize.x * 0.5f;
+        }
+    }
 }
 
 void UiRenderer::Begin(uint32_t screenWidth, uint32_t screenHeight, const Texture2DArray* atlas) {
@@ -136,6 +179,21 @@ void UiRenderer::DrawAtlasTile(glm::vec2 pos, glm::vec2 size, uint16_t layer, gl
     PushQuad(pos, size, {0.0f, 1.0f, w}, {1.0f, 0.0f, w}, kModeAtlas, tint);
 }
 
+void UiRenderer::DrawImage(std::shared_ptr<Texture2D> texture, glm::vec2 pos, glm::vec2 size,
+                           glm::vec2 srcPos, glm::vec2 srcSize, glm::vec4 tint) {
+    VOX_ASSERT(texture, "DrawImage needs a texture");
+    if (m_image && m_image.get() != texture.get()) {
+        Flush(); // one image sheet per batch
+    }
+    m_image = std::move(texture);
+    const auto w = static_cast<float>(m_image->Width());
+    const auto h = static_cast<float>(m_image->Height());
+    // Textures load flipped for GL's bottom-left origin: image-top is v=1.
+    PushQuad(pos, size, {srcPos.x / w, 1.0f - srcPos.y / h, 0.0f},
+             {(srcPos.x + srcSize.x) / w, 1.0f - (srcPos.y + srcSize.y) / h, 0.0f}, kModeImage,
+             tint);
+}
+
 void UiRenderer::DrawText(glm::vec2 pos, std::string_view text, float scale, glm::vec4 color) {
     VOX_ASSERT(m_font, "DrawText needs a font (SetFont)");
     const glm::vec2 glyph = m_glyphSize * scale;
@@ -147,7 +205,11 @@ void UiRenderer::DrawText(glm::vec2 pos, std::string_view text, float scale, glm
             continue;
         }
         const int index = c - m_fontFirstChar;
-        if (index >= 0 && index < static_cast<int>(m_fontColumns * m_fontRows) && c != ' ') {
+        if (index < 0 || index >= static_cast<int>(m_fontColumns * m_fontRows)) {
+            pen.x += glyph.x;
+            continue;
+        }
+        if (c != ' ') {
             const auto col = static_cast<float>(index % static_cast<int>(m_fontColumns));
             const auto row = static_cast<float>(index / static_cast<int>(m_fontColumns));
             const float u0 = col / static_cast<float>(m_fontColumns);
@@ -156,29 +218,33 @@ void UiRenderer::DrawText(glm::vec2 pos, std::string_view text, float scale, glm
             const float vBottom = 1.0f - (row + 1.0f) / static_cast<float>(m_fontRows);
             PushQuad(pen, glyph, {u0, vTop, 0.0f}, {u1, vBottom, 0.0f}, kModeFont, color);
         }
-        pen.x += glyph.x;
+        pen.x += m_advances[static_cast<size_t>(index)] * scale;
     }
 }
 
 glm::vec2 UiRenderer::MeasureText(std::string_view text, float scale) const {
-    size_t maxLine = 0;
-    size_t line = 0;
+    float maxLine = 0.0f;
+    float line = 0.0f;
     size_t lines = 1;
     for (const char c : text) {
         if (c == '\n') {
             ++lines;
-            line = 0;
-        } else {
-            maxLine = std::max(maxLine, ++line);
+            line = 0.0f;
+            continue;
         }
+        const int index = c - m_fontFirstChar;
+        line += (index >= 0 && index < static_cast<int>(m_advances.size()))
+                    ? m_advances[static_cast<size_t>(index)]
+                    : m_glyphSize.x;
+        maxLine = std::max(maxLine, line);
     }
-    return m_glyphSize * scale *
-           glm::vec2(static_cast<float>(maxLine), static_cast<float>(lines));
+    return {maxLine * scale, m_glyphSize.y * scale * static_cast<float>(lines)};
 }
 
 void UiRenderer::End() {
     Flush();
     m_atlas = nullptr;
+    m_image.reset();
 }
 
 void UiRenderer::PushQuad(glm::vec2 pos, glm::vec2 size, glm::vec3 uvwMin, glm::vec3 uvwMax,
@@ -207,6 +273,9 @@ void UiRenderer::Flush() {
     }
     if (m_atlas) {
         m_atlas->Bind(1);
+    }
+    if (m_image) {
+        m_image->Bind(2);
     }
 
     // Overlay pass: no depth, no culling (quads wind whichever way), blended.

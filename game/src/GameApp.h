@@ -15,6 +15,7 @@
 #include "vox/renderer/VertexArray.h"
 
 #include "Player.h"
+#include "ui/Widgets.h"
 #include "world/World.h"
 
 class GameApp : public vox::Application {
@@ -76,7 +77,8 @@ private:
     std::unique_ptr<vox::UiRenderer> m_ui;
 
     // Hotbar: keys 1..N select into this list (filled after block registration).
-    std::array<vc::BlockId, 8> m_hotbar{};
+    std::array<vc::BlockId, 9> m_hotbar{}; // 9th stays Air (MC bar is 9 wide)
+    vc::GuiTextures m_guiTextures;         // null members = placeholder look
     size_t m_hotbarSlot = 0;
 
     // Occlusion culling (cave culling) is on by default; O toggles it for

@@ -5,6 +5,8 @@
 
 #include <glm/glm.hpp>
 
+#include "ui/Widgets.h"
+
 namespace vox {
 class UiRenderer;
 }
@@ -22,7 +24,7 @@ public:
     };
 
     static Action Draw(vox::UiRenderer& ui, glm::vec2 screen, glm::vec2 mouse, bool clicked,
-                       std::span<const std::string> worlds);
+                       std::span<const std::string> worlds, const GuiTextures& tex);
 };
 
 } // namespace vc

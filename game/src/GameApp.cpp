@@ -104,8 +104,21 @@ void GameApp::OnInit() {
         vox::Texture2DArray::FromFileStrip(PreferMcAsset("textures/atlas.png"), 16);
 
     m_ui = std::make_unique<vox::UiRenderer>();
-    // Grid layout matches scripts/gen_font.py: ASCII 32..127, 16 cols x 6 rows.
-    m_ui->SetFont(vox::Texture2D::FromFile("fonts/ascii.png"), 16, 6);
+    // Real MC font: 16x16 grid of 8x8 cells from char 0, proportional widths
+    // scanned from the glyphs. Placeholder (scripts/gen_font.py): monospace
+    // ASCII 32..127 in a 16x6 grid.
+    const std::string fontPath = PreferMcAsset("fonts/ascii.png");
+    if (fontPath.starts_with("mc/")) {
+        m_ui->SetFont(vox::Texture2D::FromFile(fontPath), 16, 16, '\0', true);
+    } else {
+        m_ui->SetFont(vox::Texture2D::FromFile(fontPath), 16, 6);
+    }
+    if (std::filesystem::exists(vox::assets::Resolve("mc/textures/gui/icons.png"))) {
+        m_guiTextures.icons = vox::Texture2D::FromFile("mc/textures/gui/icons.png");
+    }
+    if (std::filesystem::exists(vox::assets::Resolve("mc/textures/gui/widgets.png"))) {
+        m_guiTextures.widgets = vox::Texture2D::FromFile("mc/textures/gui/widgets.png");
+    }
 
     m_skyShader = vox::Shader::FromFiles("shaders/sky.vert", "shaders/sky.frag");
     constexpr float skyVerts[] = {-1, -1, 1, -1, 1, 1, -1, 1};
@@ -319,7 +332,8 @@ void GameApp::HandleInput(double frameDt) {
     const bool placeDown = vox::Input::IsMouseButtonDown(vox::MouseButton::Right);
     if (placeDown && m_target && (!m_placeWasDown || m_placeCooldown == 0.0)) {
         const glm::ivec3 cell = m_target->block + m_target->normal;
-        if (!m_world->IsSolid(cell.x, cell.y, cell.z) && !m_player.Intersects(cell)) {
+        if (m_hotbar[m_hotbarSlot] != vc::blocks::Air &&
+            !m_world->IsSolid(cell.x, cell.y, cell.z) && !m_player.Intersects(cell)) {
             m_world->SetBlock(cell, m_hotbar[m_hotbarSlot]);
             m_placeCooldown = kEditRepeatDelay;
         }
@@ -368,7 +382,8 @@ void GameApp::DrawUi() {
         m_ui->DrawRect({0.0f, 0.0f}, screen, {0.09f, 0.27f, 0.55f, 0.35f});
     }
     if (m_state == State::Title) {
-        const auto action = vc::TitleScreen::Draw(*m_ui, screen, mouse, clicked, m_worlds);
+        const auto action =
+            vc::TitleScreen::Draw(*m_ui, screen, mouse, clicked, m_worlds, m_guiTextures);
         switch (action.type) {
         case vc::TitleScreen::Action::Type::Play:
             EnterWorld(m_worlds[action.worldIndex], kWorldSeed);
@@ -383,9 +398,9 @@ void GameApp::DrawUi() {
             break;
         }
     } else {
-        vc::Hud::Draw(*m_ui, screen, m_hotbar, m_hotbarSlot);
+        vc::Hud::Draw(*m_ui, screen, m_hotbar, m_hotbarSlot, m_guiTextures);
         if (m_state == State::Paused) {
-            const auto action = vc::PauseMenu::Draw(*m_ui, screen, mouse, clicked);
+            const auto action = vc::PauseMenu::Draw(*m_ui, screen, mouse, clicked, m_guiTextures);
             if (action == vc::PauseMenu::Action::Resume) {
                 SetPaused(false);
             } else if (action == vc::PauseMenu::Action::SaveQuit) {

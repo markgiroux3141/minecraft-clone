@@ -4,6 +4,7 @@
 
 #include <glm/glm.hpp>
 
+#include "ui/Widgets.h"
 #include "world/Block.h"
 
 namespace vox {
@@ -21,7 +22,7 @@ float GuiScale(glm::vec2 screen);
 class Hud {
 public:
     static void Draw(vox::UiRenderer& ui, glm::vec2 screen, std::span<const BlockId> hotbar,
-                     size_t selectedSlot);
+                     size_t selectedSlot, const GuiTextures& tex);
 };
 
 } // namespace vc

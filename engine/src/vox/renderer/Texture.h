@@ -23,6 +23,7 @@ public:
 
     uint32_t Width() const { return m_width; }
     uint32_t Height() const { return m_height; }
+    uint32_t RendererId() const { return m_handle; }
 
 private:
     uint32_t m_handle = 0;

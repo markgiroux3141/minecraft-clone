@@ -13,6 +13,7 @@ Requires Pillow (same as gen_font.py). Usage:
     python scripts/import_mc_assets.py [path-to-minecraft-assets-root]
 """
 
+import shutil
 import sys
 from pathlib import Path
 
@@ -24,6 +25,15 @@ TILE = 16
 # Plains climate point (temperature 0.8, rainfall 0.4) -> colormap pixel.
 PLAINS_X = int((1.0 - 0.8) * 255)
 PLAINS_Y = int((1.0 - 0.4 * 0.8) * 255)
+
+# Straight copies: (source under the MC assets root, destination under
+# assets/mc/). The font is the real 8x8-cell 16x16 ASCII grid; the GUI
+# sheets hold the crosshair (icons) and hotbar/buttons (widgets).
+COPIES = [
+    ("textures/font/ascii.png", "fonts/ascii.png"),
+    ("textures/gui/icons.png", "textures/gui/icons.png"),
+    ("textures/gui/widgets.png", "textures/gui/widgets.png"),
+]
 
 
 def load_tile(path: Path) -> Image.Image:
@@ -100,6 +110,11 @@ def main() -> None:
         raise SystemExit(f"Minecraft assets not found at {mc}")
     assets = Path(__file__).resolve().parent.parent / "assets"
     build_atlas(mc, assets / "mc" / "textures" / "atlas.png")
+    for src, dst in COPIES:
+        target = assets / "mc" / dst
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(mc / src, target)
+        print(f"copied {src} -> {target}")
 
 
 if __name__ == "__main__":
