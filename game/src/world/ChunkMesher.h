@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <memory>
 #include <vector>
 
@@ -12,14 +13,16 @@
 
 namespace vc {
 
+// Packed chunk vertex, 8 bytes — every field is a small integer. Decoded
+// by chunk.vert with matching bit offsets:
+//   data0: x:5 | y:5 | z:5 | normal:3 | ao:2 | sky:4 | block:4
+//          x/y/z are chunk-local cell corners (0..16); normal indexes
+//          BlockFace order; ao 0..3; light levels 0..15.
+//   data1: u:5 | v:5 | layer:16
+//          UVs tile 0..16 across merged quads (sampler wraps).
 struct ChunkVertex {
-    glm::vec3 position; // chunk-local, [0,16]
-    glm::vec3 normal;
-    glm::vec2 uv;       // tiles across merged quads (sampler wraps)
-    float layer;        // texture-array layer
-    float ao;           // ambient occlusion, 0 (fully occluded) .. 1 (open)
-    float skyLight;     // 0..1 (level / 15)
-    float blockLight;   // 0..1 (level / 15)
+    uint32_t data0;
+    uint32_t data1;
 };
 
 // Quads only — 4 vertices each, drawn with the shared index pattern

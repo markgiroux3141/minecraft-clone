@@ -1,14 +1,14 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-12, end of M11 (user-verified in-game: trees, water +
-swimming, day/night cycle). Agreed milestone sequence: M10 UI/menus ✅ →
-M11 gameplay depth ✅ → M12 perf polish (next). Read alongside
-`ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md` (build
-commands, conventions).
+Updated: 2026-06-12, end of M12 (user-verified in-game: rendering
+identical with packed vertices, pool ~6x smaller, smoother streaming).
+The agreed M10 UI/menus → M11 gameplay depth → M12 perf polish sequence
+is COMPLETE; M13 is TBD with the user. Read alongside `ARCHITECTURE.md`
+(layering rules, roadmap) and `CLAUDE.md` (build commands, conventions).
 
 ## Where the project stands
 
-M0–M11 are done and verified:
+M0–M12 are done and verified:
 - Engine (`engine/src/vox/`, namespace `vox`): fixed-timestep app loop
   (20 TPS + interpolated render), GLFW window/input (incl. cursor capture),
   GL 4.6 renderer facade with DSA abstractions (Shader, Buffer/VertexArray,
@@ -118,12 +118,10 @@ M6 break/place/fly. Exercise clean shutdown (`CloseMainWindow()`, expect
 
 - One-time NVIDIA warning at startup: "Vertex shader in program 3 is being
   recompiled based on GL state" — harmless, not yet investigated.
-- GPU uploads are not budgeted per frame; bursts are bounded by the
-  in-flight job cap (~60 on a 16-thread machine). Causes brief fps dips
-  when crossing chunk borders in debug builds; minor in release (user
-  confirmed). Fix when it matters: cap uploaded bytes/frame, carry over.
-- Mesh pool sits at ~96 MB with the LOD shell (ChunkVertex is a lazy
-  48 B of floats — vertex compression to ~12 B is the known fix, M12).
+- (Fixed in M12) GPU mesh uploads are budgeted at 2 MB/frame — overflow
+  results defer to the next frame (safe: acceptance is versioned, stale
+  deferred results drop). ChunkVertex is two packed uint32s (8 B); the
+  pool sits around ~25 MB at radius 12 + LOD.
 - Block outline is light gray since M10 — fine on dirt/stone/grass, may
   wash out on pale blocks (glowstone); GL core can't draw thick lines,
   so a real fix means quad-based outlines.
@@ -343,15 +341,36 @@ Stage 3 — LOD shell:
   skylight (sea floor reads bright), lowered water surface, cutout
   leaves, moon/stars.
 
-## Next: M12 — perf polish (last of the agreed sequence)
+## M12 perf polish (how it works)
 
-Vertex compression: ChunkVertex is 48 B of floats but every field is
-small-integer (chunk-local positions/UVs 0..16, normal is one of 6, AO
-0..3, light 0..15, layer < 64k) — packs into two uint32s (~8 B, 6x
-smaller pool and uploads). Needs integer vertex attributes through
-VertexArray/MeshPool layout and a bit-decoding chunk.vert. Then a
-per-frame GPU upload budget (cap bytes/frame in DrainCompletedJobs,
-carry the rest) to smooth streaming bursts.
+- ChunkVertex = two uint32s (8 B; was 48 B of floats):
+  data0 = x:5|y:5|z:5|normal:3|ao:2|sky:4|block:4 (positions are cell
+  corners 0..16, normal indexes BlockFace order), data1 = u:5|v:5|
+  layer:16 (UVs tile 0..16 across merged quads). Packed in EmitQuad,
+  decoded bitwise in chunk.vert (kNormals table); the MeshPool layout is
+  two UInt attributes (VertexArray routes Int/UInt types through
+  glVertexArrayAttribIFormat). gentest includes a pack/decode smoke test
+  (lone stone + water block) — run it after touching the format.
+- Upload budget (World::DrainCompletedJobs): detail and LOD mesh results
+  share a 2 MB/frame upload cap; overflow carries to m_deferredMesh /
+  m_deferredLodMesh and processes first next frame (already counted out
+  of m_jobsInFlight; meshingVersion/meshInFlight stay set while
+  deferred, so nothing resubmits early; the first item each frame always
+  processes so one huge mesh can't starve).
+
+## Next: M13 — TBD (decide with the user)
+
+Backlog, roughly by expressed interest:
+- Block updates: falling sand + flowing water (user asked about both).
+  Needs per-block metadata (water flow levels / partial heights touch
+  chunk storage, the save format, and the mesher) plus a scheduled-tick
+  system on the main thread feeding SetBlock.
+- Water/visual polish: skylight attenuation underwater (sea floor reads
+  bright), lowered water surface (14/16 height), cutout leaves, moon +
+  stars at night.
+- World depth: caves (3D noise carving), biomes (temperature/moisture
+  noise driving surface blocks + tree density).
+- UI: inventory screen, world-list scrolling, settings (render distance).
 
 ## How to verify (UPDATED working agreement)
 

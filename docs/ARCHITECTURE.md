@@ -82,8 +82,14 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   sea level with a second blended mesh stream (chunk + LOD), look-
   direction swimming, day/night cycle (persisted world time, sky-dome
   gradient + sun disc, time-driven sun light, distance + underwater fog).
-- **M12 — Perf polish** (next): vertex compression (ChunkVertex 48 B ->
-  ~8 B packed ints), per-frame GPU upload budget.
+- **M12 — Perf polish** ✅: ChunkVertex packed from 48 B of floats into
+  two uint32s (8 B, ~6x smaller pool + uploads; bit-decoded in
+  chunk.vert), GPU mesh uploads budgeted at 2 MB/frame with versioned
+  carry-over.
+- **M13 — TBD**: candidates: block updates (falling sand + flowing water
+  — needs per-block metadata and scheduled ticks), visual polish (cutout
+  leaves, water skylight attenuation, lowered water surface, moon/stars),
+  caves/biomes, inventory UI.
 
 Each milestone lands as a vertical slice that runs; no big-bang integration.
 

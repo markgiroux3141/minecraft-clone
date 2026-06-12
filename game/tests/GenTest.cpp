@@ -1,6 +1,7 @@
-// Structural regression test for terrain generation + decoration. Chunks
-// generate independently, so every tree must come out identical no matter
-// which chunk regenerates which part of it — seam bugs show up as floating
+// Structural regression test for terrain generation + decoration, plus a
+// mesher smoke test of the packed vertex format. Chunks generate
+// independently, so every tree must come out identical no matter which
+// chunk regenerates which part of it — seam bugs show up as floating
 // leaves or truncated trunks. Exits 0 on pass, 1 on the first failure.
 
 #include <cstdio>
@@ -13,6 +14,7 @@
 
 #include "world/Block.h"
 #include "world/Chunk.h"
+#include "world/ChunkMesher.h"
 #include "world/Light.h"
 #include "world/TerrainGen.h"
 
@@ -114,6 +116,40 @@ int main() {
     Check(logs > 0 && leafBlocks > 0, "trees actually generate");
     Check(trunksIntact, "trunks are contiguous across chunk seams");
     Check(leavesAnchored, "every leaf block has a trunk within reach");
+
+    // Mesher smoke test: a lone stone block and a lone water block in an
+    // otherwise empty snapshot. Decodes the packed vertex stream the same
+    // way chunk.vert does.
+    {
+        vc::ChunkSnapshot snapshot;
+        auto center = std::make_shared<vc::Chunk>();
+        center->Set(8, 8, 8, vc::blocks::Stone);
+        center->Set(4, 4, 4, vc::blocks::Water);
+        snapshot.chunks[vc::ChunkSnapshot::Index(1, 1, 1)] = center;
+        snapshot.skyAbove = true;
+
+        const vc::ChunkMesh mesh = vc::ChunkMesher::Build(snapshot);
+        Check(mesh.vertices.size() == 24, "lone stone block meshes to 6 quads");
+        Check(mesh.transparentVertices.size() == 24, "lone water block meshes transparently");
+
+        const auto cornersOk = [](const std::vector<vc::ChunkVertex>& vertices, uint32_t lo) {
+            bool ok = true;
+            for (const auto& vertex : vertices) {
+                const uint32_t x = vertex.data0 & 31u;
+                const uint32_t y = (vertex.data0 >> 5) & 31u;
+                const uint32_t z = (vertex.data0 >> 10) & 31u;
+                const uint32_t normal = (vertex.data0 >> 15) & 7u;
+                const uint32_t u = vertex.data1 & 31u;
+                const uint32_t v = (vertex.data1 >> 5) & 31u;
+                ok &= x >= lo && x <= lo + 1 && y >= lo && y <= lo + 1 && z >= lo &&
+                      z <= lo + 1 && normal < 6 && u <= 1 && v <= 1;
+            }
+            return ok;
+        };
+        Check(cornersOk(mesh.vertices, 8), "packed stone vertices decode to the block corners");
+        Check(cornersOk(mesh.transparentVertices, 4),
+              "packed water vertices decode to the block corners");
+    }
 
     if (g_failures == 0) {
         std::printf("GenTest: all checks passed (%zu logs, %zu leaves)\n", logs, leafBlocks);

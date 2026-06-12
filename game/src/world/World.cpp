@@ -20,19 +20,15 @@ constexpr size_t kInFlightPerWorker = 4;
 // Chunk meshes are quads sharing one index pattern (the mesher rotates
 // vertex order for the AO diagonal flip, see EmitQuad), so the pool needs
 // no per-chunk index data. The initial capacity comfortably fits a radius
-// 12 view (~0.8M vertices, 48 B each); the pool grows if exceeded.
+// 12 view (~0.8M vertices, 8 B each packed); the pool grows if exceeded.
 constexpr uint32_t kQuadPattern[] = {0, 1, 2, 2, 3, 0};
 constexpr uint32_t kInitialPoolVertices = 1u << 20;
 
+// Two packed uint32s, decoded bitwise in chunk.vert (see ChunkVertex).
 vox::BufferLayout ChunkVertexLayout() {
     return {
-        {vox::ShaderDataType::Float3, "a_position"},
-        {vox::ShaderDataType::Float3, "a_normal"},
-        {vox::ShaderDataType::Float2, "a_uv"},
-        {vox::ShaderDataType::Float, "a_layer"},
-        {vox::ShaderDataType::Float, "a_ao"},
-        {vox::ShaderDataType::Float, "a_sky"},
-        {vox::ShaderDataType::Float, "a_block"},
+        {vox::ShaderDataType::UInt, "a_data0"},
+        {vox::ShaderDataType::UInt, "a_data1"},
     };
 }
 
@@ -628,13 +624,23 @@ void World::DrainCompletedJobs() {
         }
     }
 
-    for (auto& meshed : meshes) {
+    // GPU uploads are budgeted per frame: results past the budget carry
+    // over (deferral is safe — acceptance is versioned, so anything that
+    // went stale meanwhile just drops when it's finally processed). The
+    // first item always goes through so a single huge mesh can't starve.
+    constexpr size_t kUploadBudgetBytes = 2u << 20; // per frame
+    size_t uploadedBytes = 0;
+
+    const auto processMesh = [&](MeshResult& meshed) {
         const auto it = m_chunks.find(meshed.coord);
         if (it == m_chunks.end()) {
-            continue; // unloaded mid-job
+            return; // unloaded mid-job
         }
         ChunkEntry& entry = it->second;
         if (meshed.version == entry.dataVersion) {
+            uploadedBytes += (meshed.mesh.vertices.size() +
+                              meshed.mesh.transparentVertices.size()) *
+                             sizeof(ChunkVertex);
             UploadMesh(entry.mesh, entry.indexCount, meshed.mesh.vertices);
             UploadMesh(entry.meshT, entry.indexCountT, meshed.mesh.transparentVertices);
             entry.meshedVersion = meshed.version;
@@ -646,7 +652,19 @@ void World::DrainCompletedJobs() {
         if (entry.meshingVersion == meshed.version) {
             entry.meshingVersion = 0;
         }
+    };
+
+    std::vector<MeshResult> stillDeferred;
+    for (auto* batch : {&m_deferredMesh, &meshes}) {
+        for (auto& meshed : *batch) {
+            if (uploadedBytes < kUploadBudgetBytes) {
+                processMesh(meshed);
+            } else {
+                stillDeferred.push_back(std::move(meshed));
+            }
+        }
     }
+    m_deferredMesh = std::move(stillDeferred);
 
     for (auto& lodGen : lodGens) {
         const auto it = m_lodColumns.find(lodGen.column);
@@ -656,23 +674,41 @@ void World::DrainCompletedJobs() {
         it->second.cells = std::move(lodGen.cells);
     }
 
-    for (auto& lodMeshed : lodMeshes) {
+    // LOD meshes share the frame's upload budget (lowest priority, like
+    // their jobs). meshInFlight stays set while deferred, which also keeps
+    // the rescan from resubmitting.
+    const auto processLodMesh = [&](LodMeshResult& lodMeshed) {
         const auto it = m_lodColumns.find(lodMeshed.column);
         if (it == m_lodColumns.end()) {
-            continue; // unloaded mid-job; meshes were never uploaded
+            return; // unloaded mid-job; meshes were never uploaded
         }
         LodColumnEntry& entry = it->second;
         entry.meshInFlight = false;
         if (!entry.cells[0] || entry.meshed) {
-            continue; // recreated mid-job (let the rescan remesh) or duplicate
+            return; // recreated mid-job (let the rescan remesh) or duplicate
         }
         for (int ly = 0; ly < kLodHeightChunks; ++ly) {
+            uploadedBytes += (lodMeshed.meshes[ly].vertices.size() +
+                              lodMeshed.meshes[ly].transparentVertices.size()) *
+                             sizeof(ChunkVertex);
             UploadMesh(entry.mesh[ly], entry.indexCount[ly], lodMeshed.meshes[ly].vertices);
             UploadMesh(entry.meshT[ly], entry.indexCountT[ly],
                        lodMeshed.meshes[ly].transparentVertices);
         }
         entry.meshed = true;
+    };
+
+    std::vector<LodMeshResult> lodStillDeferred;
+    for (auto* batch : {&m_deferredLodMesh, &lodMeshes}) {
+        for (auto& lodMeshed : *batch) {
+            if (uploadedBytes < kUploadBudgetBytes) {
+                processLodMesh(lodMeshed);
+            } else {
+                lodStillDeferred.push_back(std::move(lodMeshed));
+            }
+        }
     }
+    m_deferredLodMesh = std::move(lodStillDeferred);
 }
 
 namespace {

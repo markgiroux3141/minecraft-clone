@@ -266,6 +266,12 @@ private:
     std::vector<LodGenResult> m_completedLodGen;
     std::vector<LodMeshResult> m_completedLodMesh;
 
+    // Mesh results past the frame's GPU upload budget, carried over and
+    // processed first next frame (main-thread only, already counted out
+    // of m_jobsInFlight).
+    std::vector<MeshResult> m_deferredMesh;
+    std::vector<LodMeshResult> m_deferredLodMesh;
+
     // Declared last so it is destroyed first: joining the workers before
     // the queues/maps/generator they reference go away.
     vox::ThreadPool m_pool;

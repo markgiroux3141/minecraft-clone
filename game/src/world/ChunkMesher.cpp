@@ -151,24 +151,21 @@ uint64_t MaskKey(uint32_t layer, const CornerSample corners[4]) {
     return key;
 }
 
-void EmitQuad(ChunkMesh& mesh, const FaceBasis& fb, int slice, int u0, int v0, int w, int h,
-              uint64_t key) {
+void EmitQuad(ChunkMesh& mesh, int face, const FaceBasis& fb, int slice, int u0, int v0, int w,
+              int h, uint64_t key) {
     auto& vertices = (key & kKeyTransparent) ? mesh.transparentVertices : mesh.vertices;
     const int plane = slice + (fb.s > 0 ? 1 : 0);
-    const auto layer = static_cast<float>((key >> 8) & 0xFFFFu);
-    int ao[4];
-    float sky[4];
-    float block[4];
+    const auto layer = static_cast<uint32_t>((key >> 8) & 0xFFFFu);
+    uint32_t ao[4];
+    uint32_t sky[4];
+    uint32_t block[4];
     for (int k = 0; k < 4; ++k) {
-        ao[k] = static_cast<int>(key >> (6 - k * 2)) & 3;
-        sky[k] = static_cast<float>((key >> (24 + k * 4)) & 15) / 15.0f;
-        block[k] = static_cast<float>((key >> (40 + k * 4)) & 15) / 15.0f;
+        ao[k] = static_cast<uint32_t>(key >> (6 - k * 2)) & 3u;
+        sky[k] = static_cast<uint32_t>(key >> (24 + k * 4)) & 15u;
+        block[k] = static_cast<uint32_t>(key >> (40 + k * 4)) & 15u;
     }
     const int cu[4] = {0, w, w, 0};
     const int cv[4] = {0, 0, h, h};
-
-    glm::vec3 normal(0.0f);
-    normal[fb.n] = static_cast<float>(fb.s);
 
     // Every quad uses the implicit index pattern {0,1,2, 2,3,0} (see
     // World's MeshPool). Splitting along the brighter AO diagonal (no
@@ -178,21 +175,17 @@ void EmitQuad(ChunkMesh& mesh, const FaceBasis& fb, int slice, int u0, int v0, i
     const int rotate = ao[0] + ao[2] >= ao[1] + ao[3] ? 0 : 1;
     for (int j = 0; j < 4; ++j) {
         const int k = (j + rotate) & 3;
-        glm::vec3 pos;
-        pos[fb.n] = static_cast<float>(plane);
-        pos[fb.uAxis] = static_cast<float>(u0 + cu[k]);
-        pos[fb.vAxis] = static_cast<float>(v0 + cv[k]);
-        const glm::vec2 uv = fb.swapUv
-                                 ? glm::vec2{static_cast<float>(cv[k]), static_cast<float>(cu[k])}
-                                 : glm::vec2{static_cast<float>(cu[k]), static_cast<float>(cv[k])};
+        int pos[3];
+        pos[fb.n] = plane;
+        pos[fb.uAxis] = u0 + cu[k];
+        pos[fb.vAxis] = v0 + cv[k];
+        const int u = fb.swapUv ? cv[k] : cu[k];
+        const int v = fb.swapUv ? cu[k] : cv[k];
         vertices.push_back({
-            pos,
-            normal,
-            uv,
-            layer,
-            static_cast<float>(ao[k]) / 3.0f,
-            sky[k],
-            block[k],
+            static_cast<uint32_t>(pos[0]) | static_cast<uint32_t>(pos[1]) << 5 |
+                static_cast<uint32_t>(pos[2]) << 10 | static_cast<uint32_t>(face) << 15 |
+                ao[k] << 18 | sky[k] << 20 | block[k] << 24,
+            static_cast<uint32_t>(u) | static_cast<uint32_t>(v) << 5 | layer << 10,
         });
     }
 }
@@ -352,7 +345,7 @@ ChunkMesh ChunkMesher::Build(const ChunkSnapshot& snapshot) {
                         ++h;
                     }
 
-                    EmitQuad(mesh, fb, slice, u, v, w, h, key);
+                    EmitQuad(mesh, face, fb, slice, u, v, w, h, key);
 
                     for (int dv = 0; dv < h; ++dv) {
                         for (int k = 0; k < w; ++k) {

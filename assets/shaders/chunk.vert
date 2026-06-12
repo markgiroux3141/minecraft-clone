@@ -1,12 +1,10 @@
 #version 460 core
 
-layout(location = 0) in vec3 a_position;
-layout(location = 1) in vec3 a_normal;
-layout(location = 2) in vec2 a_uv;
-layout(location = 3) in float a_layer;
-layout(location = 4) in float a_ao;
-layout(location = 5) in float a_sky;
-layout(location = 6) in float a_block;
+// Packed vertex (see ChunkVertex in ChunkMesher.h):
+//   a_data0: x:5 | y:5 | z:5 | normal:3 | ao:2 | sky:4 | block:4
+//   a_data1: u:5 | v:5 | layer:16
+layout(location = 0) in uint a_data0;
+layout(location = 1) in uint a_data1;
 
 uniform mat4 u_viewProj;
 
@@ -25,12 +23,19 @@ out float v_ao;
 out float v_sky;
 out float v_block;
 
+// BlockFace order: +X, -X, +Y, -Y, +Z, -Z.
+const vec3 kNormals[6] = vec3[](vec3(1, 0, 0), vec3(-1, 0, 0), vec3(0, 1, 0), vec3(0, -1, 0),
+                                vec3(0, 0, 1), vec3(0, 0, -1));
+
 void main() {
-    v_normal = a_normal;
-    v_uvw = vec3(a_uv, a_layer);
-    v_ao = a_ao;
-    v_sky = a_sky;
-    v_block = a_block;
-    v_worldPos = a_position * u_perDraw[gl_DrawID].w + u_perDraw[gl_DrawID].xyz;
+    vec3 position = vec3(float(a_data0 & 31u), float((a_data0 >> 5) & 31u),
+                         float((a_data0 >> 10) & 31u));
+    v_normal = kNormals[(a_data0 >> 15) & 7u];
+    v_ao = float((a_data0 >> 18) & 3u) / 3.0;
+    v_sky = float((a_data0 >> 20) & 15u) / 15.0;
+    v_block = float((a_data0 >> 24) & 15u) / 15.0;
+    v_uvw = vec3(float(a_data1 & 31u), float((a_data1 >> 5) & 31u),
+                 float((a_data1 >> 10) & 0xFFFFu));
+    v_worldPos = position * u_perDraw[gl_DrawID].w + u_perDraw[gl_DrawID].xyz;
     gl_Position = u_viewProj * vec4(v_worldPos, 1.0);
 }

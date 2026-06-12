@@ -42,10 +42,12 @@ target_include_directories(savetest PRIVATE src)
 target_link_libraries(savetest PRIVATE vox::engine)
 vox_set_target_defaults(savetest)
 
-# Structural regression test for terrain gen + tree decoration (run manually).
+# Structural regression test for terrain gen, tree decoration, and the
+# packed mesh format (run manually).
 add_executable(gentest
     tests/GenTest.cpp
     src/world/Block.cpp
+    src/world/ChunkMesher.cpp
     src/world/TerrainGen.cpp
 )
 target_include_directories(gentest PRIVATE src)
