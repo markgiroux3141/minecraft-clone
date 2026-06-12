@@ -117,6 +117,33 @@ int main() {
     Check(trunksIntact, "trunks are contiguous across chunk seams");
     Check(leavesAnchored, "every leaf block has a trunk within reach");
 
+    // Plants (M16): cross-meshed decoration must stand on its proper soil
+    // (earth for grass/flowers, sand for dead bushes) — a floating plant
+    // means the carve veto or the surface rules broke.
+    {
+        size_t plants = 0;
+        bool rooted = true;
+        for (int wz = lo; wz < hi; ++wz) {
+            for (int wx = lo; wx < hi; ++wx) {
+                for (int wy = 1; wy < vc::kWorldHeightBlocks - 1; ++wy) {
+                    const vc::BlockId id = blockAt(wx, wy, wz);
+                    const vc::BlockId below = blockAt(wx, wy - 1, wz);
+                    if (id == vc::blocks::TallGrass || id == vc::blocks::Dandelion ||
+                        id == vc::blocks::Poppy) {
+                        ++plants;
+                        rooted &= below == vc::blocks::Grass || below == vc::blocks::Dirt ||
+                                  below == vc::blocks::SnowyGrass;
+                    } else if (id == vc::blocks::DeadBush) {
+                        ++plants;
+                        rooted &= below == vc::blocks::Sand;
+                    }
+                }
+            }
+        }
+        Check(plants > 0, "plants actually generate");
+        Check(rooted, "every plant sits on its proper soil");
+    }
+
     // Caves (M15): carved air shows up as air with stone directly above
     // (heightmap terrain has no other overhangs). The breach invariant:
     // below sea level the only air is carved, and the carver's analytic

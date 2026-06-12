@@ -368,9 +368,21 @@ void World::ProcessBlockUpdate(const glm::ivec3& worldPos) {
     const auto& registry = BlockRegistry::Get();
     const BlockId id = GetBlock(worldPos.x, worldPos.y, worldPos.z);
     const BlockDef& def = registry.Def(id);
-    if (def.gravity) {
+    if (def.cross) {
+        // Plants pop without proper soil: earth for grass/flowers, sand
+        // for the dead bush. Digging out the ground wakes this cell.
         const BlockId below = GetBlock(worldPos.x, worldPos.y - 1, worldPos.z);
-        if (below == blocks::Air || registry.Def(below).liquid) {
+        const bool supported = id == blocks::DeadBush
+                                   ? below == blocks::Sand
+                                   : below == blocks::Grass || below == blocks::Dirt ||
+                                         below == blocks::SnowyGrass;
+        if (!supported) {
+            SetBlock(worldPos, blocks::Air);
+        }
+    } else if (def.gravity) {
+        const BlockId below = GetBlock(worldPos.x, worldPos.y - 1, worldPos.z);
+        const BlockDef& belowDef = registry.Def(below);
+        if (below == blocks::Air || belowDef.liquid || belowDef.replaceable) {
             // Detach into a falling entity; it becomes a block again on
             // landing. The SetBlock wakes the neighborhood, so sand above
             // follows next tick. The entity stays hidden until the remesh
@@ -443,8 +455,9 @@ void World::UpdateLiquid(const glm::ivec3& worldPos, int level) {
         const glm::ivec3 below = worldPos + kDown;
         const BlockId belowId = GetBlock(below.x, below.y, below.z);
         const BlockDef& belowDef = registry.Def(belowId);
-        if (belowId == blocks::Air || (belowDef.liquid && belowDef.liquidLevel < 7)) {
-            SetBlock(below, blocks::WaterFlows[6]);
+        if (belowId == blocks::Air || belowDef.replaceable ||
+            (belowDef.liquid && belowDef.liquidLevel < 7)) {
+            SetBlock(below, blocks::WaterFlows[6]); // crushes plants on the way
             return;
         }
         // Flows sheet sideways only when resting on SOLID ground. A flow
@@ -488,7 +501,7 @@ void World::UpdateLiquid(const glm::ivec3& worldPos, int level) {
         const glm::ivec3 pos = worldPos + kLiquidSides[d];
         const BlockId neighbor = GetBlock(pos.x, pos.y, pos.z);
         const BlockDef& neighborDef = registry.Def(neighbor);
-        if (neighbor == blocks::Air ||
+        if (neighbor == blocks::Air || neighborDef.replaceable ||
             (neighborDef.liquid && neighborDef.liquidLevel < spreadLevel)) {
             SetBlock(pos, blocks::WaterFlows[static_cast<size_t>(spreadLevel - 1)]);
         }
@@ -548,7 +561,10 @@ std::optional<World::RaycastHit> World::RaycastBlocks(const glm::vec3& origin,
         }
         cell[axis] += step[axis];
         tMax[axis] += tDelta[axis];
-        if (IsSolid(cell.x, cell.y, cell.z)) {
+        // Solids and plants are targetable (break/place); liquids and air
+        // are not. Plants never collide — only the raycast sees them.
+        const BlockDef& def = BlockRegistry::Get().Def(GetBlock(cell.x, cell.y, cell.z));
+        if (def.solid || def.cross) {
             glm::ivec3 normal{0};
             normal[axis] = -step[axis];
             return RaycastHit{cell, normal};
@@ -757,7 +773,9 @@ void World::SubmitLodGenerate(const glm::ivec2& lodColumn) {
                                     const BlockId id = srcAt(x >> 3, z >> 3, by >> 4)
                                                            .Get((x * 2 + dx) & 15, by & 15,
                                                                 (z * 2 + dz) & 15);
-                                    if (id != blocks::Air) {
+                                    // Plants are sub-cell detail — invisible
+                                    // at LOD distance, noisy if kept.
+                                    if (id != blocks::Air && !registry.Def(id).cross) {
                                         ids[count++] = id;
                                         anySolid |= registry.Def(id).solid;
                                     }

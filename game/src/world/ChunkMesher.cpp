@@ -22,6 +22,7 @@ struct PaddedVolume {
     std::array<BlockId, kPadVolume> id;
     std::array<uint8_t, kPadVolume> opaque;
     std::array<uint8_t, kPadVolume> cutout; // alpha-tested cubes (leaves)
+    std::array<uint8_t, kPadVolume> cross;  // plants: X-shaped quad pairs
     std::array<uint8_t, kPadVolume> liquid;
     std::array<uint8_t, kPadVolume> level; // liquidLevel (8 source, 7..1 flow)
     std::array<uint8_t, kPadVolume> light; // packed sky<<4 | block
@@ -42,6 +43,7 @@ void FillPadded(const ChunkSnapshot& snapshot, PaddedVolume& out) {
                 out.id[p] = id;
                 out.opaque[p] = def.opaque ? 1 : 0;
                 out.cutout[p] = def.cutout ? 1 : 0;
+                out.cross[p] = def.cross ? 1 : 0;
                 out.liquid[p] = def.liquid ? 1 : 0;
                 out.level[p] = def.liquidLevel;
 
@@ -272,6 +274,45 @@ void EmitLiquidCell(ChunkMesh& mesh, const PaddedVolume& vol, int x, int y, int 
     }
 }
 
+// Plants render as an X: two diagonal corner-to-corner planes, each
+// emitted with both windings so backface culling keeps them visible from
+// every side. They go into the regular alpha-tested stream. Lighting is
+// the cell's own light, full-bright AO, and a +Y normal — a flat sun
+// response, no fake side-shading on what is really a 2D sprite.
+void EmitCrossCell(ChunkMesh& mesh, const PaddedVolume& vol, int x, int y, int z) {
+    const int p = PadIndex(x, y, z);
+    const auto layer =
+        static_cast<uint32_t>(BlockRegistry::Get().Def(vol.id[p]).faceTiles[0]);
+    const auto sky = static_cast<uint32_t>(ChunkLight::Sky(vol.light[p]));
+    const auto block = static_cast<uint32_t>(ChunkLight::Block(vol.light[p]));
+    const uint32_t shade = 2u << 15 | 3u << 18 | sky << 20 | block << 24;
+
+    // Bottom endpoints of the two diagonals; corners run BL, BR, TR, TL
+    // (CCW seen from the +u side) with v up so the sprite stands upright.
+    const int ax[2] = {x, x};
+    const int az[2] = {z, z + 1};
+    const int bx[2] = {x + 1, x + 1};
+    const int bz[2] = {z + 1, z};
+    constexpr int cu[4] = {0, 1, 1, 0};
+    constexpr int cv[4] = {0, 0, 1, 1};
+
+    for (int plane = 0; plane < 2; ++plane) {
+        for (int winding = 0; winding < 2; ++winding) {
+            for (int j = 0; j < 4; ++j) {
+                const int k = winding == 0 ? j : 3 - j; // reverse = back face
+                const int px = cu[k] == 0 ? ax[plane] : bx[plane];
+                const int pz = cu[k] == 0 ? az[plane] : bz[plane];
+                mesh.vertices.push_back({
+                    static_cast<uint32_t>(px) | static_cast<uint32_t>(y + cv[k]) << 5 |
+                        static_cast<uint32_t>(pz) << 10 | shade,
+                    static_cast<uint32_t>(cu[k]) | static_cast<uint32_t>(cv[k]) << 5 |
+                        layer << 10,
+                });
+            }
+        }
+    }
+}
+
 // Face connectivity for occlusion culling: flood fill the chunk's
 // non-opaque cells; every component connects all the faces it touches.
 // Cell index i is YZX (Chunk::Index), so x = i & 15, z = (i>>4) & 15,
@@ -436,12 +477,16 @@ ChunkMesh ChunkMesher::Build(const ChunkSnapshot& snapshot) {
         }
     }
 
-    // Liquid pass: per-cell emission with corner-sampled surface heights.
+    // Per-cell passes: liquids (corner-sampled surface heights) and
+    // plant crosses — neither can greedy-merge.
     for (int y = 0; y < Chunk::kSize; ++y) {
         for (int z = 0; z < Chunk::kSize; ++z) {
             for (int x = 0; x < Chunk::kSize; ++x) {
-                if (vol.liquid[PadIndex(x, y, z)]) {
+                const int p = PadIndex(x, y, z);
+                if (vol.liquid[p]) {
                     EmitLiquidCell(mesh, vol, x, y, z);
+                } else if (vol.cross[p]) {
+                    EmitCrossCell(mesh, vol, x, y, z);
                 }
             }
         }

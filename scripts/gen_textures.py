@@ -120,9 +120,51 @@ def grass_side_snowed(x, y):
     return speckle(DIRT, x, y, 1)
 
 
+def tall_grass(x, y):
+    # Upright blades on a transparent background: each column hash-picks a
+    # blade height; most columns are empty.
+    if hash01(x, 0, 13) > 0.55:
+        return (0, 0, 0, 0)
+    blade = 6 + int(hash01(x, 1, 13) * 9)  # blade tops 6..14 px tall
+    if y < TILE - blade:
+        return (0, 0, 0, 0)
+    return speckle(GRASS, x, y, 13, 16)
+
+
+def flower(x, y, salt, petal):
+    # Simple sprite: a 4x4 petal head up top, a 2px stem to the ground.
+    if 5 <= x <= 9 and 2 <= y <= 6 and abs(x - 7) + abs(y - 4) <= 3:
+        return speckle(petal, x, y, salt, 12)
+    if 7 <= x <= 8 and 6 < y < TILE:
+        return speckle((62, 140, 42), x, y, salt, 10)
+    return (0, 0, 0, 0)
+
+
+def dandelion(x, y):
+    return flower(x, y, 14, (236, 220, 64))
+
+
+def poppy(x, y):
+    return flower(x, y, 15, (212, 56, 40))
+
+
+DEADBUSH = (124, 94, 50)
+
+
+def dead_bush(x, y):
+    # Dry twigs: a short trunk fanning into hash-gated diagonal branches.
+    if 7 <= x <= 8 and y >= 11:
+        return speckle(DEADBUSH, x, y, 16, 14)
+    d = abs(x - 7) + abs(x - 8)  # distance from the 2px center
+    rise = TILE - 1 - y
+    if 3 <= y <= 12 and abs(rise - d) <= 1 and hash01(x, 0, 16) > 0.35:
+        return speckle(DEADBUSH, x, y, 16, 14)
+    return (0, 0, 0, 0)
+
+
 # Layer index in the texture array == position in this list.
 TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top, leaves, water,
-         snow, grass_side_snowed]
+         snow, grass_side_snowed, tall_grass, dandelion, poppy, dead_bush]
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:

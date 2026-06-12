@@ -335,6 +335,48 @@ void TerrainGenerator::Generate(Chunk& chunk, const glm::ivec3& chunkCoord) cons
             PlaceTree(chunk, origin, tx, ground, tz, trunk);
         }
     }
+
+    // M16 plants: per-column hash gates, after trees so the air check sees
+    // trunks. A plant only ever touches its own cell, so unlike trees no
+    // neighbor enumeration is needed — chunk-local placement is already
+    // seam-deterministic. Same carve veto: no flowers hovering over cave
+    // mouths whose surface regrew lower.
+    for (int z = 0; z < Chunk::kSize; ++z) {
+        for (int x = 0; x < Chunk::kSize; ++x) {
+            const int wx = origin.x + x;
+            const int wz = origin.z + z;
+            const int height = heightAt(wx, wz);
+            const int ly = height + 1 - origin.y;
+            if (ly < 0 || ly >= Chunk::kSize || chunk.Get(x, ly, z) != blocks::Air) {
+                continue;
+            }
+            if (mask->Carved(x, height - origin.y, z)) {
+                continue;
+            }
+            const Biome biome = biomeAt(wx, wz);
+            const float r = Hash01(m_seed, wx, wz, 5);
+            BlockId plant = blocks::Air;
+            if (biome == Biome::Desert) {
+                if (r < 0.015f) {
+                    plant = blocks::DeadBush;
+                }
+            } else if (height > kBeachTop) { // beaches stay bare
+                // Snowy surfaces (biome or alpine cap) get sparse grass
+                // only; flowers keep to the green biomes.
+                const bool snowy = biome == Biome::Snowy || height >= kSnowLine;
+                const float grass = snowy ? 0.02f : biome == Biome::Forest ? 0.06f : 0.10f;
+                const float flower = snowy ? 0.0f : biome == Biome::Forest ? 0.006f : 0.012f;
+                if (r < grass) {
+                    plant = blocks::TallGrass;
+                } else if (r < grass + flower) {
+                    plant = Hash(m_seed, wx, wz, 6) & 1 ? blocks::Dandelion : blocks::Poppy;
+                }
+            }
+            if (plant != blocks::Air) {
+                chunk.Set(x, ly, z, plant);
+            }
+        }
+    }
 }
 
 } // namespace vc

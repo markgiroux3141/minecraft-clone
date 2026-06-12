@@ -93,6 +93,12 @@ def build_atlas(mc: Path, out_path: Path) -> None:
         water,
         load_tile(blocks / "snow.png"),
         load_tile(blocks / "grass_side_snowed.png"),
+        # M16 plants: tallgrass ships grayscale — bake the grass tint, like
+        # grass_top. Flowers and the dead bush are already colored.
+        tinted(load_tile(blocks / "tallgrass.png"), grass_tint),
+        load_tile(blocks / "flower_dandelion.png"),
+        load_tile(blocks / "flower_rose.png"),
+        load_tile(blocks / "deadbush.png"),
     ]
 
     strip = Image.new("RGBA", (TILE * len(tiles), TILE))

@@ -20,6 +20,10 @@ struct BlockDef {
     bool solid = true;    // collision (used from M6)
     bool cutout = false;  // non-opaque cube meshed normally; texture alpha holes
                           // are alpha-tested away in chunk.frag (leaves)
+    bool cross = false;   // plant: two diagonal alpha-tested quad pairs instead of
+                          // a cube; targetable by raycast but never collides
+    bool replaceable = false; // liquids flow into it and falling blocks crush it
+                              // (tall grass, flowers — destroyed, not blocking)
     bool liquid = false;  // meshed into the blended pass; liquid-liquid faces cull
     bool gravity = false; // falls when unsupported (block-update ticks)
     // Skylight attenuation for non-opaque blocks, 0..15: blocks direct
@@ -69,6 +73,11 @@ extern BlockId Water; // source block (liquidLevel 8); world gen places only thi
 // Flowing water by strength: WaterFlows[level - 1] for levels 1..7.
 extern std::array<BlockId, 7> WaterFlows;
 extern BlockId SnowyGrass; // M15 snowy-biome surface (snow top, snowed sides)
+// M16 cross-mesh plants: need earth (grass/dirt) underfoot...
+extern BlockId TallGrass;
+extern BlockId Dandelion;
+extern BlockId Poppy;
+extern BlockId DeadBush; // ...except the dead bush, which needs sand
 
 void RegisterDefaults();
 

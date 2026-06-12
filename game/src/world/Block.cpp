@@ -35,6 +35,23 @@ BlockId Leaves = 0;
 BlockId Water = 0;
 std::array<BlockId, 7> WaterFlows{};
 BlockId SnowyGrass = 0;
+BlockId TallGrass = 0;
+BlockId Dandelion = 0;
+BlockId Poppy = 0;
+BlockId DeadBush = 0;
+
+namespace {
+
+BlockDef Plant(std::string name, uint16_t tile) {
+    BlockDef def = BlockDef::Uniform(std::move(name), tile);
+    def.opaque = false;
+    def.solid = false; // walk through; raycast still targets it (cross)
+    def.cross = true;
+    def.replaceable = true;
+    return def;
+}
+
+} // namespace
 
 void RegisterDefaults() {
     auto& registry = BlockRegistry::Get();
@@ -102,6 +119,13 @@ void RegisterDefaults() {
     snowyGrass.faceTiles[static_cast<size_t>(BlockFace::PosY)] = 10;
     snowyGrass.faceTiles[static_cast<size_t>(BlockFace::NegY)] = 1;
     SnowyGrass = registry.Register(std::move(snowyGrass));
+
+    // M16 plants (appended after SnowyGrass): cross-meshed, alpha-tested,
+    // non-solid decoration. Tiles 12..15 — keep both atlas scripts in sync.
+    TallGrass = registry.Register(Plant("tall grass", 12));
+    Dandelion = registry.Register(Plant("dandelion", 13));
+    Poppy = registry.Register(Plant("poppy", 14));
+    DeadBush = registry.Register(Plant("dead bush", 15));
 
     GAME_INFO("Registered {} block types", registry.Count());
 }
