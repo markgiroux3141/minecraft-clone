@@ -122,8 +122,15 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   ContainerPlayer) plus a creative-style block palette, with vanilla
   PICKUP mouse rules (left whole-stack/swap/merge, right half /
   place-one).
-- **M18 — Survival II: mining feel** (next): per-block hardness +
-  hold-to-break crack overlays, block drops as item entities, pickup.
+- **M18 — Survival II: mining feel** ✅: vanilla per-block hardness +
+  hold-to-break (digSpeed/hardness/30 per tick, water/airborne x1/5
+  penalties, 5-tick hit delay) with destroy_stage_0..9 crack overlays
+  (alpha-tested entity cube), block drops as item entities (vanilla
+  EntityItem physics: scatter spawn, drag/friction, 0.5-block merge,
+  5-min despawn, grown-AABB pickup into the inventory), a vanilla-ish
+  drop table (stone -> new cobblestone block, grass -> dirt,
+  leaves/tall grass -> nothing), Q-throw and inventory-screen throws.
+  Fly mode breaks instantly and drops nothing (creative-style).
 - **M19 — Survival III: crafting**: recipe registry, 2x2 + 3x3 grids,
   tools as items.
 - **Backlog**: deeper world (kWorldHeightChunks 4 → 8), audio engine,

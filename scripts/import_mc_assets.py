@@ -63,6 +63,19 @@ def tinted(img: Image.Image, tint: tuple[int, int, int]) -> Image.Image:
     return out
 
 
+def crack_cutout(img: Image.Image) -> Image.Image:
+    # destroy_stage_N ships as a translucent gray wash (vanilla draws it
+    # with a multiplicative blend). We alpha-test it instead, so threshold:
+    # solid crack pixels stay, the wash becomes fully transparent.
+    out = img.copy()
+    px = out.load()
+    for y in range(out.height):
+        for x in range(out.width):
+            r, g, b, a = px[x, y]
+            px[x, y] = (r, g, b, 255) if a >= 140 else (0, 0, 0, 0)
+    return out
+
+
 def flattened(img: Image.Image) -> Image.Image:
     # Bake transparent pixels opaque over the tile's own body color — used
     # for the full-cube cactus, whose vanilla texture leaves the model's
@@ -127,6 +140,10 @@ def build_atlas(mc: Path, out_path: Path) -> None:
         load_tile(blocks / "sandstone_top.png"),
         load_tile(blocks / "sandstone_bottom.png"),
         load_tile(blocks / "bedrock.png"),
+        # M18: cobblestone (stone's mining drop), then the ten crack
+        # stages (kFirstCrackTile in Block.h).
+        load_tile(blocks / "cobblestone.png"),
+        *[crack_cutout(load_tile(blocks / f"destroy_stage_{i}.png")) for i in range(10)],
     ]
 
     strip = Image.new("RGBA", (TILE * len(tiles), TILE))

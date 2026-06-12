@@ -4,7 +4,6 @@
 #include <string>
 #include <vector>
 
-#include "vox/core/Log.h"
 #include "vox/renderer/UiRenderer.h"
 
 #include "ui/Hud.h" // GuiScale
@@ -104,7 +103,7 @@ std::vector<BlockId> PaletteIds() {
 } // namespace
 
 void InventoryScreen::Draw(vox::UiRenderer& ui, glm::vec2 screen, glm::vec2 mouse, bool leftClick,
-                           bool rightClick, Inventory& inv, ItemStack& carried,
+                           bool rightClick, Inventory& inv, ItemStack& carried, ItemStack& thrown,
                            const GuiTextures& tex) {
     const float s = GuiScale(screen);
     const std::vector<BlockId> palette = PaletteIds();
@@ -177,14 +176,12 @@ void InventoryScreen::Draw(vox::UiRenderer& ui, glm::vec2 screen, glm::vec2 mous
         }
     }
 
-    // A click outside both panels discards the carried stack — the
-    // creative-consistent stand-in for vanilla's throw until M18 gives us
-    // item entities to drop.
+    // A click outside both panels throws the carried stack (vanilla): the
+    // caller spawns it as an item entity in front of the player.
     if (click && !carried.Empty() &&
         !Hover(mouse, paletteOrigin, paletteSize * s) &&
         !Hover(mouse, panelOrigin, kPanelSize * s)) {
-        GAME_INFO("Discarded carried {} x{}", BlockRegistry::Get().Def(carried.id).name,
-                  carried.count);
+        thrown = carried;
         carried = {};
     }
 

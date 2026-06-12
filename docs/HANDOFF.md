@@ -1,11 +1,11 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-12, end of M17 (Survival I: items & inventory —
-CODE COMPLETE, builds clean, savetest passes; AWAITING USER
-VERIFICATION in-game, see the M17 section for what to test). M18
-(mining feel) is next once verified. Read alongside `ARCHITECTURE.md`
-(layering rules, roadmap) and `CLAUDE.md` (build commands,
-conventions).
+Updated: 2026-06-12, M17 USER-VERIFIED ("looks great"); M18 (Survival
+II: mining feel) CODE COMPLETE — builds clean, gentest/savetest pass,
+startup launch sanity-checked; AWAITING USER VERIFICATION, see the M18
+section for what to test. M19 (crafting) is next once verified. Read
+alongside `ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md`
+(build commands, conventions).
 
 IMPORTANT RESOURCE: the user has Minecraft's Java source (MCP 9.40 =
 1.12) at `D:\Minecraft source code` — look up exact game dynamics there
@@ -40,9 +40,12 @@ Starts on the title screen (cursor free): click a world / New World /
 Quit. In game the cursor is captured: WASD move, mouse look, Space jump
 (walk) or rise (fly), LeftShift sink (fly), LeftControl sprint/boost,
 F toggles walk/fly, O toggles occlusion culling (debug), T fast-forwards
-world time (debug), LMB break (picks the block up), RMB place (consumes
-one), 1..9 select the hotbar slot, E opens/closes the inventory screen
-(slots + a creative block palette; new worlds start with the legacy kit:
+world time (debug), LMB hold-to-break in walk (crack overlay, drops pop
+out as item entities and vacuum into the inventory) / instant pop in fly
+(creative-style, no drops), RMB place (consumes one), Q tosses one from
+the hand, 1..9 select the hotbar slot, E opens/closes the inventory
+screen (slots + a creative block palette; clicking outside the panels
+throws the carried stack; new worlds start with the legacy kit:
 stone/dirt/grass/glowstone/sand/log/leaves/water x64, slot 9 empty).
 In water: W swims toward the look
 direction, Space swims up (breach kick at the surface). Esc pauses
@@ -647,21 +650,90 @@ refills; 1..9 selection; E/Esc close; falling keeps happening with the
 screen open; quit + re-enter world → inventory restored; an OLD world
 still gets the legacy kit and plays as before.
 
-## Next: M18 — Survival II: mining feel (then M19)
+## M18 — Survival II: mining feel (how it works)
 
-The survival arc is the agreed plan (user, 2026-06-12: "let's stick to
-this plan"):
-- M18, Survival II — mining feel: per-block hardness + hold-to-break
-  progress (vanilla destroy_stage_0..9 crack overlays exist in the
-  1.12 assets), block drops as pickup-able item entities (reuse the
-  FallingBlock render path), pickup into the inventory — replaces
-  M17's instant-pickup stopgap and outside-click discard.
-- M19, Survival III — crafting: recipe registry, 2x2 player grid +
-  crafting table 3x3 (gui/container/crafting_table.png), tools as
-  items (tool speed multipliers hook back into M18's hardness).
-Vanilla references when porting: Block.getBlockHardness /
-getPlayerRelativeBlockHardness, PlayerControllerMP.onPlayerDamageBlock
-(break progress), Container/InventoryPlayer, CraftingManager.
+CODE COMPLETE 2026-06-12, awaiting user verification. Decided with the
+user: fly mode breaks instantly and drops nothing (creative-style);
+drop table is vanilla-ish. Replaces M17's two stopgaps (instant pickup
+on break, inventory outside-click discard).
+
+- Hardness + drops (Block.h/.cpp): `BlockDef::hardness` (vanilla's
+  values: stone 1.5, logs 2.0, dirt/sand 0.5, grass 0.6, leaves 0.2,
+  glowstone 0.3, sandstone 0.8, cactus 0.4, plants 0 = instant) and
+  `BlockDef::drop` (kDropSelf default, Air = nothing, or an id;
+  `ResolveDrop(self)` at use sites). Cross-referencing drops are
+  patched after all registrations via `BlockRegistry::EditDef`. NEW
+  block: cobblestone (tile 28, stone's drop, never generated). Table:
+  stone->cobble, grass/snowy->dirt, leaves/tallgrass/deadbush->nothing,
+  flowers/cactus/everything else->self.
+- Hold-to-break (GameApp::HandleInput, walk mode): vanilla formula —
+  progress += digSpeed/hardness/30 per tick (implemented per-frame:
+  frameDt * digSpeed / (hardness*1.5)); digSpeed 1, x1/5 if the eye is
+  underwater, x1/5 if airborne (Player::Grounded() accessor). Progress
+  resets when the target cell changes or LMB lifts; m_breakCooldown
+  doubles as vanilla's 5-tick post-break hit delay. Bedrock/air reset.
+  Pause/inventory-open also reset (no frozen cracks).
+- Crack overlay: destroy_stage_0..9 live at atlas layers 29..38
+  (`blocks::kFirstCrackTile`; BOTH texture scripts grew them + tile 28
+  cobble — import thresholds the translucent gray wash to a hard
+  cutout at alpha>=140 because we alpha-test instead of vanilla's
+  multiplicative blend). Stage = int(progress*10)-1; drawn as an
+  inflated (1.004) entity cube over the dig cell, lit from the hit
+  face; backfaces hide behind the block's own opaque mesh.
+- block_entity shaders REWRITTEN for shared use: vert is now
+  center-based — u_center/u_scale/u_yaw (spin around Y) replace
+  u_origin; frag alpha-tests (discard < 0.5) so leaf/plant item minis
+  and the crack cutout work. Falling blocks pass center+0.5/scale 1.
+- Item entities (World::ItemEntity, World.cpp): vanilla EntityItem
+  port — spawn jittered to cell+0.25..0.75 with scatter velocity
+  (+-2, 4, +-2 b/s = vanilla's b/tick x20), gravity 16 b/s^2, drag
+  x0.98/tick (ground x0.6 horizontal), axis-separated AABB collision
+  (0.25 cube), embedded-in-block -> float up (pushOutOfBlocks
+  simplified), merges same-id stacks within 0.5 on cell-cross or every
+  25 ticks (cap 64), despawns at age 6000. NOT persisted — drops
+  vanish on save/quit (they'd despawn anyway). Pickup delay 10 (40 for
+  player throws so they don't vacuum straight back).
+- Pickup (GameApp::OnTick): World::PickupItems(boxMin, boxMax, take) —
+  player AABB grown by vanilla's (1.0, 0.5, 1.0); the take callback
+  Add()s to the inventory and returns how many fit, partial leftovers
+  stay in the world. Runs in Playing AND Inventory states.
+- Render (GameApp::OnRender): one entity pass draws falling blocks,
+  item minis (scale 0.25, vanilla bob sin(t*0.1)*0.1+0.1 and spin
+  t*0.05 + per-item phase), and the crack cube; cell light sampled
+  max(cell, above) as before.
+- Crush/pop drops (World.cpp): plants popped by support loss, crushed
+  by flowing water (pour-down + sideways sites in UpdateLiquid), or
+  squashed by landing sand all SpawnBlockDrop their table entry first
+  (CrushDrops checks def.cross).
+- Throws: Q tosses one from the hand (press + 0.25 s repeat); the
+  inventory screen's outside-click now returns the carried stack via a
+  `thrown` out-param and GameApp throws it (eye - 0.3, look * 6 b/s);
+  closing with a full bag throws the leftover instead of discarding.
+- Known M18 limits: no dig sounds/particles (no audio engine yet), no
+  tool speeds until M19, drops aren't saved, falling-sand entities
+  crush drops only at the landing cell (vanilla breaks items it falls
+  through — close enough), grass digs as fast as dirt bare-handed
+  (vanilla parity).
+
+What the user should test (NEW WORLD not needed — worldgen unchanged):
+walk mode: hold LMB on stone ~2.3 s -> crack stages -> cobblestone
+pops out, scatters, and vacuums in (watch the hotbar count); dirt/sand
+~0.75 s; plants instant, flowers drop themselves, tall grass nothing;
+leaves break fast and drop nothing; digging while swimming/jumping is
+much slower; releasing/retargeting resets the crack. Fly mode: instant
+pop, no drops. Q tosses an item forward (pickable after ~2 s). Break a
+flower with water flow / falling sand -> it pops as a drop. Inventory
+screen: click outside the panels -> stack lands in front of you. Items
+despawn after 5 min; quit+reload clears ground items (known limit).
+
+## Next: M19 — Survival III: crafting
+
+The survival arc's last leg (agreed 2026-06-12): recipe registry, 2x2
+player grid + crafting table 3x3 (gui/container/crafting_table.png),
+tools as items — tool dig-speed multipliers hook into M18's hardness
+path (EntityPlayer.getDigSpeed/getStrVsBlock), plus ItemStack growing
+a notion of non-block items. Vanilla references: CraftingManager,
+Container/InventoryPlayer, ItemTool/ItemPickaxe.
 
 Other backlog: deeper world (kWorldHeightChunks 4 -> 8, rebase
 topology + cave start heights — discussed 2026-06-12, deferred), audio

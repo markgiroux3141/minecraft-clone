@@ -49,6 +49,8 @@ private:
     bool EyeInWater() const;
     void DrawTargetOutline();
     void DrawUi(); // HUD + menus; may change state (menu clicks)
+    // Tosses an item entity forward from the eye (Q key, inventory throws).
+    void ThrowItem(vc::BlockId id, int count);
 
     vox::PerspectiveCamera m_camera;
     Player m_player{m_camera};
@@ -107,8 +109,16 @@ private:
     bool m_rightClickWasDown = false;
     bool m_breakWasDown = false;
     bool m_placeWasDown = false;
-    double m_breakCooldown = 0.0;
+    bool m_dropKeyWasDown = false;
+    double m_breakCooldown = 0.0; // fly repeat AND the walk-dig hit delay
     double m_placeCooldown = 0.0;
+    double m_dropCooldown = 0.0;
+
+    // Hold-to-break (M18, walk mode): the block being dug and its damage
+    // 0..1 (vanilla curBlockDamageMP). Resets when the target changes or
+    // the button lifts; crack stage = int(progress * 10) - 1.
+    std::optional<glm::ivec3> m_digCell;
+    float m_digProgress = 0.0f;
 
     // Rolling counters for the once-per-second title-bar stats.
     double m_statsTimer = 0.0;

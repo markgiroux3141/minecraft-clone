@@ -262,11 +262,34 @@ def bedrock(x, y):
     return speckle((110, 110, 110), x, y, 28, 22)
 
 
+def cobblestone(x, y):
+    # Rounded stone lumps on a 4px grid with dark mortar seams between.
+    if x % 5 == 0 or y % 5 == 0:
+        return speckle((78, 78, 78), x, y, 29, 10)
+    return speckle((132, 132, 132), x, y, 29, 16)
+
+
+def crack_stage(stage):
+    # M18 destroy_stage_0..9 (kFirstCrackTile in Block.h): transparent
+    # tile with dark crack pixels, density rising with the stage; rendered
+    # as an alpha-tested cube over the block being dug.
+    def pixel(x, y):
+        # A fixed jagged X of cracks plus stage-keyed spread around it.
+        on_seam = abs(x - y) <= 0 or abs(x + y - 15) <= 0
+        spread = hash01(x, y, 40 + stage) < (stage + 1) / 14.0
+        if (on_seam and stage >= 1) or spread:
+            return (30, 30, 30, 255)
+        return (0, 0, 0, 0)
+
+    return pixel
+
+
 # Layer index in the texture array == position in this list.
 TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top, leaves, water,
          snow, grass_side_snowed, tall_grass, dandelion, poppy, dead_bush,
          birch_side, birch_top, birch_leaves, spruce_side, spruce_top, spruce_leaves,
-         cactus_side, cactus_top, sandstone_side, sandstone_top, sandstone_bottom, bedrock]
+         cactus_side, cactus_top, sandstone_side, sandstone_top, sandstone_bottom, bedrock,
+         cobblestone] + [crack_stage(i) for i in range(10)]
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:

@@ -319,6 +319,7 @@ void World::Tick() {
                 }
                 if (restY < kHeightBlocks) {
                     const glm::ivec3 restCell{falling.x, restY, falling.z};
+                    CrushDrops(restCell); // a plant under landing sand pops its drop
                     SetBlock(restCell, falling.id);
                     // Freeze the cube on the placed cell and keep drawing
                     // it until the remesh lands.
@@ -336,6 +337,174 @@ void World::Tick() {
             falling.y = newY;
         }
         ++i;
+    }
+
+    TickItemEntities();
+}
+
+namespace {
+
+// Cheap scatter randomness for item drops — gameplay-only, nothing
+// worldgen-deterministic flows through this.
+float ItemRand01() {
+    static uint32_t s = 0x9E3779B9u;
+    s ^= s << 13;
+    s ^= s >> 17;
+    s ^= s << 5;
+    return static_cast<float>(s & 0xFFFFFFu) / 16777215.0f;
+}
+
+constexpr float kItemHalf = 0.125f; // the mini cube is 0.25 on a side
+constexpr int kItemDespawnAge = 6000;   // 5 minutes, vanilla
+constexpr int kItemMergeMax = 64;       // == kMaxStackSize (Inventory.h)
+
+} // namespace
+
+void World::SpawnBlockDrop(const glm::ivec3& cell, BlockId id, int count) {
+    // Vanilla Block.spawnAsEntity: jitter into the middle half of the cell;
+    // EntityItem's constructor adds the small scatter velocity (b/tick
+    // 0.2 up, +-0.1 sideways -> b/s at 20 TPS).
+    const glm::vec3 pos{static_cast<float>(cell.x) + 0.25f + ItemRand01() * 0.5f,
+                        static_cast<float>(cell.y) + 0.25f + ItemRand01() * 0.5f,
+                        static_cast<float>(cell.z) + 0.25f + ItemRand01() * 0.5f};
+    const glm::vec3 vel{(ItemRand01() - 0.5f) * 4.0f, 4.0f, (ItemRand01() - 0.5f) * 4.0f};
+    SpawnItem(pos, vel, id, count, 10);
+}
+
+void World::SpawnItem(const glm::vec3& pos, const glm::vec3& vel, BlockId id, int count,
+                      int pickupDelay) {
+    if (id == blocks::Air || count <= 0) {
+        return;
+    }
+    ItemEntity item;
+    item.id = id;
+    item.count = count;
+    item.pos = pos;
+    item.prevPos = pos;
+    item.vel = vel;
+    item.pickupDelay = pickupDelay;
+    item.phase = ItemRand01() * 6.2832f; // vanilla hoverStart: random 0..2pi
+    m_itemEntities.push_back(item);
+}
+
+void World::TickItemEntities() {
+    constexpr float kTickDt = 0.05f;
+    constexpr float kGravity = 16.0f; // vanilla 0.04 b/tick^2
+
+    // Axis-separated AABB move against solid blocks (the player's scheme,
+    // sized for the item cube). Returns true on collision (velocity zeroed).
+    const auto moveAxis = [&](ItemEntity& item, int axis, float delta) {
+        if (delta == 0.0f) {
+            return false;
+        }
+        item.pos[axis] += delta;
+        const glm::vec3 boxMin = item.pos - glm::vec3{kItemHalf, 0.0f, kItemHalf};
+        const glm::vec3 boxMax = item.pos + glm::vec3{kItemHalf, 2.0f * kItemHalf, kItemHalf};
+        const glm::ivec3 lo{static_cast<int>(std::floor(boxMin.x + 1e-5f)),
+                            static_cast<int>(std::floor(boxMin.y + 1e-5f)),
+                            static_cast<int>(std::floor(boxMin.z + 1e-5f))};
+        const glm::ivec3 hi{static_cast<int>(std::floor(boxMax.x - 1e-5f)),
+                            static_cast<int>(std::floor(boxMax.y - 1e-5f)),
+                            static_cast<int>(std::floor(boxMax.z - 1e-5f))};
+        bool collided = false;
+        float resolved = item.pos[axis];
+        for (int by = lo.y; by <= hi.y; ++by) {
+            for (int bz = lo.z; bz <= hi.z; ++bz) {
+                for (int bx = lo.x; bx <= hi.x; ++bx) {
+                    if (!IsSolid(bx, by, bz)) {
+                        continue;
+                    }
+                    collided = true;
+                    const int cell = (axis == 0) ? bx : (axis == 1) ? by : bz;
+                    if (delta > 0.0f) {
+                        const float extent = (axis == 1) ? 2.0f * kItemHalf : kItemHalf;
+                        resolved = std::min(resolved, static_cast<float>(cell) - extent - 0.001f);
+                    } else {
+                        const float extent = (axis == 1) ? 0.0f : kItemHalf;
+                        resolved = std::max(resolved, static_cast<float>(cell + 1) + extent + 0.001f);
+                    }
+                }
+            }
+        }
+        if (collided) {
+            item.pos[axis] = resolved;
+            item.vel[axis] = 0.0f;
+        }
+        return collided;
+    };
+
+    for (size_t i = 0; i < m_itemEntities.size();) {
+        ItemEntity& item = m_itemEntities[i];
+        item.prevPos = item.pos;
+        ++item.age;
+        if (item.pickupDelay > 0) {
+            --item.pickupDelay;
+        }
+        if (item.age >= kItemDespawnAge) {
+            m_itemEntities.erase(m_itemEntities.begin() + static_cast<ptrdiff_t>(i));
+            continue;
+        }
+
+        const glm::ivec3 cell{static_cast<int>(std::floor(item.pos.x)),
+                              static_cast<int>(std::floor(item.pos.y + kItemHalf)),
+                              static_cast<int>(std::floor(item.pos.z))};
+        const glm::ivec3 cc{cell.x >> 4, std::clamp(cell.y, 0, kHeightBlocks - 1) >> 4,
+                            cell.z >> 4};
+        const auto chunkIt = m_chunks.find(cc);
+        if (chunkIt == m_chunks.end() || !chunkIt->second.blocks) {
+            ++i; // ground not loaded — hang like falling blocks do
+            continue;
+        }
+
+        item.vel.y -= kGravity * kTickDt;
+        bool onGround = false;
+        if (cell.y >= 0 && cell.y < kHeightBlocks && IsSolid(cell.x, cell.y, cell.z)) {
+            // Embedded (a block was placed over it, or it spawned inside
+            // one): skip collision and float up until free — vanilla's
+            // pushOutOfBlocks, simplified to "up".
+            item.vel = {0.0f, 2.0f, 0.0f};
+            item.pos.y += item.vel.y * kTickDt;
+        } else {
+            onGround = moveAxis(item, 1, item.vel.y * kTickDt) && item.prevPos.y >= item.pos.y;
+            moveAxis(item, 0, item.vel.x * kTickDt);
+            moveAxis(item, 2, item.vel.z * kTickDt);
+        }
+
+        // Vanilla drag: x0.98/tick, ground friction x0.6 horizontally.
+        const float friction = onGround ? 0.6f * 0.98f : 0.98f;
+        item.vel.x *= friction;
+        item.vel.z *= friction;
+        item.vel.y *= 0.98f;
+
+        // Merge with same-id stacks nearby (vanilla: on cell crossing or
+        // every 25 ticks; absorbed item keeps the younger age).
+        const bool crossedCell = glm::ivec3{glm::floor(item.prevPos)} !=
+                                 glm::ivec3{glm::floor(item.pos)};
+        if (crossedCell || item.age % 25 == 0) {
+            for (size_t j = m_itemEntities.size(); j-- > i + 1;) {
+                ItemEntity& other = m_itemEntities[j];
+                if (other.id != item.id || item.count + other.count > kItemMergeMax ||
+                    std::abs(other.pos.x - item.pos.x) > 0.5f ||
+                    std::abs(other.pos.y - item.pos.y) > 0.5f ||
+                    std::abs(other.pos.z - item.pos.z) > 0.5f) {
+                    continue;
+                }
+                item.count += other.count;
+                item.age = std::min(item.age, other.age);
+                item.pickupDelay = std::max(item.pickupDelay, other.pickupDelay);
+                m_itemEntities.erase(m_itemEntities.begin() + static_cast<ptrdiff_t>(j));
+            }
+        }
+        ++i;
+    }
+}
+
+void World::CrushDrops(const glm::ivec3& pos) {
+    const auto& registry = BlockRegistry::Get();
+    const BlockId id = GetBlock(pos.x, pos.y, pos.z);
+    const BlockDef& def = registry.Def(id);
+    if (def.cross) {
+        SpawnBlockDrop(pos, def.ResolveDrop(id), 1);
     }
 }
 
@@ -377,6 +546,7 @@ void World::ProcessBlockUpdate(const glm::ivec3& worldPos) {
                                    : below == blocks::Grass || below == blocks::Dirt ||
                                          below == blocks::SnowyGrass;
         if (!supported) {
+            SpawnBlockDrop(worldPos, def.ResolveDrop(id), 1); // popped plants drop
             SetBlock(worldPos, blocks::Air);
         }
     } else if (id == blocks::Cactus) {
@@ -384,6 +554,7 @@ void World::ProcessBlockUpdate(const glm::ivec3& worldPos) {
         // everything above it, one update at a time.
         const BlockId below = GetBlock(worldPos.x, worldPos.y - 1, worldPos.z);
         if (below != blocks::Sand && below != blocks::Cactus) {
+            SpawnBlockDrop(worldPos, def.ResolveDrop(id), 1);
             SetBlock(worldPos, blocks::Air);
         }
     } else if (def.gravity) {
@@ -464,7 +635,8 @@ void World::UpdateLiquid(const glm::ivec3& worldPos, int level) {
         const BlockDef& belowDef = registry.Def(belowId);
         if (belowId == blocks::Air || belowDef.replaceable ||
             (belowDef.liquid && belowDef.liquidLevel < 7)) {
-            SetBlock(below, blocks::WaterFlows[6]); // crushes plants on the way
+            CrushDrops(below); // crushed plants pop their drops
+            SetBlock(below, blocks::WaterFlows[6]);
             return;
         }
         // Flows sheet sideways only when resting on SOLID ground. A flow
@@ -510,6 +682,7 @@ void World::UpdateLiquid(const glm::ivec3& worldPos, int level) {
         const BlockDef& neighborDef = registry.Def(neighbor);
         if (neighbor == blocks::Air || neighborDef.replaceable ||
             (neighborDef.liquid && neighborDef.liquidLevel < spreadLevel)) {
+            CrushDrops(pos); // crushed plants pop their drops
             SetBlock(pos, blocks::WaterFlows[static_cast<size_t>(spreadLevel - 1)]);
         }
     }

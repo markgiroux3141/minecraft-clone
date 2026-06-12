@@ -138,6 +138,52 @@ public:
     const std::vector<FallingBlock>& FallingBlocks() const { return m_fallingBlocks; }
     bool FallingBlockVisible(const FallingBlock& falling) const;
 
+    // A dropped item in the world (M18): a mini block cube with vanilla
+    // EntityItem physics — gravity 0.04 b/tick^2, drag x0.98/tick (ground
+    // friction x0.6 horizontally), merges with same-id neighbors within
+    // 0.5 blocks, despawns at age 6000 (5 min). Tick-simulated and
+    // interpolated like FallingBlock. NOT persisted — drops vanish on
+    // save/quit (they'd despawn within minutes anyway).
+    struct ItemEntity {
+        BlockId id;
+        int count;
+        glm::vec3 pos, prevPos; // bottom-center of the cube
+        glm::vec3 vel;          // blocks/s
+        int age = 0;
+        int pickupDelay = 10; // ticks (vanilla default; throws use 40)
+        float phase = 0.0f;   // render bob/spin offset (vanilla hoverStart)
+    };
+    const std::vector<ItemEntity>& ItemEntities() const { return m_itemEntities; }
+
+    // Block-drop spawn, vanilla Block.spawnAsEntity: jittered to
+    // cell + 0.25..0.75 with a small random scatter velocity. No-op when
+    // id is air or count <= 0.
+    void SpawnBlockDrop(const glm::ivec3& cell, BlockId id, int count);
+    // Explicit spawn (player throws): pickupDelay 40 like vanilla's drops.
+    void SpawnItem(const glm::vec3& pos, const glm::vec3& vel, BlockId id, int count,
+                   int pickupDelay);
+    // Items overlapping box min/max (caller grows the player AABB by
+    // vanilla's 1.0/0.5/1.0 pickup reach) whose delay has expired.
+    // take(id, count) returns how many fit; fully-taken items are removed.
+    template <typename Fn> void PickupItems(const glm::vec3& boxMin, const glm::vec3& boxMax, Fn&& take) {
+        for (size_t i = 0; i < m_itemEntities.size();) {
+            ItemEntity& item = m_itemEntities[i];
+            const glm::vec3 c = item.pos; // bottom-center, half extent 0.125
+            if (item.pickupDelay > 0 || c.x + 0.125f < boxMin.x || c.x - 0.125f > boxMax.x ||
+                c.z + 0.125f < boxMin.z || c.z - 0.125f > boxMax.z || c.y + 0.25f < boxMin.y ||
+                c.y > boxMax.y) {
+                ++i;
+                continue;
+            }
+            item.count -= take(item.id, item.count);
+            if (item.count <= 0) {
+                m_itemEntities.erase(m_itemEntities.begin() + static_cast<ptrdiff_t>(i));
+            } else {
+                ++i;
+            }
+        }
+    }
+
     // Packed light at a world position (sky 15 above the world, 0 when
     // unloaded/below). Used for entity lighting too.
     uint8_t PackedLightAt(const glm::ivec3& worldPos) const;
@@ -310,6 +356,14 @@ private:
     uint64_t m_simTick = 0;
     std::priority_queue<BlockUpdate, std::vector<BlockUpdate>, LaterFirst> m_blockUpdates;
     std::vector<FallingBlock> m_fallingBlocks; // settled back into blocks in ~World
+    std::vector<ItemEntity> m_itemEntities;    // not persisted (see ItemEntity)
+
+    // One tick of EntityItem physics for every dropped item (called from
+    // Tick): move with axis-separated collision, drag, merge, despawn.
+    void TickItemEntities();
+    // If the replaceable block at pos (plant) is about to be crushed by
+    // flowing water or a landing gravity block, pop its drop first.
+    void CrushDrops(const glm::ivec3& pos);
 
     // CollectVisibleChunks scratch, reused across frames. The visit grid
     // covers the view square (stamped instead of cleared); the queue holds

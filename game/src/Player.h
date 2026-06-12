@@ -40,6 +40,7 @@ public:
 
     // Persisted into the world save on exit.
     glm::vec3 Position() const { return m_position; } // feet center
+    bool Grounded() const { return m_grounded; } // vanilla dig-speed penalty input
     float Yaw() const { return m_yaw; }
     float Pitch() const { return m_pitch; }
 

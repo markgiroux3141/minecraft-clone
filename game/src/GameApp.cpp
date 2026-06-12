@@ -324,6 +324,18 @@ void GameApp::OnTick(double dt) {
     if (m_world && (m_state == State::Playing || m_state == State::Inventory)) {
         m_player.Tick(*m_world, dt, m_state == State::Playing);
         m_world->Tick(); // scheduled block updates (falling sand, water flow)
+
+        // Vacuum nearby drops: the player AABB grown by vanilla's pickup
+        // reach (1.0, 0.5, 1.0); whatever the bag can't hold stays put.
+        const glm::vec3 feet = m_player.Position();
+        const glm::vec3 reach{Player::kHalfWidth + 1.0f, 0.5f, Player::kHalfWidth + 1.0f};
+        m_world->PickupItems(feet - reach,
+                             feet + glm::vec3{0.0f, Player::kHeight, 0.0f} + reach,
+                             [&](vc::BlockId id, int count) {
+                                 const vc::ItemStack leftover = m_inventory.Add({id, count});
+                                 return count - leftover.count;
+                             });
+
         m_worldTime += 1.0;
         if (m_state == State::Playing && vox::Input::IsKeyDown(vox::Key::T)) {
             m_worldTime += kTimeFastForward; // debug: watch the cycle quickly
@@ -331,6 +343,17 @@ void GameApp::OnTick(double dt) {
     }
     ++m_tickCount;
     ++m_totalTicks;
+}
+
+void GameApp::ThrowItem(vc::BlockId id, int count) {
+    if (!m_world || id == vc::blocks::Air || count <= 0) {
+        return;
+    }
+    // Vanilla dropItem: from just below the eye, 0.3 b/tick (6 b/s) along
+    // the look; 40-tick pickup delay so it isn't vacuumed straight back.
+    const glm::vec3 dir = m_camera.Forward();
+    const glm::vec3 origin = m_camera.Position() + glm::vec3{0.0f, -0.3f, 0.0f} + dir * 0.3f;
+    m_world->SpawnItem(origin, dir * 6.0f, id, count, 40);
 }
 
 void GameApp::SetInventoryOpen(bool open) {
@@ -342,14 +365,15 @@ void GameApp::SetInventoryOpen(bool open) {
         m_state = State::Inventory;
         GetWindow().SetCursorCaptured(false);
         m_target.reset();
+        m_digCell.reset();
+        m_digProgress = 0.0f;
         return;
     }
-    // Whatever is still on the cursor goes back to the bag; with a full
-    // inventory it's gone (vanilla would drop it — item entities are M18).
+    // Whatever is still on the cursor goes back to the bag; if the bag is
+    // full, the leftover is thrown at the player's feet (M18).
     const vc::ItemStack leftover = m_inventory.Add(m_carried);
     if (!leftover.Empty()) {
-        GAME_INFO("Inventory full: discarded {} x{}",
-                  vc::BlockRegistry::Get().Def(leftover.id).name, leftover.count);
+        ThrowItem(leftover.id, leftover.count);
     }
     m_carried = {};
     m_state = State::Playing;
@@ -370,6 +394,8 @@ void GameApp::SetPaused(bool paused) {
     GetWindow().SetCursorCaptured(!paused);
     if (paused) {
         m_target.reset();
+        m_digCell.reset();
+        m_digProgress = 0.0f;
     } else {
         // Buttons held through the resume (e.g. the click that hit Resume)
         // must be re-pressed before they break or place anything.
@@ -409,19 +435,79 @@ void GameApp::HandleInput(double frameDt) {
     m_placeCooldown = std::max(0.0, m_placeCooldown - frameDt);
 
     const bool breakDown = vox::Input::IsMouseButtonDown(vox::MouseButton::Left);
-    if (breakDown && m_target && (!m_breakWasDown || m_breakCooldown == 0.0)) {
+    if (m_player.GetMode() == Player::Mode::Fly) {
+        // Creative-style (decided with the user): fly mode pops blocks
+        // instantly and drops nothing — the palette is the source there.
+        if (breakDown && m_target && (!m_breakWasDown || m_breakCooldown == 0.0)) {
+            const vc::BlockId targetId =
+                m_world->GetBlock(m_target->block.x, m_target->block.y, m_target->block.z);
+            if (!vc::BlockRegistry::Get().Def(targetId).unbreakable) {
+                m_world->SetBlock(m_target->block, vc::blocks::Air);
+            }
+            m_breakCooldown = kEditRepeatDelay;
+        }
+        m_digCell.reset();
+        m_digProgress = 0.0f;
+    } else if (breakDown && m_target) {
+        // Survival dig (vanilla PlayerControllerMP.onPlayerDamageBlock):
+        // damage accrues at digSpeed / hardness / 30 per tick — bare-hand
+        // digSpeed 1, x1/5 with the head underwater, x1/5 airborne. The
+        // shared cooldown doubles as the 5-tick post-break hit delay.
         const vc::BlockId targetId =
             m_world->GetBlock(m_target->block.x, m_target->block.y, m_target->block.z);
-        if (!vc::BlockRegistry::Get().Def(targetId).unbreakable) {
-            m_world->SetBlock(m_target->block, vc::blocks::Air);
-            // Instant pickup, the M17 stopgap for item-entity drops (M18).
-            // Leftover (full inventory) is simply lost, like vanilla's
-            // expired drops. No drop tables yet: blocks yield themselves.
-            m_inventory.Add({targetId, 1});
+        const vc::BlockDef& def = vc::BlockRegistry::Get().Def(targetId);
+        if (def.unbreakable || targetId == vc::blocks::Air) {
+            m_digCell.reset();
+            m_digProgress = 0.0f;
+        } else {
+            if (!m_digCell || *m_digCell != m_target->block) {
+                m_digCell = m_target->block;
+                m_digProgress = 0.0f;
+            }
+            if (m_breakCooldown == 0.0) {
+                if (def.hardness <= 0.0f) {
+                    m_digProgress = 1.0f; // plants: instant
+                } else {
+                    float digSpeed = 1.0f;
+                    if (EyeInWater()) {
+                        digSpeed *= 0.2f;
+                    }
+                    if (!m_player.Grounded()) {
+                        digSpeed *= 0.2f;
+                    }
+                    // Per-second form of the per-tick formula (x20 TPS).
+                    m_digProgress +=
+                        static_cast<float>(frameDt) * digSpeed / (def.hardness * 1.5f);
+                }
+                if (m_digProgress >= 1.0f) {
+                    m_world->SetBlock(m_target->block, vc::blocks::Air);
+                    m_world->SpawnBlockDrop(m_target->block, def.ResolveDrop(targetId), 1);
+                    m_digCell.reset();
+                    m_digProgress = 0.0f;
+                    m_breakCooldown = kEditRepeatDelay; // vanilla blockHitDelay (5 ticks)
+                }
+            }
         }
-        m_breakCooldown = kEditRepeatDelay;
+    } else {
+        m_digCell.reset();
+        m_digProgress = 0.0f;
     }
     m_breakWasDown = breakDown;
+
+    // Q tosses one item from the hand (press, then repeat while held).
+    m_dropCooldown = std::max(0.0, m_dropCooldown - frameDt);
+    const bool dropKey = vox::Input::IsKeyDown(vox::Key::Q);
+    if (dropKey && (!m_dropKeyWasDown || m_dropCooldown == 0.0)) {
+        vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
+        if (!hand.Empty()) {
+            ThrowItem(hand.id, 1);
+            if (--hand.count <= 0) {
+                hand = {};
+            }
+            m_dropCooldown = kEditRepeatDelay;
+        }
+    }
+    m_dropKeyWasDown = dropKey;
 
     const bool placeDown = vox::Input::IsMouseButtonDown(vox::MouseButton::Right);
     if (placeDown && m_target && (!m_placeWasDown || m_placeCooldown == 0.0)) {
@@ -503,8 +589,12 @@ void GameApp::DrawUi() {
         if (m_state == State::Inventory) {
             // Vanilla's darkened-world backdrop behind the container GUI.
             m_ui->DrawRect({0.0f, 0.0f}, screen, {0.06f, 0.06f, 0.06f, 0.75f});
+            vc::ItemStack thrown;
             vc::InventoryScreen::Draw(*m_ui, screen, mouse, clicked, rightClicked, m_inventory,
-                                      m_carried, m_guiTextures);
+                                      m_carried, thrown, m_guiTextures);
+            if (!thrown.Empty()) {
+                ThrowItem(thrown.id, thrown.count);
+            }
         } else if (m_state == State::Paused) {
             const auto action = vc::PauseMenu::Draw(*m_ui, screen, mouse, clicked, m_guiTextures);
             if (action == vc::PauseMenu::Action::Resume) {
@@ -632,10 +722,15 @@ void GameApp::OnRender(double alpha, double frameDt) {
                                       m_drawItems, m_drawItemsTransparent);
         m_world->Meshes().Draw(m_drawItems);
 
-        // Falling-block entities: opaque, so before the water pass (which
-        // expects the chunk shader bound again afterwards).
+        // Entity cubes — falling blocks, item drops, and the dig crack
+        // overlay share one shader and the unit-cube VAO. Opaque (alpha-
+        // tested), so before the water pass (which expects the chunk
+        // shader bound again afterwards).
         const auto& fallingBlocks = m_world->FallingBlocks();
-        if (!fallingBlocks.empty()) {
+        const auto& items = m_world->ItemEntities();
+        const int crackStage =
+            m_digCell ? std::min(static_cast<int>(m_digProgress * 10.0f) - 1, 9) : -1;
+        if (!fallingBlocks.empty() || !items.empty() || crackStage >= 0) {
             m_entityShader->Bind();
             m_entityShader->SetMat4("u_viewProj", viewProj);
             m_entityShader->SetInt("u_atlas", 0);
@@ -643,21 +738,11 @@ void GameApp::OnRender(double alpha, double frameDt) {
             m_entityShader->SetFloat("u_sunLight", dayNight.sunLight);
             m_entityShader->SetFloat3("u_skyTint", dayNight.skyTint);
             vox::Renderer::SetCullFace(false); // a handful of cubes; skip winding care
-            for (const auto& falling : fallingBlocks) {
-                if (!m_world->FallingBlockVisible(falling)) {
-                    continue; // mesh handover in progress (no double-draw/gap)
-                }
-                const float y = glm::mix(falling.prevY, falling.y, static_cast<float>(alpha));
-                const auto& def = vc::BlockRegistry::Get().Def(falling.id);
-                for (int face = 0; face < 6; ++face) {
-                    m_entityShader->SetFloat(std::format("u_faceLayers[{}]", face),
-                                             static_cast<float>(def.faceTiles[face]));
-                }
-                // Sample the cell AND the cell above and take the max:
-                // once the block is placed, its own (opaque) cell reads
-                // light 0 and the lingering cube would flash black.
-                const glm::ivec3 cell{falling.x, static_cast<int>(std::floor(y + 0.5f)),
-                                      falling.z};
+
+            // Sample the cell AND the cell above and take the max: a cube
+            // sitting in (or lingering over) an opaque cell reads light 0
+            // and would flash black otherwise.
+            const auto setCellLight = [&](const glm::ivec3& cell) {
                 const uint8_t here = m_world->PackedLightAt(cell);
                 const uint8_t above = m_world->PackedLightAt(cell + glm::ivec3{0, 1, 0});
                 m_entityShader->SetFloat2(
@@ -668,10 +753,60 @@ void GameApp::OnRender(double alpha, double frameDt) {
                      static_cast<float>(std::max(vc::ChunkLight::Block(here),
                                                  vc::ChunkLight::Block(above))) /
                          15.0f});
-                m_entityShader->SetFloat3("u_origin", {static_cast<float>(falling.x), y,
-                                                       static_cast<float>(falling.z)});
+            };
+            const auto setFaceLayers = [&](const std::array<uint16_t, 6>& tiles) {
+                for (int face = 0; face < 6; ++face) {
+                    m_entityShader->SetFloat(std::format("u_faceLayers[{}]", face),
+                                             static_cast<float>(tiles[static_cast<size_t>(face)]));
+                }
+            };
+
+            for (const auto& falling : fallingBlocks) {
+                if (!m_world->FallingBlockVisible(falling)) {
+                    continue; // mesh handover in progress (no double-draw/gap)
+                }
+                const float y = glm::mix(falling.prevY, falling.y, static_cast<float>(alpha));
+                setFaceLayers(vc::BlockRegistry::Get().Def(falling.id).faceTiles);
+                setCellLight({falling.x, static_cast<int>(std::floor(y + 0.5f)), falling.z});
+                m_entityShader->SetFloat3("u_center", {static_cast<float>(falling.x) + 0.5f,
+                                                       y + 0.5f,
+                                                       static_cast<float>(falling.z) + 0.5f});
+                m_entityShader->SetFloat("u_scale", 1.0f);
+                m_entityShader->SetFloat("u_yaw", 0.0f);
                 vox::Renderer::DrawIndexed(*m_entityCube);
             }
+
+            for (const auto& item : items) {
+                // Vanilla item presentation: a quarter-scale block that
+                // hovers (sin, ~3 s period) and spins (~6 s per turn).
+                const glm::vec3 pos =
+                    glm::mix(item.prevPos, item.pos, static_cast<float>(alpha));
+                const float t = static_cast<float>(item.age) + static_cast<float>(alpha);
+                const float bob = std::sin(t * 0.1f + item.phase) * 0.1f + 0.1f;
+                setFaceLayers(vc::BlockRegistry::Get().Def(item.id).faceTiles);
+                setCellLight({static_cast<int>(std::floor(pos.x)),
+                              static_cast<int>(std::floor(pos.y + 0.125f)),
+                              static_cast<int>(std::floor(pos.z))});
+                m_entityShader->SetFloat3("u_center", pos + glm::vec3{0.0f, 0.125f + bob, 0.0f});
+                m_entityShader->SetFloat("u_scale", 0.25f);
+                m_entityShader->SetFloat("u_yaw", t * 0.05f + item.phase);
+                vox::Renderer::DrawIndexed(*m_entityCube);
+            }
+
+            if (crackStage >= 0) {
+                // Crack overlay: an alpha-tested cube inflated just past
+                // the block's faces (backfaces hide behind its opaque
+                // mesh), lit from the face being dug.
+                std::array<uint16_t, 6> crackTiles;
+                crackTiles.fill(static_cast<uint16_t>(vc::blocks::kFirstCrackTile + crackStage));
+                setFaceLayers(crackTiles);
+                setCellLight(*m_digCell + (m_target ? m_target->normal : glm::ivec3{0, 1, 0}));
+                m_entityShader->SetFloat3("u_center", glm::vec3(*m_digCell) + 0.5f);
+                m_entityShader->SetFloat("u_scale", 1.004f);
+                m_entityShader->SetFloat("u_yaw", 0.0f);
+                vox::Renderer::DrawIndexed(*m_entityCube);
+            }
+
             vox::Renderer::SetCullFace(true);
             m_chunkShader->Bind();
         }
