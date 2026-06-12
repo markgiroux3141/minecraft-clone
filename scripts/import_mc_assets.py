@@ -33,6 +33,8 @@ COPIES = [
     ("textures/font/ascii.png", "fonts/ascii.png"),
     ("textures/gui/icons.png", "textures/gui/icons.png"),
     ("textures/gui/widgets.png", "textures/gui/widgets.png"),
+    # Survival inventory panel (M17): 176x166 at (0,0) in a 256x256 sheet.
+    ("textures/gui/container/inventory.png", "textures/gui/container/inventory.png"),
     # Celestial sheets: opaque with black backgrounds, drawn additively.
     ("textures/environment/sun.png", "textures/environment/sun.png"),
     ("textures/environment/moon_phases.png", "textures/environment/moon_phases.png"),

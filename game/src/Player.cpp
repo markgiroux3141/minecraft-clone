@@ -56,16 +56,16 @@ glm::vec3 Player::HorizontalWishDir() const {
     const glm::vec3 right{-forward.z, 0.0f, forward.x};
 
     glm::vec3 wish{0.0f};
-    if (vox::Input::IsKeyDown(vox::Key::W)) {
+    if (KeyDown(vox::Key::W)) {
         wish += forward;
     }
-    if (vox::Input::IsKeyDown(vox::Key::S)) {
+    if (KeyDown(vox::Key::S)) {
         wish -= forward;
     }
-    if (vox::Input::IsKeyDown(vox::Key::D)) {
+    if (KeyDown(vox::Key::D)) {
         wish += right;
     }
-    if (vox::Input::IsKeyDown(vox::Key::A)) {
+    if (KeyDown(vox::Key::A)) {
         wish -= right;
     }
     return wish == glm::vec3{0.0f} ? wish : glm::normalize(wish);
@@ -79,23 +79,28 @@ glm::vec3 Player::SwimWishDir() const {
     const glm::vec3 right{-std::sin(yawRad), 0.0f, std::cos(yawRad)};
 
     glm::vec3 wish{0.0f};
-    if (vox::Input::IsKeyDown(vox::Key::W)) {
+    if (KeyDown(vox::Key::W)) {
         wish += forward;
     }
-    if (vox::Input::IsKeyDown(vox::Key::S)) {
+    if (KeyDown(vox::Key::S)) {
         wish -= forward;
     }
-    if (vox::Input::IsKeyDown(vox::Key::D)) {
+    if (KeyDown(vox::Key::D)) {
         wish += right;
     }
-    if (vox::Input::IsKeyDown(vox::Key::A)) {
+    if (KeyDown(vox::Key::A)) {
         wish -= right;
     }
     return wish == glm::vec3{0.0f} ? wish : glm::normalize(wish);
 }
 
-void Player::Tick(const vc::World& world, double dt) {
+bool Player::KeyDown(vox::Key key) const {
+    return m_inputEnabled && vox::Input::IsKeyDown(key);
+}
+
+void Player::Tick(const vc::World& world, double dt, bool input) {
     m_prevPosition = m_position;
+    m_inputEnabled = input;
     if (m_mode == Mode::Fly) {
         TickFly(static_cast<float>(dt));
     } else {
@@ -127,7 +132,7 @@ void Player::TickWalk(const vc::World& world, float dt) {
     const bool headInWater = waterAt(m_position.x, m_position.y + kEyeHeight, m_position.z);
 
     float speed = kWalkSpeed;
-    if (vox::Input::IsKeyDown(vox::Key::LeftControl)) {
+    if (KeyDown(vox::Key::LeftControl)) {
         speed *= kSprintMultiplier;
     }
 
@@ -139,7 +144,7 @@ void Player::TickWalk(const vc::World& world, float dt) {
         const glm::vec3 wish = SwimWishDir();
         m_velocity.x = wish.x * speed;
         m_velocity.z = wish.z * speed;
-        if (vox::Input::IsKeyDown(vox::Key::Space)) {
+        if (KeyDown(vox::Key::Space)) {
             m_velocity.y = headInWater ? kSwimSpeed : kBreachSpeed;
         } else if (wish.y != 0.0f) {
             m_velocity.y = wish.y * speed;
@@ -151,7 +156,7 @@ void Player::TickWalk(const vc::World& world, float dt) {
         m_velocity.x = wish.x * speed;
         m_velocity.z = wish.z * speed;
         m_velocity.y = std::max(m_velocity.y - kGravity * dt, -kTerminalSpeed);
-        if (m_grounded && vox::Input::IsKeyDown(vox::Key::Space)) {
+        if (m_grounded && KeyDown(vox::Key::Space)) {
             m_velocity.y = kJumpSpeed;
         }
     }
@@ -164,14 +169,14 @@ void Player::TickWalk(const vc::World& world, float dt) {
 
 void Player::TickFly(float dt) {
     glm::vec3 velocity = HorizontalWishDir();
-    if (vox::Input::IsKeyDown(vox::Key::Space)) {
+    if (KeyDown(vox::Key::Space)) {
         velocity.y += 1.0f;
     }
-    if (vox::Input::IsKeyDown(vox::Key::LeftShift)) {
+    if (KeyDown(vox::Key::LeftShift)) {
         velocity.y -= 1.0f;
     }
     float speed = kFlySpeed;
-    if (vox::Input::IsKeyDown(vox::Key::LeftControl)) {
+    if (KeyDown(vox::Key::LeftControl)) {
         speed *= kFlyBoostMultiplier;
     }
     m_position += velocity * speed * dt;

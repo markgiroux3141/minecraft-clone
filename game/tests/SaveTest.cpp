@@ -89,8 +89,10 @@ int main() {
 
         Check(!save.GetPlayerState().has_value(), "pre-player-state manifest reads as absent");
         Check(!save.GetWorldTime().has_value(), "pre-time manifest reads as absent");
+        Check(!save.GetInventory().has_value(), "pre-inventory manifest reads as absent");
         save.SetWorldTime(13337);
         save.SetPlayerState({{1234.5f, 70.25f, -8.125f}, 123.5f, -45.0f, true});
+        save.SetInventory({{0, 1, 64}, {8, 9, 1}, {35, 20, 17}});
     }
     {
         vc::WorldSave save(dir, 7);
@@ -100,8 +102,21 @@ int main() {
                   player->yaw == 123.5f && player->pitch == -45.0f && player->fly,
               "player state round-trips exactly");
         Check(save.GetWorldTime() == 13337, "world time round-trips");
+        const auto& inv = save.GetInventory();
+        Check(inv.has_value() && inv->size() == 3 && (*inv)[0].slot == 0 && (*inv)[0].id == 1 &&
+                  (*inv)[0].count == 64 && (*inv)[1].slot == 8 && (*inv)[1].id == 9 &&
+                  (*inv)[1].count == 1 && (*inv)[2].slot == 35 && (*inv)[2].id == 20 &&
+                  (*inv)[2].count == 17,
+              "inventory round-trips exactly");
         Check(save.Seed() == 42, "seed survives the manifest rewrite");
         Check(save.SavedChunkCount() == 4, "chunks survive the manifest rewrite");
+        save.SetInventory({});
+    }
+    {
+        vc::WorldSave save(dir, 7);
+        const auto& inv = save.GetInventory();
+        Check(inv.has_value() && inv->empty(),
+              "empty inventory reads back as present-but-empty (not absent)");
     }
 
     std::filesystem::remove_all(dir);

@@ -1,11 +1,15 @@
 add_executable(game
     src/GameApp.cpp
     src/GameApp.h
+    src/Inventory.cpp
+    src/Inventory.h
     src/Main.cpp
     src/Player.cpp
     src/Player.h
     src/ui/Hud.cpp
     src/ui/Hud.h
+    src/ui/InventoryScreen.cpp
+    src/ui/InventoryScreen.h
     src/ui/PauseMenu.cpp
     src/ui/PauseMenu.h
     src/ui/TitleScreen.cpp

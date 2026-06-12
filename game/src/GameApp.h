@@ -14,6 +14,7 @@
 #include "vox/renderer/UiRenderer.h"
 #include "vox/renderer/VertexArray.h"
 
+#include "Inventory.h"
 #include "Player.h"
 #include "ui/Widgets.h"
 #include "world/World.h"
@@ -31,10 +32,12 @@ protected:
 
 private:
     // Title/world-select (no world, free cursor), captured-cursor gameplay,
-    // or the pause menu over a live world (free cursor).
-    enum class State : uint8_t { Title, Playing, Paused };
+    // the pause menu (free cursor, sim frozen), or the inventory screen
+    // (free cursor, world keeps ticking, player physics run input-less).
+    enum class State : uint8_t { Title, Playing, Paused, Inventory };
 
     void SetPaused(bool paused);
+    void SetInventoryOpen(bool open);
     void RefreshWorldList();
     // Loads (or creates) saves/<name>; defaultSeed only matters for a brand
     // new save — an existing manifest's seed wins.
@@ -80,9 +83,11 @@ private:
     // 2D overlay (crosshair, hotbar; menus from M10 stage 2).
     std::unique_ptr<vox::UiRenderer> m_ui;
 
-    // Hotbar: keys 1..N select into this list (filled after block registration).
-    std::array<vc::BlockId, 9> m_hotbar{}; // 9th stays Air (MC bar is 9 wide)
-    vc::GuiTextures m_guiTextures;         // null members = placeholder look
+    // Player items (M17): hotbar = inventory slots 0..8, keys 1..9 select;
+    // m_carried rides the mouse while the inventory screen is open.
+    vc::Inventory m_inventory;
+    vc::ItemStack m_carried;
+    vc::GuiTextures m_guiTextures; // null members = placeholder look
     size_t m_hotbarSlot = 0;
 
     // Occlusion culling (cave culling) is on by default; O toggles it for
@@ -97,7 +102,9 @@ private:
     bool m_modeKeyWasDown = false;
     bool m_occlusionKeyWasDown = false;
     bool m_escapeWasDown = false;
+    bool m_inventoryKeyWasDown = false;
     bool m_clickWasDown = false; // menu clicks (break/place track separately)
+    bool m_rightClickWasDown = false;
     bool m_breakWasDown = false;
     bool m_placeWasDown = false;
     double m_breakCooldown = 0.0;

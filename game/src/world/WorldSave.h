@@ -19,8 +19,9 @@ namespace vc {
 //
 // Layout (all fields little-endian):
 //   <dir>/level.dat           text manifest: save format version + seed,
-//                             plus an optional "player x y z yaw pitch fly"
-//                             line (absent in pre-M10 saves)
+//                             plus optional tagged lines in any order:
+//                             "player x y z yaw pitch fly" (M10), "time t"
+//                             (M11), "inventory n {slot id count}*n" (M17)
 //   <dir>/r.<rx>.<rz>.vxr     region file covering 32x32 chunk columns:
 //     uint32 magic "VXR1", uint32 chunkCount,
 //     chunkCount x { int32 cx, cy, cz; uint32 blobSize },
@@ -61,6 +62,19 @@ public:
     // in saves that predate it.
     const std::optional<int64_t>& GetWorldTime() const { return m_worldTime; }
     void SetWorldTime(int64_t ticks);
+
+    // Player inventory (M17), also in the manifest: non-empty slots only,
+    // one "inventory <n> <slot> <id> <count>..." line. Absent in saves
+    // that predate it (the game grants the legacy starter hotbar); an
+    // empty inventory persists as "inventory 0".
+    struct InventorySlot {
+        int slot = 0;
+        uint16_t id = 0;
+        int count = 0;
+    };
+    const std::optional<std::vector<InventorySlot>>& GetInventory() const { return m_inventory; }
+    // Rewrites the manifest immediately, like SetPlayerState (quit-path).
+    void SetInventory(std::vector<InventorySlot> slots);
 
     // Null when the chunk was never saved. Invalidated by the next Put.
     const std::vector<uint8_t>* FindBlob(const glm::ivec3& chunkCoord) const;
@@ -105,6 +119,7 @@ private:
     int m_seed = 0;
     std::optional<PlayerState> m_player;
     std::optional<int64_t> m_worldTime;
+    std::optional<std::vector<InventorySlot>> m_inventory;
     std::unordered_map<glm::ivec2, RegionChunks, IVec2Hash> m_regions;
     std::unordered_set<glm::ivec2, IVec2Hash> m_dirtyRegions;
     size_t m_count = 0;

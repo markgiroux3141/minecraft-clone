@@ -114,9 +114,21 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   biome-scattered, raycast-targetable, crushed by water/sand, popped by
   support ticks), and tree species (birch in forests, conical spruce in
   snow and on alpine caps, 1-3-tall cactus columns on desert sand).
-- **M17 — TBD**: candidates: inventory UI, audio engine, animated
-  water, stars, world-list scrolling, settings screen, vanilla's 14/16
-  cactus inset.
+- **M17 — Survival I: items & inventory** ✅: ItemStack/36-slot
+  Inventory model behind the hotbar (counts on the HUD, placing
+  consumes, breaking instant-picks-up as the M18 stopgap), inventory
+  persistence as a level.dat manifest line, and the E-key inventory
+  screen — vanilla's 176x166 container panel (slot grid from
+  ContainerPlayer) plus a creative-style block palette, with vanilla
+  PICKUP mouse rules (left whole-stack/swap/merge, right half /
+  place-one).
+- **M18 — Survival II: mining feel** (next): per-block hardness +
+  hold-to-break crack overlays, block drops as item entities, pickup.
+- **M19 — Survival III: crafting**: recipe registry, 2x2 + 3x3 grids,
+  tools as items.
+- **Backlog**: deeper world (kWorldHeightChunks 4 → 8), audio engine,
+  animated water, lava, stars, world-list scrolling, settings screen,
+  vanilla's 14/16 cactus inset.
 
 Each milestone lands as a vertical slice that runs; no big-bang integration.
 

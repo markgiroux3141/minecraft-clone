@@ -51,4 +51,23 @@ bool UiButton(vox::UiRenderer& ui, float s, glm::vec2 pos, glm::vec2 size, std::
     return hover && clicked;
 }
 
+void DrawItemStack(vox::UiRenderer& ui, glm::vec2 pos, float s, const ItemStack& stack) {
+    if (stack.Empty()) {
+        return;
+    }
+    // Side face: for grass that's the fringe tile, more recognizable than
+    // plain green from the top.
+    const uint16_t layer =
+        BlockRegistry::Get().Def(stack.id).faceTiles[static_cast<size_t>(BlockFace::PosX)];
+    ui.DrawAtlasTile(pos, glm::vec2(16.0f * s), layer);
+    if (stack.count > 1) {
+        // Vanilla anchors the count's bottom-right one pixel proud of the
+        // icon (right edge x+17, bottom y+17 with the 8px font).
+        const std::string text = std::to_string(stack.count);
+        const float textScale = UiTextScale(ui, s);
+        const glm::vec2 size = ui.MeasureText(text, textScale);
+        ShadowedText(ui, glm::floor(pos + glm::vec2(17.0f * s) - size), text, textScale);
+    }
+}
+
 } // namespace vc

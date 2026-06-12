@@ -5,6 +5,8 @@
 
 #include <glm/glm.hpp>
 
+#include "Inventory.h"
+
 namespace vox {
 class Texture2D;
 class UiRenderer;
@@ -19,6 +21,7 @@ namespace vc {
 struct GuiTextures {
     std::shared_ptr<vox::Texture2D> icons;   // gui/icons.png — crosshair
     std::shared_ptr<vox::Texture2D> widgets; // gui/widgets.png — hotbar, buttons
+    std::shared_ptr<vox::Texture2D> inventory; // gui/container/inventory.png — M17 panel
 };
 
 inline constexpr glm::vec4 kUiText{1.0f, 1.0f, 1.0f, 0.95f};
@@ -37,5 +40,10 @@ void ShadowedText(vox::UiRenderer& ui, glm::vec2 pos, std::string_view text, flo
 bool UiButton(vox::UiRenderer& ui, float s, glm::vec2 pos, glm::vec2 size, std::string_view label,
               glm::vec2 mouse, bool clicked,
               const std::shared_ptr<vox::Texture2D>& widgets = nullptr);
+
+// A 16x16-at-scale item icon (the block's side-face tile) with the stack
+// count in the bottom-right corner (drawn only above 1, vanilla style).
+// pos is the icon's top-left; nothing drawn for an empty stack.
+void DrawItemStack(vox::UiRenderer& ui, glm::vec2 pos, float s, const ItemStack& stack);
 
 } // namespace vc

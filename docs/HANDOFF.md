@@ -1,10 +1,9 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-12, end of M16 (flora & decoration + sandstone +
-bedrock addenda — USER-VERIFIED in-game: "everything looks really
-good"; the M15 topology got implicitly covered by the same flights).
-M17 is DECIDED: the survival arc, starting with items & inventory —
-see the M17 section and start there. Read alongside `ARCHITECTURE.md`
+Updated: 2026-06-12, end of M17 (Survival I: items & inventory —
+CODE COMPLETE, builds clean, savetest passes; AWAITING USER
+VERIFICATION in-game, see the M17 section for what to test). M18
+(mining feel) is next once verified. Read alongside `ARCHITECTURE.md`
 (layering rules, roadmap) and `CLAUDE.md` (build commands,
 conventions).
 
@@ -41,8 +40,11 @@ Starts on the title screen (cursor free): click a world / New World /
 Quit. In game the cursor is captured: WASD move, mouse look, Space jump
 (walk) or rise (fly), LeftShift sink (fly), LeftControl sprint/boost,
 F toggles walk/fly, O toggles occlusion culling (debug), T fast-forwards
-world time (debug), LMB break, RMB place, 1..9 hotbar (stone/dirt/grass/
-glowstone/sand/log/leaves/water/empty hand). In water: W swims toward the look
+world time (debug), LMB break (picks the block up), RMB place (consumes
+one), 1..9 select the hotbar slot, E opens/closes the inventory screen
+(slots + a creative block palette; new worlds start with the legacy kit:
+stone/dirt/grass/glowstone/sand/log/leaves/water x64, slot 9 empty).
+In water: W swims toward the look
 direction, Space swims up (breach kick at the surface). Esc pauses
 (Resume / Save & Quit to Title) — quitting the app is the title screen's
 Quit button or the window X. Default spawn (8.5, 48, 8.5); a world with
@@ -583,21 +585,77 @@ unedited chunks regenerate with new rules; test in a NEW world.
   sand/cactus), and the trunk/leaf checks are generic over all three
   log/leaf species.
 
-## Next: M17 — Survival I: items & inventory (DECIDED with the user)
+## M17 — Survival I: items & inventory (how it works)
+
+CODE COMPLETE 2026-06-12, awaiting user verification. Item economy was
+DECIDED with the user: creative palette in the inventory screen +
+placing consumes counts + breaking adds the block straight to the
+inventory (explicit stopgap that M18's item-entity drops replace).
+
+- Data model (`game/src/Inventory.h/.cpp`): `ItemStack {BlockId, count}`
+  (max 64), `Inventory` = 36 slots in vanilla InventoryPlayer order —
+  0..8 hotbar (keys 1..9; `Hotbar()` span feeds the HUD), 9..35 the 9x3
+  grid. `Add()` merges into matching stacks then first empty slot
+  (hotbar first) and returns the leftover. An empty slot IS the empty
+  hand — the old "slot 9 = hand" convention survives via the starter
+  kit just leaving it empty.
+- Persistence: one manifest line, `inventory <n> {slot id count}*n`
+  (non-empty slots only) — `WorldSave::Get/SetInventory`, same
+  immediate-rewrite pattern as player state. ABSENT line = pre-M17 save
+  → EnterWorld grants the legacy starter kit (old hotbar x64);
+  `inventory 0` = genuinely empty. savetest covers round-trip + the
+  empty-vs-absent distinction. PersistPlayerState merges any carried
+  stack back first (window-X while the screen is open is the only quit
+  path with one in flight).
+- Screen (`game/src/ui/InventoryScreen.h/.cpp`): immediate-mode like
+  the menus; GameApp owns inventory/carried/state. Vanilla 176x166
+  panel (gui/container/inventory.png imported via COPIES; procedural
+  fallback otherwise), slot grid straight from ContainerPlayer: main
+  (8+c*18, 84+r*18), hotbar y=142. Armor/crafting regions are inert
+  art until M19. Above it a procedural "Blocks" palette panel lists
+  every block except air + the 7 internal flow ids: left-click grabs a
+  64-stack onto the cursor (replacing it), right-click adds one.
+  Slot clicks follow vanilla PICKUP: left = pick/place/swap/merge,
+  right = pick larger half / place one / swap on mismatch. Clicking
+  outside both panels DISCARDS the carried stack (logged; vanilla
+  would throw — needs M18 item entities). Hover = white highlight +
+  name tooltip (suppressed while carrying).
+- GameApp: `State::Inventory` — cursor free, world KEEPS TICKING
+  (vanilla: block updates run, day advances), player physics run with
+  input ignored (`Player::Tick(world, dt, input)` gates all key reads
+  through `KeyDown()`; you keep falling/floating). E opens (Playing
+  only) / closes; Esc closes too (pause is reachable only after
+  closing). Closing returns the carried stack via Add (overflow logged
+  + discarded) and re-arms the break/place press guards like unpause.
+- Economy in HandleInput: place reads the selected hotbar
+  ItemStack, decrements (slot empties to {}); break adds
+  {brokenId, 1} via Add — no drop tables, blocks yield themselves
+  (grass gives grass, tall grass gives tall grass; M18 fixes), full
+  inventory loses the block silently.
+- HUD: `DrawItemStack` (ui/Widgets) is the shared icon+count drawer
+  (side-face tile; count >1 bottom-right at vanilla's x+17/y+17
+  anchor); hotbar takes `span<const ItemStack>` now.
+- Known M17 limits (fine for now): no hotbar mouse-wheel scroll (engine
+  Input has no scroll yet), no number-key slot swap while hovering, no
+  shift-click quick-move, water is placeable like any block (bucket is
+  far future), bedrock sits in the palette (creative-ish).
+
+What the user should test: E in game → screen layout at their
+resolution; drag/merge/split stacks (left/right click); palette grab;
+counts on the hotbar; place drains to 0 and the slot empties; breaking
+refills; 1..9 selection; E/Esc close; falling keeps happening with the
+screen open; quit + re-enter world → inventory restored; an OLD world
+still gets the legacy kit and plays as before.
+
+## Next: M18 — Survival II: mining feel (then M19)
 
 The survival arc is the agreed plan (user, 2026-06-12: "let's stick to
-this plan") — three milestones, in dependency order. M17 is the first;
-M18/M19 follow unless the user redirects:
-- M17, Survival I — items & inventory: an ItemStack/slot data model
-  behind the hotbar (counts, persistence in level.dat), the inventory
-  screen (import gui/container/inventory.png — the import script's
-  COPIES list is the pattern; UiRenderer::DrawImage is ready), mouse
-  slot interaction. Unlocks plants/new blocks in the hotbar (slots are
-  full today).
+this plan"):
 - M18, Survival II — mining feel: per-block hardness + hold-to-break
   progress (vanilla destroy_stage_0..9 crack overlays exist in the
   1.12 assets), block drops as pickup-able item entities (reuse the
-  FallingBlock render path), pickup into the inventory.
+  FallingBlock render path), pickup into the inventory — replaces
+  M17's instant-pickup stopgap and outside-click discard.
 - M19, Survival III — crafting: recipe registry, 2x2 player grid +
   crafting table 3x3 (gui/container/crafting_table.png), tools as
   items (tool speed multipliers hook back into M18's hardness).

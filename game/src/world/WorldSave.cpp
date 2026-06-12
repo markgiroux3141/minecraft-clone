@@ -118,6 +118,19 @@ void WorldSave::ReadManifest(int defaultSeed) {
                 if (in >> ticks) {
                     m_worldTime = ticks;
                 }
+            } else if (tag == "inventory") {
+                size_t n = 0;
+                if (in >> n) {
+                    std::vector<InventorySlot> slots;
+                    slots.reserve(n);
+                    InventorySlot s;
+                    while (slots.size() < n && in >> s.slot >> s.id >> s.count) {
+                        slots.push_back(s);
+                    }
+                    if (slots.size() == n) {
+                        m_inventory = std::move(slots);
+                    }
+                }
             } else {
                 break;
             }
@@ -138,6 +151,13 @@ void WorldSave::WriteManifest() const {
             << m_player->position.y << ' ' << m_player->position.z << ' ' << m_player->yaw << ' '
             << m_player->pitch << ' ' << (m_player->fly ? 1 : 0) << '\n';
     }
+    if (m_inventory) {
+        out << "inventory " << m_inventory->size();
+        for (const InventorySlot& s : *m_inventory) {
+            out << ' ' << s.slot << ' ' << s.id << ' ' << s.count;
+        }
+        out << '\n';
+    }
 }
 
 void WorldSave::SetPlayerState(const PlayerState& state) {
@@ -147,6 +167,11 @@ void WorldSave::SetPlayerState(const PlayerState& state) {
 
 void WorldSave::SetWorldTime(int64_t ticks) {
     m_worldTime = ticks;
+    WriteManifest();
+}
+
+void WorldSave::SetInventory(std::vector<InventorySlot> slots) {
+    m_inventory = std::move(slots);
     WriteManifest();
 }
 

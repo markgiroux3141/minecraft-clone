@@ -17,6 +17,7 @@
 #include "vox/renderer/Texture.h"
 
 #include "ui/Hud.h"
+#include "ui/InventoryScreen.h"
 #include "ui/PauseMenu.h"
 #include "ui/TitleScreen.h"
 #include "world/Block.h"
@@ -106,8 +107,6 @@ void GameApp::OnInit() {
     vox::Renderer::SetClearColor(0.45f, 0.70f, 1.00f); // placeholder sky
 
     vc::blocks::RegisterDefaults();
-    m_hotbar = {vc::blocks::Stone, vc::blocks::Dirt, vc::blocks::Grass, vc::blocks::Glowstone,
-                vc::blocks::Sand,  vc::blocks::Log,  vc::blocks::Leaves, vc::blocks::Water};
 
     m_chunkShader = vox::Shader::FromFiles("shaders/chunk.vert", "shaders/chunk.frag");
     m_blockTextures =
@@ -128,6 +127,11 @@ void GameApp::OnInit() {
     }
     if (std::filesystem::exists(vox::assets::Resolve("mc/textures/gui/widgets.png"))) {
         m_guiTextures.widgets = vox::Texture2D::FromFile("mc/textures/gui/widgets.png");
+    }
+    if (std::filesystem::exists(
+            vox::assets::Resolve("mc/textures/gui/container/inventory.png"))) {
+        m_guiTextures.inventory =
+            vox::Texture2D::FromFile("mc/textures/gui/container/inventory.png");
     }
 
     m_skyShader = vox::Shader::FromFiles("shaders/sky.vert", "shaders/sky.frag");
@@ -241,6 +245,29 @@ void GameApp::EnterWorld(const std::string& name, int defaultSeed) {
     m_worldTime =
         static_cast<double>(m_world->SaveStore().GetWorldTime().value_or(kNewWorldTime));
 
+    m_inventory.Clear();
+    m_carried = {};
+    m_hotbarSlot = 0;
+    if (const auto& saved = m_world->SaveStore().GetInventory()) {
+        const auto& registry = vc::BlockRegistry::Get();
+        for (const auto& s : *saved) {
+            if (s.slot >= 0 && static_cast<size_t>(s.slot) < vc::Inventory::kSize &&
+                s.id < registry.Count() && s.count > 0) {
+                m_inventory.Slot(static_cast<size_t>(s.slot)) = {
+                    s.id, std::min(s.count, vc::kMaxStackSize)};
+            }
+        }
+    } else {
+        // New world or pre-M17 save: the legacy hotbar as a starter kit
+        // (slot 9 stays empty — the old empty-hand convention).
+        const vc::BlockId kit[] = {vc::blocks::Stone, vc::blocks::Dirt,  vc::blocks::Grass,
+                                   vc::blocks::Glowstone, vc::blocks::Sand, vc::blocks::Log,
+                                   vc::blocks::Leaves, vc::blocks::Water};
+        for (size_t i = 0; i < std::size(kit); ++i) {
+            m_inventory.Slot(i) = {kit[i], vc::kMaxStackSize};
+        }
+    }
+
     m_state = State::Playing;
     m_target.reset();
     GetWindow().SetCursorCaptured(true);
@@ -277,19 +304,62 @@ void GameApp::PersistPlayerState() {
     m_world->SaveStore().SetWorldTime(static_cast<int64_t>(m_worldTime));
     m_world->SaveStore().SetPlayerState({m_player.Position(), m_player.Yaw(), m_player.Pitch(),
                                          m_player.GetMode() == Player::Mode::Fly});
+    // Merge any carried stack back first — the only quit path that can have
+    // one in flight is the window X while the inventory screen is open.
+    m_inventory.Add(m_carried);
+    m_carried = {};
+    std::vector<vc::WorldSave::InventorySlot> slots;
+    for (size_t i = 0; i < vc::Inventory::kSize; ++i) {
+        const vc::ItemStack& stack = m_inventory.Slot(i);
+        if (!stack.Empty()) {
+            slots.push_back({static_cast<int>(i), stack.id, stack.count});
+        }
+    }
+    m_world->SaveStore().SetInventory(std::move(slots));
 }
 
 void GameApp::OnTick(double dt) {
-    if (m_world && m_state == State::Playing) {
-        m_player.Tick(*m_world, dt);
+    // The inventory screen doesn't pause the world (vanilla): block updates
+    // run and the player keeps falling/floating, just without movement keys.
+    if (m_world && (m_state == State::Playing || m_state == State::Inventory)) {
+        m_player.Tick(*m_world, dt, m_state == State::Playing);
         m_world->Tick(); // scheduled block updates (falling sand, water flow)
         m_worldTime += 1.0;
-        if (vox::Input::IsKeyDown(vox::Key::T)) {
+        if (m_state == State::Playing && vox::Input::IsKeyDown(vox::Key::T)) {
             m_worldTime += kTimeFastForward; // debug: watch the cycle quickly
         }
     }
     ++m_tickCount;
     ++m_totalTicks;
+}
+
+void GameApp::SetInventoryOpen(bool open) {
+    if (!m_world || (m_state == State::Inventory) == open ||
+        (open && m_state != State::Playing)) {
+        return;
+    }
+    if (open) {
+        m_state = State::Inventory;
+        GetWindow().SetCursorCaptured(false);
+        m_target.reset();
+        return;
+    }
+    // Whatever is still on the cursor goes back to the bag; with a full
+    // inventory it's gone (vanilla would drop it — item entities are M18).
+    const vc::ItemStack leftover = m_inventory.Add(m_carried);
+    if (!leftover.Empty()) {
+        GAME_INFO("Inventory full: discarded {} x{}",
+                  vc::BlockRegistry::Get().Def(leftover.id).name, leftover.count);
+    }
+    m_carried = {};
+    m_state = State::Playing;
+    GetWindow().SetCursorCaptured(true);
+    // Same guard as unpausing: buttons held through the closing click must
+    // be re-pressed before they edit the world.
+    m_breakWasDown = true;
+    m_placeWasDown = true;
+    m_breakCooldown = kEditRepeatDelay;
+    m_placeCooldown = kEditRepeatDelay;
 }
 
 void GameApp::SetPaused(bool paused) {
@@ -326,8 +396,8 @@ void GameApp::HandleInput(double frameDt) {
     }
     m_occlusionKeyWasDown = occlusionKey;
 
-    // 1..N select the hotbar block.
-    for (size_t i = 0; i < m_hotbar.size(); ++i) {
+    // 1..9 select the hotbar slot.
+    for (size_t i = 0; i < vc::Inventory::kHotbarSize; ++i) {
         if (vox::Input::IsKeyDown(static_cast<vox::Key>(static_cast<int>(vox::Key::Num1) + i))) {
             m_hotbarSlot = i;
         }
@@ -344,6 +414,10 @@ void GameApp::HandleInput(double frameDt) {
             m_world->GetBlock(m_target->block.x, m_target->block.y, m_target->block.z);
         if (!vc::BlockRegistry::Get().Def(targetId).unbreakable) {
             m_world->SetBlock(m_target->block, vc::blocks::Air);
+            // Instant pickup, the M17 stopgap for item-entity drops (M18).
+            // Leftover (full inventory) is simply lost, like vanilla's
+            // expired drops. No drop tables yet: blocks yield themselves.
+            m_inventory.Add({targetId, 1});
         }
         m_breakCooldown = kEditRepeatDelay;
     }
@@ -352,9 +426,13 @@ void GameApp::HandleInput(double frameDt) {
     const bool placeDown = vox::Input::IsMouseButtonDown(vox::MouseButton::Right);
     if (placeDown && m_target && (!m_placeWasDown || m_placeCooldown == 0.0)) {
         const glm::ivec3 cell = m_target->block + m_target->normal;
-        if (m_hotbar[m_hotbarSlot] != vc::blocks::Air &&
-            !m_world->IsSolid(cell.x, cell.y, cell.z) && !m_player.Intersects(cell)) {
-            m_world->SetBlock(cell, m_hotbar[m_hotbarSlot]);
+        vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
+        if (!hand.Empty() && !m_world->IsSolid(cell.x, cell.y, cell.z) &&
+            !m_player.Intersects(cell)) {
+            m_world->SetBlock(cell, hand.id);
+            if (--hand.count <= 0) {
+                hand = {};
+            }
             m_placeCooldown = kEditRepeatDelay;
         }
     }
@@ -393,6 +471,9 @@ void GameApp::DrawUi() {
     const bool clickDown = vox::Input::IsMouseButtonDown(vox::MouseButton::Left);
     const bool clicked = clickDown && !m_clickWasDown;
     m_clickWasDown = clickDown;
+    const bool rightDown = vox::Input::IsMouseButtonDown(vox::MouseButton::Right);
+    const bool rightClicked = rightDown && !m_rightClickWasDown;
+    m_rightClickWasDown = rightDown;
 
     const glm::vec2 mouse = vox::Input::MousePosition();
 
@@ -418,8 +499,13 @@ void GameApp::DrawUi() {
             break;
         }
     } else {
-        vc::Hud::Draw(*m_ui, screen, m_hotbar, m_hotbarSlot, m_guiTextures);
-        if (m_state == State::Paused) {
+        vc::Hud::Draw(*m_ui, screen, m_inventory.Hotbar(), m_hotbarSlot, m_guiTextures);
+        if (m_state == State::Inventory) {
+            // Vanilla's darkened-world backdrop behind the container GUI.
+            m_ui->DrawRect({0.0f, 0.0f}, screen, {0.06f, 0.06f, 0.06f, 0.75f});
+            vc::InventoryScreen::Draw(*m_ui, screen, mouse, clicked, rightClicked, m_inventory,
+                                      m_carried, m_guiTextures);
+        } else if (m_state == State::Paused) {
             const auto action = vc::PauseMenu::Draw(*m_ui, screen, mouse, clicked, m_guiTextures);
             if (action == vc::PauseMenu::Action::Resume) {
                 SetPaused(false);
@@ -435,9 +521,20 @@ void GameApp::DrawUi() {
 void GameApp::OnRender(double alpha, double frameDt) {
     const bool escapeDown = vox::Input::IsKeyDown(vox::Key::Escape);
     if (escapeDown && !m_escapeWasDown) {
-        SetPaused(m_state == State::Playing); // no-op on the title screen
+        if (m_state == State::Inventory) {
+            SetInventoryOpen(false);
+        } else {
+            SetPaused(m_state == State::Playing); // no-op on the title screen
+        }
     }
     m_escapeWasDown = escapeDown;
+
+    // E opens/closes the inventory screen (only over a live, unpaused world).
+    const bool inventoryKey = vox::Input::IsKeyDown(vox::Key::E);
+    if (inventoryKey && !m_inventoryKeyWasDown) {
+        SetInventoryOpen(m_state == State::Playing);
+    }
+    m_inventoryKeyWasDown = inventoryKey;
 
     if (m_world) {
         const bool playing = m_state == State::Playing;
@@ -451,8 +548,11 @@ void GameApp::OnRender(double alpha, double frameDt) {
     vox::Renderer::Clear();
 
     if (m_world) {
-        const double dayFraction =
-            std::fmod((m_worldTime + (m_state == State::Playing ? alpha : 0.0)) / kDayTicks, 1.0);
+        const double dayFraction = std::fmod(
+            (m_worldTime + (m_state == State::Playing || m_state == State::Inventory ? alpha
+                                                                                     : 0.0)) /
+                kDayTicks,
+            1.0);
         const DayNight dayNight = ComputeDayNight(static_cast<float>(dayFraction));
         const glm::mat4 viewProj = m_camera.ViewProjection();
         const glm::vec3 eye = m_camera.Position();
@@ -616,7 +716,7 @@ void GameApp::OnRender(double alpha, double frameDt) {
                 m_frameCount, m_tickCount, pos.x, pos.y, pos.z, clockMinutes / 60,
                 clockMinutes % 60,
                 m_player.GetMode() == Player::Mode::Fly ? "fly" : "walk",
-                vc::BlockRegistry::Get().Def(m_hotbar[m_hotbarSlot]).name,
+                vc::BlockRegistry::Get().Def(m_inventory.Slot(m_hotbarSlot).id).name,
                 m_world->LoadedChunkCount(), m_chunksDrawn, m_chunksWithMesh,
                 m_world->PendingMeshCount(), m_world->JobsInFlight(),
                 static_cast<double>(m_trianglesLoaded) / 1e6,

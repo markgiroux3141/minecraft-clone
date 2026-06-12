@@ -4,6 +4,7 @@
 
 #include <glm/glm.hpp>
 
+#include "vox/platform/KeyCodes.h"
 #include "vox/renderer/Camera.h"
 
 namespace vc {
@@ -23,7 +24,10 @@ public:
     void Teleport(const glm::vec3& feetPos);
     void SetLook(float yawDegrees, float pitchDegrees);
 
-    void Tick(const vc::World& world, double dt);
+    // With input disabled (inventory screen open) movement keys are
+    // ignored but physics continue — you keep falling, water keeps
+    // pushing you around.
+    void Tick(const vc::World& world, double dt, bool input = true);
 
     // Moves the camera to the interpolated eye; applies mouse look unless
     // disabled (menus). While disabled the delta tracking resets, so the
@@ -49,6 +53,8 @@ public:
 private:
     void TickWalk(const vc::World& world, float dt);
     void TickFly(float dt);
+    // Input::IsKeyDown gated on this tick's input flag.
+    bool KeyDown(vox::Key key) const;
     // Move along one axis and clamp against solid blocks (axis-separated
     // AABB collision). Sets m_grounded when landing.
     void MoveAxis(const vc::World& world, int axis, float delta);
@@ -64,6 +70,7 @@ private:
     float m_yaw = -90.0f;
     float m_pitch = 0.0f;
     bool m_grounded = false;
+    bool m_inputEnabled = true; // this tick's input flag (see Tick)
     Mode m_mode = Mode::Walk;
 
     glm::vec2 m_lastMouse{0.0f};
