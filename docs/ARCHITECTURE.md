@@ -149,12 +149,17 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   ItemRenderer transform chains: 6-tick swing looped while digging,
   +-0.4-per-tick equip dip on slot change, drawn over a cleared depth
   buffer).
+- **M21 — Ores + furnace/smelting** (next, decided): coal/iron ore
+  worldgen (WorldGenMinable port, seam-deterministic), harvest tiers,
+  the furnace as the first block entity (per-block state, ticked,
+  persisted, GUI), coal fuel, iron ingots + iron tools. Details in
+  HANDOFF.md.
 - **Backlog**: deeper world (kWorldHeightChunks 4 → 8), audio engine,
-  ores + furnace/smelting (iron tier), tall-grass wheat seeds (1/8
-  chance, BlockTallGrass — pairs with farming), animated water, lava,
-  stars, world-list scrolling, settings screen, vanilla's 14/16 cactus
-  inset, 3D-extruded item sprites in hand (flat quad for now), view
-  bobbing.
+  torches, tall-grass wheat seeds (1/8 chance, BlockTallGrass — pairs
+  with farming), animated water, lava, stars, world-list scrolling,
+  settings screen, vanilla's 14/16 cactus inset, 3D-extruded item
+  sprites in hand (flat quad for now), view bobbing, block orientation
+  data (table/furnace fronts).
 - **Long-term**: native BuildCraft + IndustrialCraft systems (pipes, EU
   power network, machines) — survey, source breadcrumbs, and phased plan
   in `docs/mods/MOD_INTEGRATION.md`.
