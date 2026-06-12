@@ -134,8 +134,16 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
 - **M19 — Survival III: crafting**: recipe registry, 2x2 + 3x3 grids,
   tools as items.
 - **Backlog**: deeper world (kWorldHeightChunks 4 → 8), audio engine,
-  animated water, lava, stars, world-list scrolling, settings screen,
-  vanilla's 14/16 cactus inset.
+  block-break particles (vanilla has them for EVERY block, not just
+  glass: hit chips at the dig face + a 64-chip destroy burst textured
+  from the block — ParticleManager.addBlockHit/DestroyEffects; needs a
+  small particle system), tall-grass wheat seeds (1/8 chance,
+  BlockTallGrass — needs non-block items, so after M19's item
+  registry, ideally with farming), animated water, lava, stars,
+  world-list scrolling, settings screen, vanilla's 14/16 cactus inset.
+- **Long-term**: native BuildCraft + IndustrialCraft systems (pipes, EU
+  power network, machines) — survey, source breadcrumbs, and phased plan
+  in `docs/mods/MOD_INTEGRATION.md`.
 
 Each milestone lands as a vertical slice that runs; no big-bang integration.
 

@@ -740,10 +740,16 @@ Container/InventoryPlayer, ItemTool/ItemPickaxe.
 
 Other backlog: deeper world (kWorldHeightChunks 4 -> 8, rebase
 topology + cave start heights — discussed 2026-06-12, deferred), audio
-engine (1.12 .ogg hashed store surveyed — see M14 notes), flow-animated
-water (16x512 strip), lava (cave floors below y10 in vanilla), stars,
-world-list scrolling, settings screen, vanilla's 14/16 cactus inset +
-touch damage.
+engine (1.12 .ogg hashed store surveyed — see M14 notes), block-break
+particles (user asked 2026-06-12: vanilla gives EVERY block hit chips
+while digging + a 64-chip destroy burst textured from random
+sub-regions of the block's tile — ParticleManager.addBlockHitEffects /
+addBlockDestroyEffects; needs a small particle system in the engine),
+tall-grass wheat seeds (vanilla 1/8, BlockTallGrass.getItemDropped —
+blocked on non-block items, so post-M19, pairs with farming),
+flow-animated water (16x512 strip), lava (cave floors below y10 in
+vanilla), stars, world-list scrolling, settings screen, vanilla's
+14/16 cactus inset + touch damage.
 
 ## How to verify (UPDATED working agreement)
 
