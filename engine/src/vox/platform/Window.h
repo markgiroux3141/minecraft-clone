@@ -40,6 +40,10 @@ public:
     void SetCursorCaptured(bool captured);
     bool IsCursorCaptured() const { return m_cursorCaptured; }
 
+    // Mouse-wheel clicks accumulated since the last call (positive = up).
+    // Consume once per frame (hotbar scrolling).
+    double TakeScrollY();
+
     uint32_t Width() const { return m_config.width; }
     uint32_t Height() const { return m_config.height; }
 
@@ -53,6 +57,7 @@ private:
     WindowConfig m_config;
     ResizeCallback m_resizeCallback;
     bool m_cursorCaptured = false;
+    double m_scrollY = 0.0;
 };
 
 } // namespace vox

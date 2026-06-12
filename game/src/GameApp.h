@@ -54,7 +54,7 @@ private:
     void CreateNewWorld();
     void ExitToTitle(); // persists player state, drops the world
     void PersistPlayerState();
-    void HandleInput(double frameDt);
+    void HandleInput(double frameDt, int scroll); // scroll: wheel clicks this frame
     bool EyeInWater() const;
     void DrawTargetOutline();
     void DrawUi(); // HUD + menus; may change state (menu clicks)

@@ -75,9 +75,15 @@ std::shared_ptr<vox::VertexArray> BuildArmMesh() {
             {f.u / 64.0f, 1.0f - f.v / 64.0f},
         };
         for (int c = 0; c < 4; ++c) {
+            // Rigid 180-degree X-rotation about the box center: in our
+            // matrix setup the verbatim vanilla chain showed the teal
+            // SHOULDER cap where the fist belongs (user-spotted) — flip
+            // the whole textured box end-for-end.
+            const glm::vec3 p{f.corners[c].x, (lo.y + hi.y) - f.corners[c].y,
+                              -f.corners[c].z};
+            const glm::vec3 n{f.normal.x, -f.normal.y, -f.normal.z};
             verts.insert(verts.end(),
-                         {f.corners[c].x, f.corners[c].y, f.corners[c].z, f.normal.x,
-                          f.normal.y, f.normal.z, uvs[c].x, uvs[c].y, 0.0f});
+                         {p.x, p.y, p.z, n.x, n.y, n.z, uvs[c].x, uvs[c].y, 0.0f});
         }
         indices.insert(indices.end(),
                        {base, base + 1, base + 2, base + 2, base + 3, base});

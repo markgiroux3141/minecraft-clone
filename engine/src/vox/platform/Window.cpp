@@ -58,6 +58,9 @@ Window::Window(const WindowConfig& config) : m_config(config) {
     SetVsync(m_config.vsync);
 
     glfwSetWindowUserPointer(m_window, this);
+    glfwSetScrollCallback(m_window, [](GLFWwindow* handle, double /*x*/, double y) {
+        static_cast<Window*>(glfwGetWindowUserPointer(handle))->m_scrollY += y;
+    });
     glfwSetFramebufferSizeCallback(m_window, [](GLFWwindow* handle, int width, int height) {
         auto* self = static_cast<Window*>(glfwGetWindowUserPointer(handle));
         self->m_config.width = static_cast<uint32_t>(width);
@@ -109,6 +112,12 @@ void Window::SetCursorCaptured(bool captured) {
     if (glfwRawMouseMotionSupported()) {
         glfwSetInputMode(m_window, GLFW_RAW_MOUSE_MOTION, captured ? GLFW_TRUE : GLFW_FALSE);
     }
+}
+
+double Window::TakeScrollY() {
+    const double y = m_scrollY;
+    m_scrollY = 0.0;
+    return y;
 }
 
 void Window::SetTitle(const std::string& title) {

@@ -456,7 +456,7 @@ void GameApp::SetPaused(bool paused) {
     }
 }
 
-void GameApp::HandleInput(double frameDt) {
+void GameApp::HandleInput(double frameDt, int scroll) {
     // F toggles walk/fly.
     const bool modeKey = vox::Input::IsKeyDown(vox::Key::F);
     if (modeKey && !m_modeKeyWasDown) {
@@ -472,11 +472,17 @@ void GameApp::HandleInput(double frameDt) {
     }
     m_occlusionKeyWasDown = occlusionKey;
 
-    // 1..9 select the hotbar slot.
+    // 1..9 select the hotbar slot; the wheel cycles it (vanilla: scroll
+    // up moves left, wrapping).
     for (size_t i = 0; i < vc::Inventory::kHotbarSize; ++i) {
         if (vox::Input::IsKeyDown(static_cast<vox::Key>(static_cast<int>(vox::Key::Num1) + i))) {
             m_hotbarSlot = i;
         }
+    }
+    if (scroll != 0) {
+        constexpr int n = static_cast<int>(vc::Inventory::kHotbarSize);
+        m_hotbarSlot = static_cast<size_t>(
+            ((static_cast<int>(m_hotbarSlot) - scroll) % n + n) % n);
     }
 
     // Aim from the eye; break/place act on press, then repeat while held.
@@ -724,11 +730,15 @@ void GameApp::OnRender(double alpha, double frameDt) {
     }
     m_inventoryKeyWasDown = inventoryKey;
 
+    // Consume wheel input every frame so clicks made over menus don't
+    // burst-apply to the hotbar on resume.
+    const int scroll = static_cast<int>(GetWindow().TakeScrollY());
+
     if (m_world) {
         const bool playing = m_state == State::Playing;
         m_player.OnRender(alpha, playing);
         if (playing) {
-            HandleInput(frameDt);
+            HandleInput(frameDt, scroll);
         }
         m_world->Update(m_camera.Position());
     }

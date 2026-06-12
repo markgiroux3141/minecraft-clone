@@ -847,10 +847,22 @@ visual — the user's eyes are the test).
 - Render order recap (OnRender): sky -> celestial -> opaque terrain ->
   entity cubes/sprites + crack -> water -> PARTICLES -> outline ->
   VIEW MODEL (depth cleared) -> UI.
+- Arm orientation fix (user-spotted: "the hand looks backwards"): the
+  verbatim vanilla chain showed the teal SHOULDER cap where the fist
+  belongs in our matrix setup, so BuildArmMesh applies a rigid 180-deg
+  X-rotation about the box center (caps swap, textures ride along).
+  Diagnosed by sampling the skin: (44,16) cap is pure teal shirt,
+  (48,16) is skin — whichever cap faces the camera tells you the
+  orientation.
+- Mouse wheel (user request, same session): Window grew a GLFW scroll
+  callback + TakeScrollY() accumulator (consumed once per frame in
+  OnRender so menu scrolling can't burst-apply); scrolling cycles the
+  hotbar, vanilla direction (up = left), wrapping.
 - Known M20 limits: no view bobbing, item sprites are flat (vanilla
   extrudes them to ~1px-thick 3D), no swing on Q-throw or attack-miss
   swings (no left-click-in-air swing), arm only for the right hand, no
-  particle emission from world-side plant crushes.
+  particle emission from world-side plant crushes, no scroll in the
+  container screens (hotbar only).
 
 What the user should test (visual): bare hand visible bottom-right
 (Steve sleeve); hold dirt/stone -> mini block in hand; hold a
