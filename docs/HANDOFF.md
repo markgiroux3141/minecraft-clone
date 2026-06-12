@@ -809,9 +809,19 @@ loads its inventory intact.
 
 ## Next: M20 candidates
 
-Ores + furnace/smelting (iron tier, coal, makes durability matter) is
-the natural continuation; alternatives: block-break particles + audio
-("game feel" pair), deeper world, lava. User decides.
+- Game feel (RECOMMENDED next, user has flagged all three gaps):
+  first-person view model — held block/tool + bare arm (Steve skin is
+  in the 1.12 assets), dig swing loop synced to crack progress, click
+  swing, equip dip on slot change, optional view bobbing. Vanilla
+  reference: ItemRenderer.renderItemInFirstPerson (equippedProgress /
+  swingProgress curves, 6-tick swing), EntityRenderer (bobbing).
+  Needs a camera-space render path with a real model matrix (the
+  entity shader only has center/scale/yaw) + a depth trick so the
+  hand doesn't clip walls. Pairs with block-break particles (see
+  backlog).
+- Ores + furnace/smelting (iron tier, coal — makes durability
+  matter).
+User decides the order.
 
 Other backlog: deeper world (kWorldHeightChunks 4 -> 8, rebase
 topology + cave start heights — discussed 2026-06-12, deferred), audio

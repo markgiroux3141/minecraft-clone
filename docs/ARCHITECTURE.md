@@ -141,7 +141,10 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   gating: stone family digs /100 and drops nothing bare-handed) with
   durability (59/131 uses, vanilla bar, persisted per stack), and flat
   sprite rendering for non-block item drops.
-- **Backlog**: deeper world (kWorldHeightChunks 4 → 8), audio engine,
+- **Backlog**: first-person view model (held block/tool + bare arm,
+  dig swing + equip animations — ItemRenderer.renderItemInFirstPerson;
+  pairs with break particles as a game-feel milestone), deeper world
+  (kWorldHeightChunks 4 → 8), audio engine,
   block-break particles (vanilla has them for EVERY block, not just
   glass: hit chips at the dig face + a 64-chip destroy burst textured
   from the block — ParticleManager.addBlockHit/DestroyEffects; needs a
