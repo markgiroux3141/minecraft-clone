@@ -10,8 +10,10 @@ class VertexArray;
 // seam where a renderer abstraction (command lists, future Vulkan backend)
 // slots in; game code should never call GL directly.
 // Alpha = classic src-alpha blending (water); Additive adds onto the
-// framebuffer (sun/moon — black pixels contribute nothing).
-enum class BlendMode { None, Alpha, Additive };
+// framebuffer (sun/moon — black pixels contribute nothing); Crumble is
+// Minecraft's block-damage blend, out = 2 * src * dst — mid-gray neutral,
+// dark pixels darken, light pixels highlight.
+enum class BlendMode { None, Alpha, Additive, Crumble };
 
 class Renderer {
 public:

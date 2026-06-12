@@ -737,6 +737,7 @@ void GameApp::OnRender(double alpha, double frameDt) {
             m_entityShader->SetFloat3("u_sunDir", dayNight.lightDir);
             m_entityShader->SetFloat("u_sunLight", dayNight.sunLight);
             m_entityShader->SetFloat3("u_skyTint", dayNight.skyTint);
+            m_entityShader->SetFloat("u_unlit", 0.0f);
             vox::Renderer::SetCullFace(false); // a handful of cubes; skip winding care
 
             // Sample the cell AND the cell above and take the max: a cube
@@ -794,17 +795,23 @@ void GameApp::OnRender(double alpha, double frameDt) {
             }
 
             if (crackStage >= 0) {
-                // Crack overlay: an alpha-tested cube inflated just past
-                // the block's faces (backfaces hide behind its opaque
-                // mesh), lit from the face being dug.
+                // Crack overlay, vanilla's crumbling pass: an alpha-tested
+                // cube inflated just past the block's faces, drawn UNLIT
+                // with the 2*src*dst Crumble blend — the texture's dark
+                // pixels darken the (already lit) block, its light pixels
+                // highlight, and backfaces hide behind the opaque mesh.
                 std::array<uint16_t, 6> crackTiles;
                 crackTiles.fill(static_cast<uint16_t>(vc::blocks::kFirstCrackTile + crackStage));
                 setFaceLayers(crackTiles);
-                setCellLight(*m_digCell + (m_target ? m_target->normal : glm::ivec3{0, 1, 0}));
+                m_entityShader->SetFloat("u_unlit", 1.0f);
                 m_entityShader->SetFloat3("u_center", glm::vec3(*m_digCell) + 0.5f);
                 m_entityShader->SetFloat("u_scale", 1.004f);
                 m_entityShader->SetFloat("u_yaw", 0.0f);
+                vox::Renderer::SetBlend(vox::BlendMode::Crumble);
+                vox::Renderer::SetDepthWrite(false);
                 vox::Renderer::DrawIndexed(*m_entityCube);
+                vox::Renderer::SetBlend(vox::BlendMode::None);
+                vox::Renderer::SetDepthWrite(true);
             }
 
             vox::Renderer::SetCullFace(true);

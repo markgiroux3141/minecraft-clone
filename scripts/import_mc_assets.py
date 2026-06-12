@@ -64,9 +64,11 @@ def tinted(img: Image.Image, tint: tuple[int, int, int]) -> Image.Image:
 
 
 def crack_cutout(img: Image.Image) -> Image.Image:
-    # destroy_stage_N ships as a translucent gray wash (vanilla draws it
-    # with a multiplicative blend). We alpha-test it instead, so threshold:
-    # solid crack pixels stay, the wash becomes fully transparent.
+    # destroy_stage_N: white background at alpha ~1, gray crack pixels
+    # opaque. The game alpha-tests (vanilla's alpha test) and draws the
+    # survivors with the 2*src*dst Crumble blend (dark grays darken the
+    # block, light grays highlight). Threshold to clean 0/255 alpha so
+    # the cutout and its mips stay crisp.
     out = img.copy()
     px = out.load()
     for y in range(out.height):

@@ -92,6 +92,10 @@ void Renderer::SetBlend(BlendMode mode) {
         glEnable(GL_BLEND);
         glBlendFunc(GL_SRC_ALPHA, GL_ONE);
         break;
+    case BlendMode::Crumble:
+        glEnable(GL_BLEND);
+        glBlendFunc(GL_DST_COLOR, GL_SRC_COLOR); // out = 2 * src * dst
+        break;
     }
 }
 

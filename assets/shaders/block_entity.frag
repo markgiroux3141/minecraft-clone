@@ -8,6 +8,8 @@ uniform vec3 u_sunDir; // toward the dominant body: sun by day, moon by night
 uniform float u_sunLight;
 uniform vec3 u_skyTint;
 uniform vec2 u_light; // sky/block light sampled at the entity's cell, 0..1
+uniform float u_unlit; // 1 = raw texture (crack overlay: the framebuffer
+                       // under the crumble blend is already lit)
 
 out vec4 o_color;
 
@@ -24,5 +26,6 @@ void main() {
     vec3 skyTerm = u_skyTint * (u_light.x * u_sunLight * (0.40 + 0.60 * diffuse));
     vec3 light = max(skyTerm, vec3(1.0, 0.85, 0.62) * u_light.y);
     light = max(light, vec3(0.03));
+    light = mix(light, vec3(1.0), u_unlit);
     o_color = vec4(tex.rgb * light, 1.0);
 }
