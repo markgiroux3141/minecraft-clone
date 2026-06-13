@@ -367,15 +367,19 @@ void EmitTorchCell(ChunkMesh& mesh, const PaddedVolume& vol, int x, int y, int z
     }
 
     // Top cap: a +Y quad spanning the post's 7/16..9/16 walls (both axes
-    // inset at once — the codes are independent bits), at the flame
-    // height. The cap corner sits at (y+1) - 3/9 ≈ y + 10.7/16, vanilla's
-    // 10/16; the offset rides the Y-offset field (data1 26..29). Uses the
-    // torch's own +Y face tile (a dedicated opaque flame-top sprite, so
-    // the alpha test keeps it). One-sided, only seen from above. Corner
-    // order matches the mesher's +Y winding so backface culling keeps it.
+    // inset at once — the codes are independent bits), sitting at the
+    // flame top. The height rides the Y-offset field (data1 26..29), but
+    // it's quantized to ninths and the side-plane flame top lands at a
+    // texture-dependent cell-height (~0.59 on the MC atlas, ~0.66 on the
+    // procedural one). (y+1) - 4/9 ≈ y + 0.56 sits just BELOW both, so
+    // the cap overlaps the post with no gap — a float reads worse than a
+    // hairline overlap. Uses the torch's own +Y face tile (a dedicated
+    // opaque flame-top sprite, so the alpha test keeps it). One-sided,
+    // only seen from above; corner order matches the mesher's +Y winding
+    // so backface culling keeps it.
     const auto capLayer =
         static_cast<uint32_t>(def.faceTiles[static_cast<size_t>(BlockFace::PosY)]);
-    constexpr uint32_t kCapYOff = 3u << 26; // lower y+1 by 3/9 to the post top
+    constexpr uint32_t kCapYOff = 4u << 26; // lower y+1 by 4/9 to just under the flame top
     constexpr uint32_t kCapXIn[4] = {1, 1, 2, 2}; // +7/16, +7/16, +9/16, +9/16
     constexpr uint32_t kCapZIn[4] = {1, 2, 2, 1}; // +7/16, +9/16, +9/16, +7/16
     for (int k = 0; k < 4; ++k) {

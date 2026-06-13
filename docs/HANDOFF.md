@@ -1046,9 +1046,11 @@ just absent).
 
 Torches: craft (coal over stick -> 4), place on the ground — reads
 as a thin 3D post from every angle, with a small lit flame cap on top
-when you look down at it (added after the first cut missed it; it sits
-at ~10/16 height — easy to nudge in EmitTorchCell's kCapYOff if it
-looks off). Lights the area (14, just below glowstone) and looks right
+when you look down at it (added after the first cut missed it; first
+placement floated above the post, fixed by dropping kCapYOff to sit
+just under the flame top — the height is ninths-quantized so it can't
+land pixel-exact on the texture's flame, and biasing below avoids a
+gap). Lights the area (14, just below glowstone) and looks right
 in caves at night; held torch is a flat sprite in hand (so are flowers
 now). Can't place on the side of a wall or on another torch (no
 ground); dig out the block under one -> it pops as a drop; flowing

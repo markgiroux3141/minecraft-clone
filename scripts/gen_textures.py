@@ -411,11 +411,12 @@ def iron_ingot_sprite(x, y):
 
 def torch(x, y):
     # 2px stick up the middle with a glowing head (the mesher's inset
-    # planes show only these middle columns).
-    if 7 <= x <= 8 and 8 <= y <= 15:
+    # planes show only these middle columns). Flame top at row 6 to match
+    # the MC torch_on tile, so the mesher's top cap lines up either way.
+    if 7 <= x <= 8 and 9 <= y <= 15:
         return speckle((124, 98, 60), x, y, 62, 10)
-    if 7 <= x <= 8 and 5 <= y <= 7:
-        return (255, 222, 120) if y == 6 else (244, 168, 54)
+    if 7 <= x <= 8 and 6 <= y <= 8:
+        return (255, 222, 120) if y == 7 else (244, 168, 54)
     return (0, 0, 0, 0)
 
 
