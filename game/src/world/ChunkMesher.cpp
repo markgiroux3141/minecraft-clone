@@ -315,19 +315,21 @@ void EmitCrossCell(ChunkMesh& mesh, const PaddedVolume& vol, int x, int y, int z
     }
 }
 
-// Torches render as vanilla's template_torch sides: four one-sided
-// full-cell planes inset 7/16 and 9/16 from the cell walls (the post
-// pixels live in the texture's middle columns; the alpha test trims the
-// rest, and from any angle one X plane + one Z plane read as a 3D post).
-// The sub-block insets ride the spare packed bits (data0 28..31, decoded
-// in chunk.vert) — everything else still emits integer corners. No top
-// cap: UVs are tile-granular and the 2x2-texel cap is invisible at torch
-// scale. Lighting mirrors the cross plants: the cell's own light (the
-// BFS seeds it at the torch's emission), full-bright AO, +Y normal.
+// Torches render as vanilla's template_torch: four one-sided full-cell
+// side planes inset 7/16 and 9/16 from the cell walls (the post pixels
+// live in the texture's middle columns; the alpha test trims the rest,
+// and from any angle one X plane + one Z plane read as a 3D post), plus
+// a small top cap at the flame height (vanilla's central-post upper
+// face). The sub-block insets ride the spare packed bits (data0 28..31,
+// decoded in chunk.vert) — everything else still emits integer corners;
+// the cap's fractional height rides the per-vertex Y-offset field (the
+// same ninths field liquids use for their surface drop). Lighting
+// mirrors the cross plants: the cell's own light (the BFS seeds it at
+// the torch's emission), full-bright AO, +Y normal.
 void EmitTorchCell(ChunkMesh& mesh, const PaddedVolume& vol, int x, int y, int z) {
     const int p = PadIndex(x, y, z);
-    const auto layer =
-        static_cast<uint32_t>(BlockRegistry::Get().Def(vol.id[p]).faceTiles[0]);
+    const BlockDef& def = BlockRegistry::Get().Def(vol.id[p]);
+    const auto layer = static_cast<uint32_t>(def.faceTiles[0]);
     const auto sky = static_cast<uint32_t>(ChunkLight::Sky(vol.light[p]));
     const auto block = static_cast<uint32_t>(ChunkLight::Block(vol.light[p]));
     const uint32_t shade = 2u << 15 | 3u << 18 | sky << 20 | block << 24;
@@ -362,6 +364,28 @@ void EmitTorchCell(ChunkMesh& mesh, const PaddedVolume& vol, int x, int y, int z
                     layer << 10,
             });
         }
+    }
+
+    // Top cap: a +Y quad spanning the post's 7/16..9/16 walls (both axes
+    // inset at once — the codes are independent bits), at the flame
+    // height. The cap corner sits at (y+1) - 3/9 ≈ y + 10.7/16, vanilla's
+    // 10/16; the offset rides the Y-offset field (data1 26..29). Uses the
+    // torch's own +Y face tile (a dedicated opaque flame-top sprite, so
+    // the alpha test keeps it). One-sided, only seen from above. Corner
+    // order matches the mesher's +Y winding so backface culling keeps it.
+    const auto capLayer =
+        static_cast<uint32_t>(def.faceTiles[static_cast<size_t>(BlockFace::PosY)]);
+    constexpr uint32_t kCapYOff = 3u << 26; // lower y+1 by 3/9 to the post top
+    constexpr uint32_t kCapXIn[4] = {1, 1, 2, 2}; // +7/16, +7/16, +9/16, +9/16
+    constexpr uint32_t kCapZIn[4] = {1, 2, 2, 1}; // +7/16, +9/16, +9/16, +7/16
+    for (int k = 0; k < 4; ++k) {
+        mesh.vertices.push_back({
+            static_cast<uint32_t>(x) | static_cast<uint32_t>(y + 1) << 5 |
+                static_cast<uint32_t>(z) << 10 | shade | kCapXIn[k] << 28 |
+                kCapZIn[k] << 30,
+            static_cast<uint32_t>(cu[k]) | static_cast<uint32_t>(cv[k]) << 5 |
+                capLayer << 10 | kCapYOff,
+        });
     }
 }
 

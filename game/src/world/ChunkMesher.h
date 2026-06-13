@@ -20,10 +20,11 @@ namespace vc {
 //          BlockFace order; ao 0..3; light levels 0..15. xIn/zIn are
 //          sub-block insets added to x/z in the shader (0 = none,
 //          1 = +7/16, 2 = +9/16) — torch planes only, zero elsewhere.
-//   data1: u:5 | v:5 | layer:16 | drop:4
-//          UVs tile 0..16 across merged quads (sampler wraps). drop is
-//          the liquid surface's distance below the cell top in ninths
-//          (0..9), subtracted from y in the shader; 0 on solid faces.
+//   data1: u:5 | v:5 | layer:16 | yoff:4
+//          UVs tile 0..16 across merged quads (sampler wraps). yoff is a
+//          downward Y offset in ninths (0..9), subtracted from y in the
+//          shader; 0 on ordinary faces. Used by liquid surfaces (the
+//          drop below the cell top) and the torch top cap (post height).
 struct ChunkVertex {
     uint32_t data0;
     uint32_t data1;

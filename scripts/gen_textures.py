@@ -419,6 +419,15 @@ def torch(x, y):
     return (0, 0, 0, 0)
 
 
+def torch_flame(x, y):
+    # The torch top cap (mapped onto the small post-top quad): a hot
+    # yellow core fading to orange, fully opaque so the alpha test keeps
+    # it. Looking down at a torch shows this square.
+    if abs(x - 7.5) + abs(y - 7.5) < 4:
+        return (255, 232, 138, 255)
+    return (242, 158, 48, 255)
+
+
 # Layer index in the texture array == position in this list.
 TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top, leaves, water,
          snow, grass_side_snowed, tall_grass, dandelion, poppy, dead_bush,
@@ -435,8 +444,9 @@ TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top,
          furnace_top, glass,
          coal_sprite, iron_ingot_sprite,
          tool_sprite(IRON_HEAD, 59), tool_sprite(IRON_HEAD, 60), tool_sprite(IRON_HEAD, 61),
-         # M21 follow-up: torch (62).
-         torch]
+         # M21 follow-up: torch sides (62) + the flame-top cap tile (63,
+         # the torch block's +Y face, drawn on the small post-top quad).
+         torch, torch_flame]
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:

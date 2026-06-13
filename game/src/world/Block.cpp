@@ -282,6 +282,9 @@ void RegisterDefaults() {
     torch.replaceable = true;
     torch.hardness = 0.0f;
     torch.emission = 14;
+    // The mesher's torch top cap reads faceTiles[PosY]: a dedicated
+    // opaque flame-top sprite (tile 63), not the side post (tile 62).
+    torch.faceTiles[static_cast<size_t>(BlockFace::PosY)] = 63;
     Torch = registry.Register(std::move(torch));
 
     // M18 drop table (vanilla-ish; cross-references resolve here, after

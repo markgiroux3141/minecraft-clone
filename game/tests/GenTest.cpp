@@ -341,7 +341,10 @@ int main() {
         snapshot.skyAbove = true;
 
         const vc::ChunkMesh mesh = vc::ChunkMesher::Build(snapshot);
-        Check(mesh.vertices.size() == 16, "lone torch meshes to 4 planes");
+        // Four one-sided side planes (4 verts each) + a four-vert top cap.
+        Check(mesh.vertices.size() == 20, "lone torch meshes to 4 planes + a cap");
+        int sidePlaneVerts = 0;
+        int capVerts = 0;
         bool insetsOk = true;
         for (const auto& vertex : mesh.vertices) {
             const uint32_t x = vertex.data0 & 31u;
@@ -349,11 +352,24 @@ int main() {
             const uint32_t z = (vertex.data0 >> 10) & 31u;
             const uint32_t xIn = (vertex.data0 >> 28) & 3u;
             const uint32_t zIn = vertex.data0 >> 30;
+            const uint32_t yoff = (vertex.data1 >> 26) & 15u;
             insetsOk &= x >= 8 && x <= 9 && y >= 8 && y <= 9 && z >= 8 && z <= 9;
-            insetsOk &= (xIn == 0) != (zIn == 0); // exactly one axis inset
-            insetsOk &= xIn != 3 && zIn != 3;     // codes are 1 or 2 only
+            insetsOk &= xIn != 3 && zIn != 3; // codes are 1 or 2 only
+            if (xIn != 0 && zIn != 0) {
+                // Cap: inset on both axes, raised to the post top via yoff,
+                // and anchored to the cell's top corner (y+1 = 9).
+                ++capVerts;
+                insetsOk &= yoff > 0 && y == 9;
+            } else {
+                // Side plane: exactly one axis inset, no Y offset.
+                ++sidePlaneVerts;
+                insetsOk &= (xIn == 0) != (zIn == 0);
+                insetsOk &= yoff == 0;
+            }
         }
-        Check(insetsOk, "torch vertices carry one inset code on one axis");
+        Check(sidePlaneVerts == 16 && capVerts == 4,
+              "torch is 4 side planes + a 4-vert cap");
+        Check(insetsOk, "torch verts: side planes one-axis inset, cap both-axis + raised");
     }
 
     if (g_failures == 0) {

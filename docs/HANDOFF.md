@@ -365,8 +365,9 @@ Stage 3 — LOD shell:
   data0 = x:5|y:5|z:5|normal:3|ao:2|sky:4|block:4|xIn:2|zIn:2
   (positions are cell corners 0..16, normal indexes BlockFace order;
   xIn/zIn are the M21-torch sub-block insets — 0, +7/16, or +9/16 —
-  zero everywhere else), data1 = u:5|v:5|
-  layer:16 (UVs tile 0..16 across merged quads). Packed in EmitQuad,
+  zero everywhere else), data1 = u:5|v:5|layer:16|yoff:4 (UVs tile
+  0..16 across merged quads; yoff lowers y by N/9 — liquid surface
+  drop or torch-cap height). Packed in EmitQuad,
   decoded bitwise in chunk.vert (kNormals table); the MeshPool layout is
   two UInt attributes (VertexArray routes Int/UInt types through
   glVertexArrayAttribIFormat). gentest includes a pack/decode smoke test
@@ -970,18 +971,48 @@ near-spawn chunks you've edited keep their pre-ore stone).
   IsSolid below; GameApp refuses placement without solid ground
   (instead of place-then-pop). Raycast targets torches like cross
   plants.
-  - THE MESH (the interesting bit): vanilla's template_torch sides —
-    four ONE-SIDED full-cell planes inset 7/16 and 9/16 from the
-    cell walls (EmitTorchCell in ChunkMesher.cpp); the texture's
-    middle 2px column survives the alpha test, so any angle shows
-    one X plane + one Z plane as a 3D post. The packed vertex format
-    stores INTEGER corners only, so the insets ride the four spare
-    bits of data0 (28..31: xIn:2 | zIn:2, 0 = none / 1 = +7/16 /
-    2 = +9/16) decoded by a table add in chunk.vert — every other
-    emitter leaves them zero, so the format change is backward
-    compatible (gentest grew a torch-plane check). No top cap (UVs
-    are tile-granular; a 2x2-texel cap is invisible anyway). Own-cell
-    light, AO 3, +Y normal, regular alpha-tested stream.
+  - THE MESH (the interesting bit): vanilla's template_torch — four
+    ONE-SIDED full-cell side planes inset 7/16 and 9/16 from the cell
+    walls (EmitTorchCell in ChunkMesher.cpp), PLUS a small +Y top cap
+    at the flame height. The texture's middle 2px column survives the
+    alpha test, so any angle shows one X plane + one Z plane as a 3D
+    post. The packed vertex format stores INTEGER corners only, so
+    the insets ride the four spare bits of data0 (28..31: xIn:2 |
+    zIn:2, 0 = none / 1 = +7/16 / 2 = +9/16) decoded by a table add
+    in chunk.vert — every other emitter leaves them zero, so the
+    format change is backward compatible. The cap (added after the
+    user noticed the missing top face — vanilla's central-post upper
+    face) is inset on BOTH axes and raised to ~10/16 via the existing
+    per-vertex Y-offset field (data1 26..29 — renamed `drop` ->
+    `yoff` in the docs since liquids AND the torch cap now use it; it
+    just means "lower y by N/9"); it samples the torch block's +Y
+    face tile, a dedicated opaque flame-top sprite (atlas layer 63,
+    cropped from torch_on's flame core in the importer). Own-cell
+    light, AO 3, +Y normal, regular alpha-tested stream. gentest
+    checks 4 planes (one-axis inset) + a 4-vert cap (both-axis inset,
+    raised).
+  - WHY NOT THE "RIGHT" WAY (and when to do it): vanilla represents
+    ALL non-cube blocks (torches, and the slabs/stairs/fences/panes
+    we'll likely want) with arbitrary float positions + sub-tile UVs
+    — its DefaultVertexFormats.BLOCK is POSITION_3F + COLOR_4UB +
+    TEX_2F + TEX_2S (~28 B, no packing, no greedy merge; models bake
+    once and stamp per instance). It gets fractional geometry for
+    free because it never imposed our packing. Our 8-byte packed
+    vertex + greedy meshing is the right call for cubic terrain (the
+    99% case) and is exactly why sub-cube blocks are awkward. The
+    torch's xIn/zIn insets + yoff reuse are legit (free bits / a
+    field used for its real purpose), NOT bit-stealing hacks — but
+    they're the FIRST accretion. The clean long-term home for
+    irregular blocks is a SECOND per-cell chunk vertex stream with a
+    fatter, general vertex (float-ish position + sub-sprite UV, its
+    own MeshPool + shader) — mirroring vanilla's model path and our
+    existing fully-float entity path (block_entity.vert). DECISION
+    (with the user, 2026-06-12): keep the torch's minimal packed-
+    format approach for now; when the SECOND irregular block lands
+    (stairs/slabs are foreseen), build that model-block stream and
+    subsume the torch special-casing into it rather than adding more
+    inset codes. That's the line in the sand — don't grow the packed
+    format past the torch.
   - Sprite rendering (bonus fix): new `RenderAsSprite(ItemId)`
     (Item.h) — registry items PLUS cross/torch blocks now draw as
     flat quads instead of mini cubes, both as world drops (GameApp
@@ -1014,12 +1045,15 @@ survive. An old M19/M20 world still loads fine (its furnaces.dat is
 just absent).
 
 Torches: craft (coal over stick -> 4), place on the ground — reads
-as a thin 3D post from every angle, lights the area (14, just below
-glowstone) and looks right in caves at night; held torch is a flat
-sprite in hand (so are flowers now). Can't place on the side of a
-wall or on another torch (no ground); dig out the block under one ->
-it pops as a drop; flowing water washes it away (drop pops). Breaking
-is instant; quit/reload keeps placed torches (they're normal blocks).
+as a thin 3D post from every angle, with a small lit flame cap on top
+when you look down at it (added after the first cut missed it; it sits
+at ~10/16 height — easy to nudge in EmitTorchCell's kCapYOff if it
+looks off). Lights the area (14, just below glowstone) and looks right
+in caves at night; held torch is a flat sprite in hand (so are flowers
+now). Can't place on the side of a wall or on another torch (no
+ground); dig out the block under one -> it pops as a drop; flowing
+water washes it away (drop pops). Breaking is instant; quit/reload
+keeps placed torches (they're normal blocks).
 
 ## Next: audio engine (DECIDED with the user, 2026-06-12)
 

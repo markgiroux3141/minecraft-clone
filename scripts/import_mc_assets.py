@@ -86,6 +86,16 @@ def crack_cutout(img: Image.Image) -> Image.Image:
     return out
 
 
+def torch_flame_cap(path: Path) -> Image.Image:
+    # The torch top cap: crop the flame core (vanilla template_torch's
+    # up-face uv [7,6,9,8]) and scale it to a full opaque 16x16 tile, so
+    # our cap quad samples it with a plain 0..1 UV.
+    img = Image.open(path).convert("RGBA")
+    cap = img.crop((7, 6, 9, 8)).resize((TILE, TILE), Image.NEAREST)
+    cap.putalpha(255)
+    return cap
+
+
 def flattened(img: Image.Image) -> Image.Image:
     # Bake transparent pixels opaque over the tile's own body color — used
     # for the full-cube cactus, whose vanilla texture leaves the model's
@@ -182,9 +192,13 @@ def build_atlas(mc: Path, out_path: Path) -> None:
         load_tile(items / "iron_pickaxe.png"),
         load_tile(items / "iron_axe.png"),
         load_tile(items / "iron_shovel.png"),
-        # M21 follow-up: torch (62) — alpha survives, the mesher's inset
-        # planes and the alpha test carve out the post.
+        # M21 follow-up: torch sides (62) — alpha survives, the mesher's
+        # inset planes and the alpha test carve out the post.
         load_tile(blocks / "torch_on.png"),
+        # Torch top cap (63): vanilla's template_torch maps the post's
+        # upper face to texels (7,6)-(9,8) — the flame core. Crop that and
+        # scale to a full opaque tile for our cap quad's 0..1 UV.
+        torch_flame_cap(blocks / "torch_on.png"),
     ]
 
     strip = Image.new("RGBA", (TILE * len(tiles), TILE))
