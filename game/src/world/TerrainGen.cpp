@@ -76,7 +76,8 @@ BiomeParams ParamsFor(Biome biome) {
 
 constexpr int kBiomeCell = 4; // blend resolution, like vanilla
 // Peaks above this get a snow cap regardless of climate (sandy excluded).
-constexpr int kSnowLine = 48;
+// M25: raised with the world (tall hills now reach ~y95+).
+constexpr int kSnowLine = 90;
 
 // 10 / sqrt(dx^2 + dz^2 + 0.2), vanilla's biomeWeights.
 const std::array<float, 25>& BiomeWeights() {
@@ -288,7 +289,15 @@ void TerrainGenerator::Generate(Chunk& chunk, const glm::ivec3& chunkCoord) cons
         base /= total;
         variation /= total;
         const float n = noise.GetNoise(static_cast<float>(wx), static_cast<float>(wz));
-        return 16 + static_cast<int>(base * 22.0f + n * (5.0f + variation * 34.0f));
+        // M25 rebase to vanilla proportions in the 128-tall world. The +3
+        // lift keeps flat plains (~y68) clearly above the beach band (sea+2 =
+        // 65) so inland flats are grass, not sand — only columns that dip to
+        // the waterline read as beach. base*18 raises hillier biomes; the
+        // noise amplitude grows with heightVariation. Extreme hills top out
+        // near y102, below the ~y104 spawn so a fresh world never drops the
+        // player inside a peak.
+        return kSeaLevel + 3 +
+               static_cast<int>(base * 18.0f + n * (3.0f + variation * 30.0f));
     };
 
     const glm::ivec3 origin = chunkCoord * Chunk::kSize;

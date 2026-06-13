@@ -14,8 +14,10 @@ namespace vc {
 class TerrainGenerator {
 public:
     // Lowlands at or near this height get sand instead of grass; the M11
-    // water pass fills up to it.
-    static constexpr int kSeaLevel = 14;
+    // water pass fills up to it. M25 raised this to vanilla's 63 (was 14)
+    // when the world grew to 128 tall — surface now sits at ~y65 like
+    // vanilla, with the full underground below it.
+    static constexpr int kSeaLevel = 63;
 
     explicit TerrainGenerator(int seed) : m_seed(seed) {}
 

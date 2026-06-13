@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -66,6 +67,12 @@ struct BlockDef {
     bool gravity = false; // falls when unsupported (block-update ticks)
     bool unbreakable = false; // the break edit refuses it (bedrock; no
                               // hardness system, so a simple guard)
+    // M24: this cube remembers a horizontal FRONT direction in its per-cell
+    // meta (furnace, crafting table). The canonical front tile is
+    // faceTiles[PosX] and the side tile is faceTiles[NegX]; the mesher draws
+    // the front tile on whatever horizontal face the meta names (meta 0 =
+    // PosX, matching pre-M24 saves) and the side tile on the other three.
+    bool horizontalFacing = false;
     // Skylight attenuation for non-opaque blocks, 0..15: blocks direct
     // (straight-down) sky and costs max(1, lightOpacity) per propagation
     // step. Ignored when opaque (opaque always blocks fully). Leaves 1,
@@ -191,5 +198,62 @@ inline constexpr uint16_t kFirstCrackTile = 29;
 void RegisterDefaults();
 
 } // namespace blocks
+
+// M24 block orientation. Per-cell meta stores a facing; the meaning is
+// block-specific (vanilla does the same with its meta int):
+//   - horizontalFacing cubes (furnace, crafting table): meta = the BlockFace
+//     of the FRONT, one of PosX/NegX/PosZ/NegZ. meta 0 = PosX, so untouched
+//     pre-M24 blocks keep their old +X front.
+//   - torch: meta 0 = floor (standing); meta = TorchWallMeta(face) for a
+//     torch mounted on a wall, where `face` is the horizontal direction the
+//     torch points (away from the wall it hangs on).
+namespace facing {
+
+// Unit step of a BlockFace direction.
+inline constexpr glm::ivec3 Dir(BlockFace f) {
+    switch (f) {
+    case BlockFace::PosX: return {1, 0, 0};
+    case BlockFace::NegX: return {-1, 0, 0};
+    case BlockFace::PosY: return {0, 1, 0};
+    case BlockFace::NegY: return {0, -1, 0};
+    case BlockFace::PosZ: return {0, 0, 1};
+    case BlockFace::NegZ: return {0, 0, -1};
+    }
+    return {0, 0, 0};
+}
+
+inline constexpr BlockFace Opposite(BlockFace f) {
+    switch (f) {
+    case BlockFace::PosX: return BlockFace::NegX;
+    case BlockFace::NegX: return BlockFace::PosX;
+    case BlockFace::PosY: return BlockFace::NegY;
+    case BlockFace::NegY: return BlockFace::PosY;
+    case BlockFace::PosZ: return BlockFace::NegZ;
+    case BlockFace::NegZ: return BlockFace::PosZ;
+    }
+    return f;
+}
+
+// The horizontal face a look/forward vector points along, snapped to the
+// dominant cardinal axis (vanilla EnumFacing.fromAngle).
+inline BlockFace HorizontalFromLook(const glm::vec3& look) {
+    if (std::abs(look.x) >= std::abs(look.z)) {
+        return look.x >= 0.0f ? BlockFace::PosX : BlockFace::NegX;
+    }
+    return look.z >= 0.0f ? BlockFace::PosZ : BlockFace::NegZ;
+}
+
+// Torch meta packing: floor = 0, wall = facing index + 1 (so meta 0 stays
+// the floor torch that pre-M24 saves and worldgen produce).
+inline constexpr uint8_t TorchFloor = 0;
+inline constexpr uint8_t TorchWallMeta(BlockFace pointDir) {
+    return static_cast<uint8_t>(static_cast<int>(pointDir) + 1);
+}
+inline constexpr bool TorchIsWall(uint8_t meta) { return meta != TorchFloor; }
+inline constexpr BlockFace TorchWallFacing(uint8_t meta) {
+    return static_cast<BlockFace>(meta - 1);
+}
+
+} // namespace facing
 
 } // namespace vc

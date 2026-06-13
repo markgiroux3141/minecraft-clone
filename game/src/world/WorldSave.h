@@ -30,9 +30,14 @@ namespace vc {
 //     chunkCount x { int32 cx, cy, cz; uint32 blobSize },
 //     then the chunk blobs concatenated in index order.
 //
-// Chunk blob: one format byte — 0 = RLE pairs of uint16 {id, runLength}
-// over the YZX-ordered 16^3 ids, 1 = raw uint16 ids (used when RLE would
-// be larger) — followed by the payload.
+// Chunk blob: one format byte, then the payload.
+//   0 = RLE pairs of uint16 {id, runLength} over the YZX-ordered 16^3 ids
+//   1 = raw uint16 ids (used when RLE would be larger)
+//   2 = format 0's id stream, then a meta RLE stream ({metaByte, run} pairs,
+//       u16-aligned) over the same 16^3 cells (M24 orientation)
+//   3 = format 1's raw ids, then the same meta RLE stream
+// Formats 2/3 are only written when some cell has non-zero meta, so the
+// common unoriented chunk stays bit-identical to a pre-M24 blob.
 //
 // The whole store loads into memory at construction (edited chunks are
 // sparse and RLE keeps blobs tiny) and is main-thread-only, like the chunk

@@ -194,11 +194,20 @@ BlockId World::GetBlock(int wx, int wy, int wz) const {
     return it->second.blocks->Get(wx & 15, wy & 15, wz & 15);
 }
 
+uint8_t World::GetMeta(int wx, int wy, int wz) const {
+    const glm::ivec3 coord{wx >> 4, wy >> 4, wz >> 4};
+    const auto it = m_chunks.find(coord);
+    if (it == m_chunks.end() || !it->second.blocks) {
+        return 0;
+    }
+    return it->second.blocks->GetMeta(wx & 15, wy & 15, wz & 15);
+}
+
 bool World::IsSolid(int wx, int wy, int wz) const {
     return BlockRegistry::Get().Def(GetBlock(wx, wy, wz)).solid;
 }
 
-void World::SetBlock(const glm::ivec3& worldPos, BlockId id) {
+void World::SetBlock(const glm::ivec3& worldPos, BlockId id, uint8_t meta) {
     if (worldPos.y < 0 || worldPos.y >= kHeightBlocks) {
         return;
     }
@@ -210,7 +219,8 @@ void World::SetBlock(const glm::ivec3& worldPos, BlockId id) {
     ChunkEntry& entry = it->second;
     const glm::ivec3 local{worldPos.x & 15, worldPos.y & 15, worldPos.z & 15};
     const BlockId oldId = entry.blocks->Get(local.x, local.y, local.z);
-    if (oldId == id) {
+    const uint8_t oldMeta = entry.blocks->GetMeta(local.x, local.y, local.z);
+    if (oldId == id && oldMeta == meta) {
         return;
     }
 
@@ -228,9 +238,11 @@ void World::SetBlock(const glm::ivec3& worldPos, BlockId id) {
         }
     }
 
-    // Copy-on-write: in-flight snapshots keep the old chunk alive.
+    // Copy-on-write: in-flight snapshots keep the old chunk alive. The copy
+    // carries meta; we then overwrite both the id and the orientation byte.
     auto edited = std::make_shared<Chunk>(*entry.blocks);
     edited->Set(local.x, local.y, local.z, id);
+    edited->SetMeta(local.x, local.y, local.z, meta);
     entry.blocks = std::move(edited);
     ++entry.dataVersion;
     entry.edited = true;
@@ -429,8 +441,10 @@ void World::TickFurnaces() {
         const bool burning = furnace::Tick(it->second);
         if (burning != (at == blocks::LitFurnace)) {
             // Lit/unlit swap; same family, so SetBlock keeps the state.
-            // Emission 13 relights through the normal edit path.
-            SetBlock(pos, burning ? blocks::LitFurnace : blocks::Furnace);
+            // Emission 13 relights through the normal edit path. Preserve
+            // the M24 facing meta so the front doesn't snap to +X on relight.
+            SetBlock(pos, burning ? blocks::LitFurnace : blocks::Furnace,
+                     GetMeta(pos.x, pos.y, pos.z));
         }
         ++it;
     }
@@ -654,9 +668,15 @@ void World::ProcessBlockUpdate(const glm::ivec3& worldPos) {
             SetBlock(worldPos, blocks::Air);
         }
     } else if (def.torch) {
-        // Torches need solid ground (floor-standing only until block
-        // orientation data exists for wall mounts).
-        if (!IsSolid(worldPos.x, worldPos.y - 1, worldPos.z)) {
+        // Torches need a solid surface to hang on (M24): a floor torch
+        // (meta 0) wants solid ground below; a wall torch wants the wall it
+        // points away from to still be solid.
+        const uint8_t meta = GetMeta(worldPos.x, worldPos.y, worldPos.z);
+        glm::ivec3 support{worldPos.x, worldPos.y - 1, worldPos.z};
+        if (facing::TorchIsWall(meta)) {
+            support = worldPos - facing::Dir(facing::TorchWallFacing(meta));
+        }
+        if (!IsSolid(support.x, support.y, support.z)) {
             SpawnBlockDrop(worldPos, def.ResolveDrop(id), 1);
             SetBlock(worldPos, blocks::Air);
         }

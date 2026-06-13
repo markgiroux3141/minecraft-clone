@@ -181,12 +181,29 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   `EmitModelBox`. The torch is the first client (its old packed-inset hack
   removed), with its flame cap now at the exact 10/16 height. Foreseen next
   clients: slabs/stairs/fences/panes.
-- **Backlog**: deeper world (kWorldHeightChunks 4 → 8),
-  tall-grass wheat seeds (1/8 chance, BlockTallGrass — pairs
-  with farming), animated water, lava, stars, world-list scrolling,
-  settings screen, vanilla's 14/16 cactus inset, 3D-extruded item
-  sprites in hand (flat quad for now), view bobbing, block orientation
-  data (table/furnace fronts, wall torches).
+- **M24 — Block orientation / facing** ✅: a per-cell metadata layer
+  (`Chunk::m_meta`, parallel `std::array<uint8_t, kVolume>`, COW like the
+  ids) carries block-specific orientation. `World::SetBlock(pos, id, meta)`;
+  the chunk blob format gained meta-bearing variants (2/3) written only when
+  a cell is oriented (unoriented chunks stay bit-identical to pre-M24). The
+  mesher reorients horizontalFacing cube fronts (furnace/table front points
+  at the placer) and applies a cell-local transform to model boxes (wall
+  torches tilt out from their wall). `namespace facing` (Block.h) holds the
+  helpers. First clients: furnace, crafting table, torch — reused by
+  slabs/stairs later.
+- **M25 — Deeper world** ✅: `kWorldHeightChunks` 4 → 8 (64 → 128 blocks)
+  for vanilla underground depth. The structural code all derives from the
+  constant (LOD height = /2, lighting, snapshots, culling, save); the
+  worldgen tuning was rebased — `kSeaLevel` 14 → 63, heightmap lifted so
+  flats sit ~y68 above the beach band (extreme hills ~y102), `kSnowLine`
+  → 90, ore bands → vanilla (coal y2..124, iron y2..62), cave start heights
+  doubled, spawn raised to y104. New world required (worldgen changed).
+- **Backlog**: slabs/stairs (reuse M24 meta + partial collision), lava
+  (deep cave floors), full 256-tall world (wants empty-air-chunk culling
+  first), tall-grass wheat seeds (1/8 chance, BlockTallGrass — pairs with
+  farming), animated water, stars, world-list scrolling, settings screen,
+  vanilla's 14/16 cactus inset, 3D-extruded item sprites in hand (flat
+  quad for now), view bobbing.
 - **Long-term**: native BuildCraft + IndustrialCraft systems (pipes, EU
   power network, machines) — survey, source breadcrumbs, and phased plan
   in `docs/mods/MOD_INTEGRATION.md`.

@@ -13,17 +13,17 @@ namespace {
 
 constexpr float kPi = std::numbers::pi_v<float>;
 
-// Vein parameters, vanilla ChunkGeneratorSettings rescaled to our world
-// height (vanilla: coal 20 veins/size 17/y0..128, iron 20/9/y0..64 in a
-// 256-tall world whose surface sits near 64). Coal spans the whole
-// underground; iron stays below y28.
+// Vein parameters, vanilla ChunkGeneratorSettings (coal 20 veins/size 17/
+// y0..128, iron 20/9/y0..64). M25 made the world 128 tall with the surface
+// near vanilla's y64, so these are now essentially the vanilla values:
+// coal spans the whole underground, iron fills the lower half.
 struct OreParams {
     int veins;
     int size;
     int minY, rangeY;
 };
-constexpr OreParams kCoal{10, 17, 2, 46}; // y 2..47
-constexpr OreParams kIron{12, 9, 2, 26};  // y 2..27
+constexpr OreParams kCoal{20, 17, 2, 123}; // y 2..124 (whole underground)
+constexpr OreParams kIron{20, 9, 2, 61};   // y 2..62 (lower half, vanilla-ish)
 
 // WorldGenMinable.generate, verbatim: an ellipsoid of shrinking-then-
 // growing radius swept along a random diagonal through (sx+8, sy, sz+8).

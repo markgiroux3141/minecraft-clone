@@ -9,7 +9,12 @@ namespace vc {
 
 // World height lives here (not World.h) so the light engine and mesher can
 // reason about "above the world = full sky" without depending on World.
-inline constexpr int kWorldHeightChunks = 4;
+// M25 raised this 4 -> 8 (64 -> 128 blocks) so the world has vanilla's
+// underground depth: surface rebased to ~y65, bedrock at 0, ~63 blocks of
+// stone/caves/ore to dig through. Worldgen tuning (TerrainGen height
+// formula + sea level, OreGen bands, CaveGen start heights) is rescaled to
+// match; changing this constant alone would just stretch empty air.
+inline constexpr int kWorldHeightChunks = 8;
 inline constexpr int kWorldHeightBlocks = kWorldHeightChunks * Chunk::kSize;
 
 // Light levels are 0..15, Minecraft-style: sky light (15 = direct sky,

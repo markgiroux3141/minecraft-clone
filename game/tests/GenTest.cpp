@@ -187,10 +187,10 @@ int main() {
     Check(caveAir > 0, "caves actually carve");
     Check(noOceanBreach, "carved air never touches worldgen water");
 
-    // Ores (M21): coal and iron veins generate, iron stays in the low
-    // band (the "dig deeper" rule), and every ore cell is buried like the
-    // stone it replaced — an ore floating in air or water would mean the
-    // carve/ore order or the stone-only predicate broke.
+    // Ores (M21, rebased in M25): coal and iron veins generate, iron stays
+    // in the lower half (vanilla y0..64; surface is now ~y65), and every ore
+    // cell is buried like the stone it replaced — an ore floating in air or
+    // water would mean the carve/ore order or the stone-only predicate broke.
     {
         size_t coal = 0;
         size_t iron = 0;
@@ -223,7 +223,7 @@ int main() {
         }
         Check(coal > 0, "coal veins actually generate");
         Check(iron > 0, "iron veins actually generate");
-        Check(ironMaxY < 32, "iron stays in the deep band");
+        Check(ironMaxY < vc::kWorldHeightBlocks / 2 + 8, "iron stays in the lower half");
         Check(oreInStone, "ore cells sit in terrain, not open space");
     }
 
@@ -375,6 +375,27 @@ int main() {
         }
         Check(sidePlaneVerts == 16 && capVerts == 4, "torch is 4 side planes + a 4-vert cap");
         Check(geomOk, "torch verts: planes one-axis inset full height, cap both-axis at 10/16");
+    }
+
+    // Wall torch (M24): same box count, but the model is oriented (tilted +
+    // shoved against the wall it points away from), so it leaves the upright
+    // floor-torch footprint. A +X-pointing torch hangs on the -X wall and is
+    // shifted toward it (some vertex crosses below the cell's x origin).
+    {
+        vc::ChunkSnapshot snapshot;
+        auto center = std::make_shared<vc::Chunk>();
+        center->Set(8, 8, 8, vc::blocks::Torch);
+        center->SetMeta(8, 8, 8, vc::facing::TorchWallMeta(vc::BlockFace::PosX));
+        snapshot.chunks[vc::ChunkSnapshot::Index(1, 1, 1)] = center;
+        snapshot.skyAbove = true;
+
+        const vc::ChunkMesh mesh = vc::ChunkMesher::Build(snapshot);
+        Check(mesh.modelVertices.size() == 20, "wall torch still meshes to 4 planes + a cap");
+        bool shiftedToWall = false;
+        for (const auto& vtx : mesh.modelVertices) {
+            shiftedToWall |= vtx.x < 8.0f; // pushed toward the -X wall
+        }
+        Check(shiftedToWall, "wall torch is oriented (tilted/shifted toward its wall)");
     }
 
     if (g_failures == 0) {

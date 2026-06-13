@@ -52,14 +52,22 @@ struct ChunkEntry {
 // One LOD column: two stacked half-res chunks (world height 4 chunks /
 // LOD scale 2) covering 32x32 world blocks. Generated once from real
 // terrain (no edits, no relighting), so plain flags replace the version
-// counters of full-detail chunks.
-inline constexpr int kLodHeightChunks = 2;
+// counters of full-detail chunks. Stacks world-height/scale chunks (4 in
+// the M25 128-tall world).
+inline constexpr int kLodHeightChunks = kWorldHeightChunks / 2;
+// Aggregate-init helper: an array of N mesh handles all set to kInvalidMesh
+// (0xFFFFFFFF, not 0 — value-init would alias real slot 0).
+template <size_t N>
+constexpr std::array<vox::MeshPool::MeshHandle, N> InvalidMeshes() {
+    std::array<vox::MeshPool::MeshHandle, N> a{};
+    a.fill(vox::MeshPool::kInvalidMesh);
+    return a;
+}
 struct LodColumnEntry {
     std::array<std::shared_ptr<const Chunk>, kLodHeightChunks> cells; // null until gen lands
-    std::array<vox::MeshPool::MeshHandle, kLodHeightChunks> mesh = {
-        vox::MeshPool::kInvalidMesh, vox::MeshPool::kInvalidMesh};
-    std::array<vox::MeshPool::MeshHandle, kLodHeightChunks> meshT = {
-        vox::MeshPool::kInvalidMesh, vox::MeshPool::kInvalidMesh};
+    std::array<vox::MeshPool::MeshHandle, kLodHeightChunks> mesh = InvalidMeshes<kLodHeightChunks>();
+    std::array<vox::MeshPool::MeshHandle, kLodHeightChunks> meshT =
+        InvalidMeshes<kLodHeightChunks>();
     std::array<uint32_t, kLodHeightChunks> indexCount{};
     std::array<uint32_t, kLodHeightChunks> indexCountT{};
     bool meshInFlight = false;
@@ -215,14 +223,18 @@ public:
 
     // World-space block query; air for unloaded chunks or outside the world.
     BlockId GetBlock(int wx, int wy, int wz) const;
+    // M24 per-cell orientation/state meta; 0 for unloaded/outside.
+    uint8_t GetMeta(int wx, int wy, int wz) const;
 
     bool IsSolid(int wx, int wy, int wz) const;
 
     // Copy-on-write block edit. Marks the chunk (and, for border blocks,
     // the affected neighbors) for remeshing and dirties every column whose
     // light the edit can reach. No-op outside the world or in ungenerated
-    // chunks.
-    void SetBlock(const glm::ivec3& worldPos, BlockId id);
+    // chunks. The meta overload also writes the cell's M24 orientation byte
+    // (default 0 = unoriented); the COW clone carries meta for free.
+    void SetBlock(const glm::ivec3& worldPos, BlockId id) { SetBlock(worldPos, id, 0); }
+    void SetBlock(const glm::ivec3& worldPos, BlockId id, uint8_t meta);
 
     struct RaycastHit {
         glm::ivec3 block;

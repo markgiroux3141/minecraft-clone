@@ -1,10 +1,12 @@
 #include "world/WorldSave.h"
 
+#include <algorithm>
 #include <cstring>
 #include <format>
 #include <fstream>
 #include <iomanip>
 #include <string>
+#include <type_traits>
 
 #include "vox/core/Log.h"
 
@@ -13,8 +15,10 @@ namespace vc {
 namespace {
 
 constexpr uint32_t kMagic = 0x31525856; // "VXR1"
-constexpr uint8_t kFormatRle = 0;
-constexpr uint8_t kFormatRaw = 1;
+constexpr uint8_t kFormatRle = 0;       // id RLE only (meta all 0)
+constexpr uint8_t kFormatRaw = 1;       // raw ids only (meta all 0)
+constexpr uint8_t kFormatRleMeta = 2;   // M24: id RLE, then a meta RLE stream
+constexpr uint8_t kFormatRawMeta = 3;   // M24: raw ids, then a meta RLE stream
 constexpr size_t kRawBytes = Chunk::kVolume * sizeof(BlockId);
 constexpr auto kFlushInterval = std::chrono::seconds(3);
 constexpr int kManifestVersion = 1;
@@ -46,25 +50,49 @@ struct Reader {
     }
 };
 
-std::vector<uint8_t> Encode(const Chunk& chunk) {
-    const auto& raw = chunk.Raw();
-    std::vector<uint8_t> blob;
-    blob.push_back(kFormatRle);
+// RLE a run-length stream of values onto blob (no header): {value, run}
+// pairs, both little-endian u16. Meta is u8 but stored in a u16 cell so the
+// stream stays 4-byte aligned like the id stream (meta blobs are usually a
+// single 0-run, so the wasted byte is free).
+template <typename T>
+void AppendRle(std::vector<uint8_t>& blob, const T* data, size_t n) {
     size_t i = 0;
-    while (i < raw.size()) {
-        const BlockId id = raw[i];
+    while (i < n) {
+        const auto v = data[i];
         size_t run = 1;
-        while (i + run < raw.size() && raw[i + run] == id && run < 0xFFFF) {
+        while (i + run < n && data[i + run] == v && run < 0xFFFF) {
             ++run;
         }
-        AppendU16(blob, id);
+        AppendU16(blob, static_cast<uint16_t>(v));
         AppendU16(blob, static_cast<uint16_t>(run));
         i += run;
     }
-    if (blob.size() > 1 + kRawBytes) { // pathological pattern: store raw instead
-        blob.assign(1, kFormatRaw);
+}
+
+std::vector<uint8_t> Encode(const Chunk& chunk) {
+    const auto& raw = chunk.Raw();
+    const auto& meta = chunk.RawMeta();
+    const bool hasMeta = std::any_of(meta.begin(), meta.end(), [](uint8_t m) { return m != 0; });
+
+    // Build the id payload first to choose RLE vs raw (raw only when a
+    // pathological pattern makes RLE larger than the flat array).
+    std::vector<uint8_t> idRle;
+    AppendRle(idRle, raw.data(), raw.size());
+    const bool useRaw = idRle.size() > kRawBytes;
+
+    std::vector<uint8_t> blob;
+    if (useRaw) {
+        blob.assign(1, hasMeta ? kFormatRawMeta : kFormatRaw);
         blob.resize(1 + kRawBytes);
         std::memcpy(blob.data() + 1, raw.data(), kRawBytes);
+    } else {
+        blob.push_back(hasMeta ? kFormatRleMeta : kFormatRle);
+        blob.insert(blob.end(), idRle.begin(), idRle.end());
+    }
+    // M24: append the meta RLE stream only when something is oriented, so
+    // the common all-zero case stays bit-identical to a pre-M24 blob.
+    if (hasMeta) {
+        AppendRle(blob, meta.data(), meta.size());
     }
     return blob;
 }
@@ -282,28 +310,60 @@ const std::vector<uint8_t>* WorldSave::FindBlob(const glm::ivec3& chunkCoord) co
 }
 
 bool WorldSave::Decode(const std::vector<uint8_t>& blob, Chunk& out) {
-    auto& raw = out.Raw();
-    if (blob.size() == 1 + kRawBytes && blob[0] == kFormatRaw) {
-        std::memcpy(raw.data(), blob.data() + 1, kRawBytes);
-        return true;
+    out = Chunk{}; // reset ids + meta; legacy formats leave meta all-air-0
+    if (blob.empty()) {
+        return false;
     }
-    if (!blob.empty() && blob[0] == kFormatRle && (blob.size() - 1) % 4 == 0) {
+    const uint8_t format = blob[0];
+    const bool raw = format == kFormatRaw || format == kFormatRawMeta;
+    const bool rle = format == kFormatRle || format == kFormatRleMeta;
+    const bool withMeta = format == kFormatRleMeta || format == kFormatRawMeta;
+    size_t pos = 1;
+
+    // Decode one RLE stream of `count` cells from pos into dst[], advancing
+    // pos. False on truncation or a bad run.
+    const auto decodeRle = [&](auto* dst, size_t count) {
         size_t cell = 0;
-        for (size_t pos = 1; pos < blob.size(); pos += 4) {
-            const auto id = static_cast<BlockId>(blob[pos] | blob[pos + 1] << 8);
-            const size_t run = static_cast<size_t>(blob[pos + 2] | blob[pos + 3] << 8);
-            if (run == 0 || cell + run > raw.size()) {
-                break;
+        while (cell < count) {
+            if (blob.size() - pos < 4) {
+                return false;
             }
-            std::fill_n(raw.begin() + static_cast<ptrdiff_t>(cell), run, id);
+            const auto value =
+                static_cast<std::remove_reference_t<decltype(*dst)>>(blob[pos] | blob[pos + 1] << 8);
+            const size_t run = static_cast<size_t>(blob[pos + 2] | blob[pos + 3] << 8);
+            pos += 4;
+            if (run == 0 || cell + run > count) {
+                return false;
+            }
+            std::fill_n(dst + cell, run, value);
             cell += run;
         }
-        if (cell == raw.size()) {
-            return true;
+        return true;
+    };
+
+    auto& ids = out.Raw();
+    if (raw) {
+        if (blob.size() < 1 + kRawBytes) {
+            out = Chunk{};
+            return false;
         }
+        std::memcpy(ids.data(), blob.data() + 1, kRawBytes);
+        pos = 1 + kRawBytes;
+    } else if (rle) {
+        if (!decodeRle(ids.data(), ids.size())) {
+            out = Chunk{};
+            return false;
+        }
+    } else {
+        out = Chunk{};
+        return false;
     }
-    out = Chunk{}; // don't leave a partial decode behind
-    return false;
+
+    if (withMeta && !decodeRle(out.RawMeta().data(), Chunk::kVolume)) {
+        out = Chunk{};
+        return false;
+    }
+    return true;
 }
 
 void WorldSave::Put(const glm::ivec3& chunkCoord, const Chunk& chunk) {

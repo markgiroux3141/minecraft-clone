@@ -30,7 +30,10 @@ constexpr int kWorldSeed = 1337; // default for saves whose manifest lacks one
 constexpr float kReachDistance = 5.0f;
 constexpr double kEditRepeatDelay = 0.25; // held-button repeat, seconds
 
-constexpr glm::vec3 kSpawnPos{8.5f, 48.0f, 8.5f};
+// M25: above the tallest terrain (~y99) in the 128-tall world, so a fresh
+// world drops the player onto the surface instead of inside a hill. No fall
+// damage system, so the short drop is harmless.
+constexpr glm::vec3 kSpawnPos{8.5f, 104.0f, 8.5f};
 constexpr float kSpawnYaw = 45.0f;
 constexpr float kSpawnPitch = -15.0f;
 
@@ -689,22 +692,45 @@ void GameApp::HandleInput(double frameDt, int scroll) {
         } else {
             const glm::ivec3 cell = m_target->block + m_target->normal;
             vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
-            // Torches are floor-standing only: refuse placement without
-            // solid ground (instead of placing + popping next tick).
-            const bool supported =
-                hand.Empty() || !vc::IsBlockItem(hand.id) ||
-                !vc::BlockRegistry::Get().Def(hand.id).torch ||
-                m_world->IsSolid(cell.x, cell.y - 1, cell.z);
-            if (!hand.Empty() && vc::IsBlockItem(hand.id) && supported &&
+            if (!hand.Empty() && vc::IsBlockItem(hand.id) &&
                 !m_world->IsSolid(cell.x, cell.y, cell.z) && !m_player.Intersects(cell)) {
-                m_world->SetBlock(cell, static_cast<vc::BlockId>(hand.id));
-                m_sounds.PlayPlace(vc::BlockRegistry::Get().Def(hand.id).soundType,
-                                   glm::vec3(cell) + 0.5f);
-                m_viewModel->TriggerSwing();
-                if (--hand.count <= 0) {
-                    hand = {};
+                const auto blockId = static_cast<vc::BlockId>(hand.id);
+                const vc::BlockDef& def = vc::BlockRegistry::Get().Def(blockId);
+                // M24 orientation: torches mount on the clicked surface (top
+                // face -> floor, side face -> wall, ceiling refused);
+                // furnace/table fronts point back at the placer.
+                uint8_t meta = 0;
+                bool allowed = true;
+                if (def.torch) {
+                    const glm::ivec3 n = m_target->normal;
+                    if (n.y > 0) {
+                        allowed = m_world->IsSolid(cell.x, cell.y - 1, cell.z);
+                        meta = vc::facing::TorchFloor;
+                    } else if (n.y == 0) {
+                        // The clicked face normal is the way the torch points.
+                        const vc::BlockFace f = n.x > 0   ? vc::BlockFace::PosX
+                                                : n.x < 0 ? vc::BlockFace::NegX
+                                                : n.z > 0 ? vc::BlockFace::PosZ
+                                                          : vc::BlockFace::NegZ;
+                        allowed = m_world->IsSolid(m_target->block.x, m_target->block.y,
+                                                   m_target->block.z);
+                        meta = vc::facing::TorchWallMeta(f);
+                    } else {
+                        allowed = false; // bottom face: nothing to hang from
+                    }
+                } else if (def.horizontalFacing) {
+                    meta = static_cast<uint8_t>(
+                        vc::facing::Opposite(vc::facing::HorizontalFromLook(m_camera.Forward())));
                 }
-                m_placeCooldown = kEditRepeatDelay;
+                if (allowed) {
+                    m_world->SetBlock(cell, blockId, meta);
+                    m_sounds.PlayPlace(def.soundType, glm::vec3(cell) + 0.5f);
+                    m_viewModel->TriggerSwing();
+                    if (--hand.count <= 0) {
+                        hand = {};
+                    }
+                    m_placeCooldown = kEditRepeatDelay;
+                }
             }
         }
     }

@@ -3,10 +3,13 @@
 Updated: 2026-06-13, written for a FRESH CONTEXT. M0-M20, M22 (AUDIO), and
 M23 (MODEL-BLOCK STREAM) are all done and USER-VERIFIED (M22: "beautiful,
 it all works"; M23: "everything looks perfect and the torch cap is where
-it should be"). M21 (ORES + FURNACE/SMELTING + torches) is CODE COMPLETE
-awaiting explicit user verification — see its section for what was built
-and what to test. Read alongside `ARCHITECTURE.md` (layering rules,
-roadmap) and `CLAUDE.md` (build commands, conventions).
+it should be"). M21 (ORES + FURNACE/SMELTING + torches), M24 (BLOCK
+ORIENTATION / FACING), and M25 (DEEPER WORLD — 128 tall, vanilla
+underground depth) are CODE COMPLETE awaiting explicit user verification —
+see their sections for what was built and what to test (M25 needs a NEW
+WORLD).
+Read alongside `ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md`
+(build commands, conventions).
 
 IMPORTANT RESOURCE: the user has Minecraft's Java source (MCP 9.40 =
 1.12) at `D:\Minecraft source code` — look up exact game dynamics there
@@ -53,7 +56,8 @@ stone/dirt/grass/glowstone/sand/log/leaves/water x64, slot 9 empty).
 In water: W swims toward the look
 direction, Space swims up (breach kick at the surface). Esc pauses
 (Resume / Save & Quit to Title) — quitting the app is the title screen's
-Quit button or the window X. Default spawn (8.5, 48, 8.5); a world with
+Quit button or the window X. Default spawn (8.5, 104, 8.5) — above the
+M25 128-tall terrain, so a fresh world drops you onto the surface; a world with
 saved player state restores position/look/mode instead.
 
 ## M4 threaded pipeline + M6 versioned edits (how it works)
@@ -80,7 +84,9 @@ saved player state restores position/look/mode instead.
   `World::SetBlock`'s offset-mask loop.
 - Job submission is capped at `workers * 4` in flight; mesh jobs are
   submitted before gen jobs, both nearest-first. View radius 12 (data ring
-  13 → 2916 chunks ≈ 24 MB); world height 4 chunks (terrain tops at y≈44).
+  13 → 2916 columns). World height is 8 chunks since M25 (128 blocks;
+  surface ~y68, see the M25 section) — double the chunk count of the old
+  4-tall world, so RAM/streaming roughly doubled.
 - `World` member order matters: the pool is declared LAST so its
   destructor joins workers before the queues/map/generator die.
 
@@ -577,11 +583,10 @@ unedited chunks regenerate with new rules; test in a NEW world.
   wherever y <= nextInt(5) (solid y0, ragged through y4; hash salts
   10+wy). `BlockDef::unbreakable` guards the break edit in GameApp (no
   hardness system); NOT in the carver's replaceable set. The user dug
-  through the old 1-block floor into the void — that's closed now. The
-  world is still only 64 blocks tall (surface ~y19-44): a deeper,
-  vanilla-proportioned underground (raise kWorldHeightChunks, rebase
-  topology, rescale cave start heights) was offered and deferred — a
-  real M17 candidate.
+  through the old 1-block floor into the void — that's closed now. (At M16
+  the world was only 64 tall with the surface at ~y19-44; M25 later raised
+  it to 128 with the surface rebased to ~y68 — see the M25 section, which
+  supersedes these height numbers.)
 - Cactus (stage 3): full opaque cube (tiles 22/23; import bakes the
   texture's transparent 14/16-inset margin opaque over the body color —
   the real inset model is backlog). Desert sand, 0.5% of columns (salts
@@ -1008,7 +1013,8 @@ near-spawn chunks you've edited keep their pre-ore stone).
   pairs with the audio/ambience milestone).
 
 What the user should test (NEW WORLD recommended): dig a cave or
-strip-mine — coal ore at any depth, iron only deep (y<28, i.e. well
+strip-mine — coal ore at any depth, iron in the lower half (y<63 after
+M25's rebase; was y<28, i.e. well
 below the surface); coal ore with a wooden pick pops the coal ITEM
 (flat sprite); iron ore with a WOODEN pick: slow dig, NO drop; with a
 stone pick it drops the ore block itself. Craft a furnace (8 cobble
@@ -1217,25 +1223,170 @@ slabs/stairs/fences/panes are the foreseen next ones.
   Sub-rect UV orientation: verify visually the first time a half-tile face
   is used.
 
-## Next milestone (open — scope with the user)
+## M24 — block orientation / facing (how it works)
 
-Audio (M22) is done. Strong candidates from the backlog below: deeper
-world (kWorldHeightChunks 4 -> 8, rebase topology + cave start heights —
-discussed and deferred twice now), a settings screen (the audio buses +
-`AudioEngine::SetBusVolume` already exist and want a UI; also occlusion/
-render-distance/sensitivity), or block orientation data (crafting table/
-furnace fronts face +X regardless of placement; wall torches). Decide
-with the user before building.
+CODE COMPLETE 2026-06-13, awaiting user verification. Build + gentest +
+savetest all pass. This is the general per-block-metadata mechanism the
+handoff promised since M19 ("no block orientation data" wart), with furnace
++ crafting table fronts and wall torches as the first three clients. The
+per-cell meta layer it adds is what SLABS/STAIRS/rotated-logs will reuse.
 
-Other backlog: deeper world (kWorldHeightChunks 4 -> 8, rebase
-topology + cave start heights — discussed 2026-06-12, deferred),
-tall-grass wheat seeds (vanilla 1/8, BlockTallGrass.getItemDropped —
-pairs with farming), flow-animated water (16x512 strip), lava (cave
-floors below y10 in vanilla), stars, world-list scrolling, settings
-screen, vanilla's 14/16 cactus inset + touch damage, 3D-extruded item
-sprites in hand + view bobbing (M20 polish), block orientation data
-(crafting table/furnace fronts face +X regardless of placement; wall
-torches).
+- STORAGE (`Chunk.h`): a parallel `std::array<uint8_t, kVolume> m_meta`
+  alongside the ids, with `Get/SetMeta` + `RawMeta()`. Chunk grew 8 KB ->
+  12 KB. Meta is block-SPECIFIC (vanilla's meta-int idea): 0 everywhere =
+  unoriented, which is exactly what worldgen and pre-M24 saves produce, so
+  defaults are unchanged. Copy-on-write carries it for free — the default
+  Chunk copy ctor copies both arrays, and `SnapshotFor` already shares
+  `shared_ptr<const Chunk>`, so meta rides into worker snapshots with no
+  new locking.
+- META SEMANTICS + helpers (`Block.h` `namespace facing`):
+  `Dir(BlockFace)`, `Opposite(BlockFace)`, `HorizontalFromLook(vec3)`
+  (vanilla EnumFacing.fromAngle, snapped to the dominant cardinal axis),
+  and torch packers (`TorchFloor=0`, `TorchWallMeta(face)=face+1`,
+  `TorchIsWall`, `TorchWallFacing`). Two block-specific encodings:
+  - horizontalFacing cubes (furnace/table): meta = the BlockFace of the
+    FRONT (PosX=0 default = the old +X front, NegX=1, PosZ=4, NegZ=5).
+  - torch: meta 0 = floor (standing), else `face+1` where `face` is the
+    horizontal direction the torch POINTS (away from the wall it hangs on).
+- EDIT PATH (`World::SetBlock`): a `SetBlock(pos, id, meta)` overload (the
+  old 2-arg form delegates with meta 0, so every existing caller is
+  unchanged); the early-out now also compares meta, and the COW clone
+  `SetMeta`s the cell. `World::GetMeta(wx,wy,wz)` mirrors `GetBlock`.
+- PERSISTENCE (`WorldSave`): two new chunk-blob formats — 2 = format-0 id
+  RLE then a meta RLE stream, 3 = format-1 raw ids then the meta RLE
+  (`{metaByte, run}` pairs, kept u16-aligned like the id stream). They're
+  written ONLY when some cell has non-zero meta, so an unoriented chunk
+  stays bit-identical to a pre-M24 blob (format 0/1) and old saves decode
+  meta = 0. `Decode` was refactored around a shared `decodeRle` lambda.
+  savetest asserts: unoriented chunk keeps the legacy format, oriented
+  chunk uses 2/3, legacy blob decodes to all-zero meta, oriented chunk
+  round-trips ids AND meta.
+- MESHER (`ChunkMesher.cpp`): `PaddedVolume` gained a `meta` array
+  (FillPadded copies it). Two consumers:
+  - CUBE front remap: `OrientedFaceTile(def, meta, face)` — for a
+    `BlockDef::horizontalFacing` cube it draws the canonical front tile
+    (`faceTiles[PosX]`) on whatever horizontal face the meta names and the
+    side tile (`faceTiles[NegX]`) on the other three; top/bottom unchanged.
+    Used in the greedy mask key, so differently-facing neighbors get
+    different keys and never wrongly merge.
+  - MODEL orient: `EmitModelBox` now takes a `glm::mat4` cell-local
+    transform; `ModelOrientation(def, meta)` returns identity for floor
+    torches / unoriented model blocks, and for a wall torch a rigid
+    tilt+shift (tilt 22.5 deg toward the facing about a low pivot, base
+    shoved -0.45 toward the wall + 0.10 up — EYEBALLED constants, tweak if
+    it sits wrong). Rigid motion preserves winding/backface culling; the
+    face-index normal is kept (slightly off sun term on tilted faces,
+    invisible on a torch).
+- PLACEMENT (`GameApp` place path): torch on a TOP face -> floor (solid
+  below required); torch on a SIDE face -> wall torch pointing along the
+  clicked normal if that wall block is solid; ceiling face refused.
+  horizontalFacing cube -> meta = `Opposite(HorizontalFromLook(forward))`
+  (front toward the placer). The chosen meta goes to `SetBlock`.
+- BLOCK UPDATES (`World::ProcessBlockUpdate` torch rule): now facing-aware
+  — a floor torch (meta 0) still needs solid ground below; a wall torch
+  checks the block in `-facing` (the wall it hangs on) and pops as a drop
+  when that goes away.
+- `BlockDef::horizontalFacing` flag set on furnace, lit furnace, crafting
+  table (their `faceTiles[PosX]`/`[NegX]` were already the front/side
+  tiles, so nothing else changed there).
+
+KNOWN M24 LIMITS / decisions: wall-torch tilt/shift constants are
+eyeballed (not pulled from the hashed-store JSON, which isn't extractable
+by filename) — visually tunable in `ModelOrientation`. No collision box for
+oriented blocks (furnace/table are full cubes; torches never collide).
+Tilted model faces keep their axis-aligned normal index (fine for a torch).
+LOD has no model/oriented blocks (worldgen produces none). Slabs/stairs
+(half/shape state + partial collision) are deliberately OUT of scope — they
+reuse this meta layer but are their own later milestone.
+
+WHAT THE USER SHOULD TEST (no new world needed — worldgen unchanged, old
+saves render as before): place a furnace / crafting table from several
+angles -> the front always points back at you; break + replace to
+re-orient. Click the SIDE of a solid block with a torch in hand -> it
+mounts on the wall, tilted out, and lights the area; click a TOP face ->
+floor torch; aim at a ceiling -> placement refused. Dig out the wall a
+wall-torch hangs on -> the torch pops as a drop; dig the floor under a
+standing torch -> still pops. An old save's furnaces/tables keep their +X
+front and old floor torches are unaffected.
+
+## M25 — deeper world (how it works)
+
+CODE COMPLETE 2026-06-13, awaiting user verification. Build + gentest +
+savetest all pass. Decided with the user: 128-tall (8 chunks), NOT full
+vanilla 256 — 128 gives vanilla's actual UNDERGROUND depth (~63 blocks of
+stone/caves/ore from surface to bedrock) without quadrupling streaming cost
+on empty air. NEW WORLD REQUIRED: worldgen heights/sea level changed, so
+unedited chunks in an old save regenerate with the new rules and seam
+against any previously edited chunks (same caveat as M15/M16). This
+supersedes the height/sea-level/ore-band numbers quoted in the M11/M15/M16
+and M21 sections above.
+
+- HEIGHT (`Light.h`): `kWorldHeightChunks` 4 -> 8 (`kWorldHeightBlocks`
+  64 -> 128). Everything structural derives from this constant — LOD,
+  lighting, snapshots, occlusion culling, save format, draw lists all just
+  scaled. The only knock-on constant: `World.h`'s `kLodHeightChunks` is now
+  `kWorldHeightChunks / 2` (= 4; a static_assert guards it), and the
+  LodColumnEntry mesh-handle arrays are filled via a new `InvalidMeshes<N>()`
+  helper instead of a hardcoded 2-element brace list (kInvalidMesh is
+  0xFFFFFFFF, not 0 — value-init would alias real slot 0).
+- SURFACE REBASE (`TerrainGen`): `kSeaLevel` 14 -> 63 (vanilla). The
+  heightmap formula became `kSeaLevel + 3 + base*18 + n*(3 + variation*30)`
+  — the +3 lifts flat plains (~y68) clearly above the beach band (sea+2 =
+  65) so inland flats stay grass instead of turning to sand (the first cut
+  without the lift dropped tree coverage ~5x — gentest's log count caught
+  it). Flats ~y66-73, forests roll more, extreme hills top out ~y102.
+  `kSnowLine` 48 -> 90 (only tall peaks cap with snow now).
+- SPAWN (`GameApp` `kSpawnPos`): y 48 -> 104, above the tallest terrain
+  (~y102), so a fresh world drops the player onto the surface rather than
+  inside a hill. No fall-damage system, so the short drop is harmless. (A
+  ground-search spawn would avoid the drop but needs the spawn chunk loaded,
+  which it isn't yet at EnterWorld — deferred.)
+- ORES (`OreGen`): rebased to essentially vanilla now that the surface sits
+  near vanilla's y64 — coal 20 veins size 17 y2..124 (whole underground),
+  iron 20 veins size 9 y2..62 (lower half; was the deep-only y2..27). Vein
+  horizontal reach is unchanged (size 17 -> ~27 < 32), so the 3x3 origin
+  replay still resolves seams identically. gentest's iron-band assertion
+  loosened from `< 32` to `< kWorldHeightBlocks/2 + 8`.
+- CAVES (`CaveGen`): tunnel start height `nextInt(nextInt(54)+8)` ->
+  `nextInt(nextInt(108)+8)` (doubled with the world, same low bias) so most
+  tunnels sit deep and a few reach up toward the surface. The analytic
+  ocean-breach test and the y clamp are sea-level/height-derived, so they
+  followed automatically.
+- KNOWN M25 LIMITS / decisions: no empty-air-chunk fast path, so chunks
+  above the surface still generate/light/mesh (cheap — interior stone meshes
+  to nothing, cave-culling skips sealed chunks, air meshes empty — but the
+  gen/light jobs still run); doubling height roughly doubled RAM and the
+  debug-build streaming-burst fps dip (release is fine; user accepts debug
+  dips per the standing note). No lava on deep cave floors yet (no lava
+  block — backlog). Hills cap ~y102 (kept below spawn); true vanilla
+  extreme-hills reach higher but mountain height wasn't the goal (digging
+  depth was). 256-tall remains an option later if empty-section culling
+  lands first.
+
+What the user should test (NEW WORLD required): make a New World -> you
+fall a short way onto the surface (~y68). Dig straight down -> a long
+column of stone with caves and ore (coal throughout, iron in the lower
+half) all the way to bedrock at y0 — far deeper than before. Surface looks
+normal (grass plains a few blocks above the water, oceans/beaches at the
+shoreline, snow only on tall peaks). Caves feel deep and extensive. An OLD
+save still loads but its untouched chunks regenerate at the new heights and
+will seam against previously-edited areas (expected — start fresh).
+
+## Backlog (after M25)
+
+The per-block metadata layer M24 added makes SLABS/STAIRS the natural
+follow-on (half/shape state + the partial-collision work M23 deferred).
+Other open candidates, to scope with the user:
+lava (cave floors below ~y10 in vanilla — pairs well now that caves are
+deep; needs a lava block + liquid rules); full 256-tall world (would want
+empty-air-chunk culling first); a settings screen (the audio
+buses + `AudioEngine::SetBusVolume` already exist and want a UI; also
+occlusion / render-distance / sensitivity); tall-grass wheat seeds
+(vanilla 1/8, BlockTallGrass.getItemDropped — pairs with farming);
+flow-animated water (16x512 strip); stars; world-list scrolling;
+vanilla's 14/16 cactus inset +
+touch damage; 3D-extruded item sprites in hand + view bobbing (M20
+polish).
 
 ## How to verify (working agreement — reinforced 2026-06-13)
 

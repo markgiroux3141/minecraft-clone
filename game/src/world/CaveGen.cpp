@@ -200,9 +200,10 @@ struct Carver {
         }
         for (int i = 0; i < count; ++i) {
             const double x = ocx * 16 + rand.NextInt(16);
-            // Vanilla draws nextInt(nextInt(120)+8) under a 256 world;
-            // scaled to our 64-block height, same low bias.
-            const double y = rand.NextInt(rand.NextInt(54) + 8);
+            // Vanilla draws nextInt(nextInt(120)+8) under a 256 world; scaled
+            // to our 128-block height (M25), same low bias — most tunnels sit
+            // deep, a few reach up toward the ~y65 surface.
+            const double y = rand.NextInt(rand.NextInt(108) + 8);
             const double z = ocz * 16 + rand.NextInt(16);
             int tunnels = 1;
             if (rand.NextInt(4) == 0) {

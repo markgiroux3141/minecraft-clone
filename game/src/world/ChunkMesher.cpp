@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cstdint>
 
+#include <glm/gtc/matrix_transform.hpp>
+
 #include "vox/core/Assert.h"
 
 namespace vc {
@@ -20,6 +22,7 @@ constexpr int PadIndex(int x, int y, int z) {
 
 struct PaddedVolume {
     std::array<BlockId, kPadVolume> id;
+    std::array<uint8_t, kPadVolume> meta; // M24 per-cell orientation/state
     std::array<uint8_t, kPadVolume> opaque;
     std::array<uint8_t, kPadVolume> cutout; // alpha-tested cubes (leaves)
     std::array<uint8_t, kPadVolume> cross;  // plants: X-shaped quad pairs
@@ -42,6 +45,7 @@ void FillPadded(const ChunkSnapshot& snapshot, PaddedVolume& out) {
                 const int p = PadIndex(x, y, z);
                 const BlockDef& def = registry.Def(id);
                 out.id[p] = id;
+                out.meta[p] = chunk ? chunk->GetMeta(x & 15, y & 15, z & 15) : 0;
                 out.opaque[p] = def.opaque ? 1 : 0;
                 out.cutout[p] = def.cutout ? 1 : 0;
                 out.cross[p] = def.cross ? 1 : 0;
@@ -138,6 +142,22 @@ CornerSample SampleCorner(const PaddedVolume& vol, const int cell[3], const Face
         sample.block = (blockSum + count / 2) / count;
     }
     return sample;
+}
+
+// M24: texture layer of `face` for a possibly-oriented cube. Most blocks
+// just return faceTiles[face]; a horizontalFacing block (furnace/table)
+// shows its canonical front tile (faceTiles[PosX]) on whatever horizontal
+// face its meta names and the side tile (faceTiles[NegX]) on the other
+// three. Top/bottom are unaffected. Differently-facing neighbors get
+// different keys here, so the greedy merge keeps them apart naturally.
+uint16_t OrientedFaceTile(const BlockDef& def, uint8_t meta, int face) {
+    if (!def.horizontalFacing || face == static_cast<int>(BlockFace::PosY) ||
+        face == static_cast<int>(BlockFace::NegY)) {
+        return def.faceTiles[face];
+    }
+    const int front = static_cast<int>(meta); // meta 0 = PosX (pre-M24 default)
+    return def.faceTiles[face == front ? static_cast<int>(BlockFace::PosX)
+                                       : static_cast<int>(BlockFace::NegX)];
 }
 
 // Mask cell key (uint64), opaque faces only — liquids emit per cell, see
@@ -324,7 +344,7 @@ void EmitCrossCell(ChunkMesh& mesh, const PaddedVolume& vol, int x, int y, int z
 // AO, like the cross plants — these are small emissive/decorative shapes,
 // not surfaces that want neighbor-sampled gradients.
 void EmitModelBox(ChunkMesh& mesh, int cellX, int cellY, int cellZ, const ModelBox& box,
-                  uint32_t sky, uint32_t block) {
+                  uint32_t sky, uint32_t block, const glm::mat4& xform) {
     constexpr float kInv16 = 1.0f / 16.0f;
     const float cell[3] = {static_cast<float>(cellX), static_cast<float>(cellY),
                            static_cast<float>(cellZ)};
@@ -355,10 +375,15 @@ void EmitModelBox(ChunkMesh& mesh, int cellX, int cellY, int cellZ, const ModelB
             // with world-up on the faces whose mask axes are transposed.
             const float tu = (cu[k] ? bf.uv.z : bf.uv.x) * kInv16;
             const float tv = (cv[k] ? bf.uv.w : bf.uv.y) * kInv16;
+            // Orient the box within the cell (identity for floor torches and
+            // unoriented model blocks; a tilt+shift for wall torches). The
+            // transform is a rigid motion, so winding/backface culling and
+            // the (kept) face-index normal stay valid.
+            const glm::vec4 t = xform * glm::vec4(pos[0], pos[1], pos[2], 1.0f);
             mesh.modelVertices.push_back({
-                cell[0] + pos[0],
-                cell[1] + pos[1],
-                cell[2] + pos[2],
+                cell[0] + t.x,
+                cell[1] + t.y,
+                cell[2] + t.z,
                 fb.swapUv ? tv : tu,
                 fb.swapUv ? tu : tv,
                 packed,
@@ -370,14 +395,35 @@ void EmitModelBox(ChunkMesh& mesh, int cellX, int cellY, int cellZ, const ModelB
 // A model-block cell emits all of its boxes. Light is the cell's own
 // (the BFS seeds emissive blocks like the torch at their emission); AO is
 // full-bright. Future model blocks (slabs/stairs) just declare boxes.
+// Cell-local orientation transform (block units, around the cell). Identity
+// unless the block reads its M24 meta — currently only the wall torch, whose
+// upright floor model is tilted out from the wall and shoved against it
+// (vanilla's template_torch_wall). The constants are eyeballed to read as a
+// mounted torch; tweak the tilt/shift if it sits wrong.
+glm::mat4 ModelOrientation(const BlockDef& def, uint8_t meta) {
+    if (!(def.torch && facing::TorchIsWall(meta))) {
+        return glm::mat4(1.0f);
+    }
+    const glm::vec3 dir = glm::vec3(facing::Dir(facing::TorchWallFacing(meta))); // points out
+    const glm::vec3 up(0.0f, 1.0f, 0.0f);
+    const glm::vec3 axis = glm::normalize(glm::cross(up, dir)); // tilt top toward `dir`
+    const glm::vec3 pivot(0.5f, 3.5f / 16.0f, 0.5f); // lower attach point (vanilla origin)
+    const float tilt = glm::radians(22.5f);          // lean away from the wall
+    const glm::vec3 shift = -dir * 0.45f + up * 0.10f; // base against the wall, raised a touch
+    return glm::translate(glm::mat4(1.0f), pivot + shift) *
+           glm::rotate(glm::mat4(1.0f), tilt, axis) *
+           glm::translate(glm::mat4(1.0f), -pivot);
+}
+
 void EmitModelCell(ChunkMesh& mesh, const PaddedVolume& vol, int x, int y, int z) {
     const int p = PadIndex(x, y, z);
     const BlockDef& def = BlockRegistry::Get().Def(vol.id[p]);
     const auto sky = static_cast<uint32_t>(ChunkLight::Sky(vol.light[p]));
     const auto block = std::max(static_cast<uint32_t>(ChunkLight::Block(vol.light[p])),
                                 static_cast<uint32_t>(def.emission));
+    const glm::mat4 xform = ModelOrientation(def, vol.meta[p]);
     for (const ModelBox& box : def.model) {
-        EmitModelBox(mesh, x, y, z, box, sky, block);
+        EmitModelBox(mesh, x, y, z, box, sky, block, xform);
     }
 }
 
@@ -498,7 +544,7 @@ ChunkMesh ChunkMesher::Build(const ChunkSnapshot& snapshot) {
                                                             static_cast<int>(def.emission));
                                 }
                             }
-                            key = MaskKey(def.faceTiles[face], corners);
+                            key = MaskKey(OrientedFaceTile(def, vol.meta[p], face), corners);
                         }
                     }
                     mask[v * Chunk::kSize + u] = key;

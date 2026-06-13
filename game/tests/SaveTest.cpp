@@ -44,6 +44,16 @@ bool SameBlocks(const vc::Chunk& a, const vc::Chunk& b) {
     return a.Raw() == b.Raw();
 }
 
+// MakeChunk plus a few oriented cells (M24): exercises the meta RLE stream
+// and the format bump.
+vc::Chunk MakeMetaChunk(int salt) {
+    vc::Chunk chunk = MakeChunk(salt);
+    chunk.SetMeta(0, 0, 0, 5);
+    chunk.SetMeta(8, 4, 2, 1);
+    chunk.SetMeta(15, 15, 15, 3);
+    return chunk;
+}
+
 } // namespace
 
 int main() {
@@ -172,6 +182,38 @@ int main() {
         Check(inv.has_value() && inv->size() == 1 && (*inv)[0].slot == 3 && (*inv)[0].id == 7 &&
                   (*inv)[0].count == 12 && (*inv)[0].damage == 0,
               "legacy triple-form inventory tag still parses");
+    }
+    {
+        // M24: orientation meta round-trips, an unoriented chunk still
+        // encodes to the legacy (meta-less) format, and an oriented one uses
+        // the new format.
+        const std::filesystem::path mdir = dir / "meta";
+        std::filesystem::remove_all(mdir);
+        const glm::ivec3 plain{1, 0, 1};
+        const glm::ivec3 oriented{2, 1, -40};
+        {
+            vc::WorldSave save(mdir, 9);
+            save.Put(plain, MakeChunk(3));
+            save.Put(oriented, MakeMetaChunk(4));
+            save.Flush(true);
+        }
+        vc::WorldSave save(mdir, 9);
+        const auto* plainBlob = save.FindBlob(plain);
+        const auto* metaBlob = save.FindBlob(oriented);
+        Check(plainBlob && !plainBlob->empty() && ((*plainBlob)[0] == 0 || (*plainBlob)[0] == 1),
+              "unoriented chunk keeps the legacy meta-less format");
+        Check(metaBlob && !metaBlob->empty() && ((*metaBlob)[0] == 2 || (*metaBlob)[0] == 3),
+              "oriented chunk uses the meta-bearing format");
+        vc::Chunk decodedPlain;
+        vc::Chunk decodedMeta;
+        Check(plainBlob && vc::WorldSave::Decode(*plainBlob, decodedPlain) &&
+                  SameBlocks(decodedPlain, MakeChunk(3)) &&
+                  decodedPlain.RawMeta() == vc::Chunk{}.RawMeta(),
+              "legacy blob decodes to all-zero meta");
+        Check(metaBlob && vc::WorldSave::Decode(*metaBlob, decodedMeta) &&
+                  SameBlocks(decodedMeta, MakeMetaChunk(4)) &&
+                  decodedMeta.RawMeta() == MakeMetaChunk(4).RawMeta(),
+              "oriented chunk round-trips ids AND meta exactly");
     }
 
     std::filesystem::remove_all(dir);

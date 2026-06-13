@@ -232,6 +232,7 @@ void RegisterDefaults() {
     craftingTable.faceTiles[static_cast<size_t>(BlockFace::PosY)] = 40;
     craftingTable.faceTiles[static_cast<size_t>(BlockFace::NegY)] = 39;
     craftingTable.faceTiles[static_cast<size_t>(BlockFace::PosX)] = 42;
+    craftingTable.horizontalFacing = true; // M24: front points at the placer
     craftingTable.hardness = 2.5f;
     craftingTable.toolClass = ToolClass::Axe;
     craftingTable.soundType = SoundType::Wood;
@@ -255,7 +256,8 @@ void RegisterDefaults() {
     IronOre = registry.Register(std::move(ironOre));
 
     // M21 furnace (tiles 52 front off / 53 front on / 54 side / 55 top):
-    // front faces +X like the crafting table (no orientation data yet).
+    // front (PosX = canonical) is reoriented per-cell by M24 facing meta to
+    // point at the placer; the side tile (54) fills the other horizontals.
     // The lit variant is a separate id (swap on burn state) and emits
     // light 13 (vanilla 0.875 luminance); it drops the unlit furnace.
     const auto furnaceDef = [](std::string name, uint16_t front) {
@@ -263,6 +265,7 @@ void RegisterDefaults() {
         def.faceTiles[static_cast<size_t>(BlockFace::PosY)] = 55;
         def.faceTiles[static_cast<size_t>(BlockFace::NegY)] = 55;
         def.faceTiles[static_cast<size_t>(BlockFace::PosX)] = front;
+        def.horizontalFacing = true; // M24: front points at the placer
         def.hardness = 3.5f;
         def.toolClass = ToolClass::Pickaxe;
         def.needsPickaxe = true;
