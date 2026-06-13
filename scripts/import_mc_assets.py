@@ -13,6 +13,7 @@ Requires Pillow (same as gen_font.py). Usage:
     python scripts/import_mc_assets.py [path-to-minecraft-assets-root]
 """
 
+import json
 import shutil
 import sys
 from pathlib import Path
@@ -210,17 +211,94 @@ def build_atlas(mc: Path, out_path: Path) -> None:
           f"grass tint {grass_tint}, foliage tint {foliage_tint})")
 
 
-def main() -> None:
-    mc = Path(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_MC_ASSETS
-    if not (mc / "textures" / "blocks").is_dir():
-        raise SystemExit(f"Minecraft assets not found at {mc}")
-    assets = Path(__file__).resolve().parent.parent / "assets"
+# M22 audio. Vanilla sounds DO ship with the MCP source — not as loose .ogg
+# files, but in the launcher-style HASHED object store at mcp940/jars/assets:
+# indexes/<ver>.json maps a name ("minecraft/sounds/dig/stone1.ogg") to a
+# hash, and the bytes live at objects/<hash[:2]>/<hash> with NO extension
+# (which is why a plain *.ogg search turns up nothing). We resolve the 1.12
+# index and copy the families the game uses into gitignored assets/mc/sounds/
+# (zero distribution, same as the textures). Same source tree as the textures
+# — no launcher install needed.
+SOUND_INDEX = "1.12"
+
+
+def sounds_store_for(mc: Path) -> Path:
+    # mc = .../mcp940/src/minecraft/assets/minecraft  ->  .../mcp940/jars/assets
+    return mc.parents[3] / "jars" / "assets"
+
+
+def want_sound(rel: str) -> str | None:
+    # rel = the index name minus "minecraft/sounds/". Returns the destination
+    # path under assets/mc/sounds/, or None to skip. Music is flattened from
+    # music/game/<name>.ogg to music/<name>.ogg (the game loads it flat).
+    for family in ("dig/", "step/", "ambient/cave/", "liquid/", "fire/"):
+        if rel.startswith(family):
+            return rel
+    if rel in ("random/pop.ogg", "random/glass1.ogg", "random/glass2.ogg",
+               "random/glass3.ogg"):
+        return rel
+    if rel.startswith("music/game/") and rel.count("/") == 2:
+        return "music/" + rel.rsplit("/", 1)[1]
+    return None
+
+
+def import_textures(mc: Path, assets: Path) -> None:
     build_atlas(mc, assets / "mc" / "textures" / "atlas.png")
     for src, dst in COPIES:
         target = assets / "mc" / dst
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(mc / src, target)
         print(f"copied {src} -> {target}")
+
+
+def import_sounds(store: Path, assets: Path) -> None:
+    index = store / "indexes" / f"{SOUND_INDEX}.json"
+    if not index.is_file():
+        print(f"(skipping sounds: no index at {index})")
+        return
+    objects = json.loads(index.read_text())["objects"]
+    out = assets / "mc" / "sounds"
+    prefix = "minecraft/sounds/"
+    count = 0
+    for name, meta in objects.items():
+        if not (name.startswith(prefix) and name.endswith(".ogg")):
+            continue
+        dst_rel = want_sound(name[len(prefix):])
+        if dst_rel is None:
+            continue
+        h = meta["hash"]
+        src = store / "objects" / h[:2] / h
+        if not src.is_file():
+            continue
+        target = out / dst_rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, target)
+        count += 1
+    print(f"copied {count} sound files -> {out}")
+
+
+def main() -> None:
+    args = sys.argv[1:]
+    sounds_store: Path | None = None
+    if "--sounds-store" in args:
+        i = args.index("--sounds-store")
+        sounds_store = Path(args[i + 1])
+        del args[i : i + 2]
+    mc = Path(args[0]) if args else DEFAULT_MC_ASSETS
+
+    assets = Path(__file__).resolve().parent.parent / "assets"
+
+    # Each source is optional so the script still runs with only one present.
+    if (mc / "textures" / "blocks").is_dir():
+        import_textures(mc, assets)
+    else:
+        print(f"(skipping textures: not found at {mc})")
+
+    store = sounds_store or sounds_store_for(mc)
+    if store.is_dir():
+        import_sounds(store, assets)
+    else:
+        print(f"(skipping sounds: no asset store at {store})")
 
 
 if __name__ == "__main__":

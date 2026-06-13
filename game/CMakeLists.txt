@@ -1,4 +1,6 @@
 add_executable(game
+    src/audio/Sounds.cpp
+    src/audio/Sounds.h
     src/Crafting.cpp
     src/Crafting.h
     src/GameApp.cpp

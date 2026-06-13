@@ -102,6 +102,7 @@ void Player::Tick(const vc::World& world, double dt, bool input) {
     m_prevPosition = m_position;
     m_inputEnabled = input;
     if (m_mode == Mode::Fly) {
+        m_inWater = false; // noclip: no footsteps/splash
         TickFly(static_cast<float>(dt));
     } else {
         TickWalk(world, static_cast<float>(dt));
@@ -130,6 +131,7 @@ void Player::TickWalk(const vc::World& world, float dt) {
     };
     const bool inWater = waterAt(m_position.x, m_position.y + 0.4f, m_position.z);
     const bool headInWater = waterAt(m_position.x, m_position.y + kEyeHeight, m_position.z);
+    m_inWater = inWater; // M22: footstep/splash audio reads this
 
     float speed = kWalkSpeed;
     if (KeyDown(vox::Key::LeftControl)) {

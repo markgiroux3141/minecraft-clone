@@ -195,6 +195,17 @@ public:
     // store's furnaces.dat sidecar.
     FurnaceState& FurnaceAt(const glm::ivec3& worldPos) { return m_furnaces[worldPos]; }
 
+    // M22: invoke fn(worldPos) for each tracked furnace whose block is
+    // currently lit (burning). Lets the audio layer keep one crackle loop per
+    // lit furnace without World ever knowing about audio. Skips furnaces in
+    // unloaded chunks (GetBlock returns air there), so loops stop on unload.
+    template <typename Fn>
+    void ForEachLitFurnace(Fn&& fn) const {
+        for (const auto& [pos, state] : m_furnaces) {
+            if (GetBlock(pos.x, pos.y, pos.z) == blocks::LitFurnace) fn(pos);
+        }
+    }
+
     // Packed light at a world position (sky 15 above the world, 0 when
     // unloaded/below). Used for entity lighting too.
     uint8_t PackedLightAt(const glm::ivec3& worldPos) const;

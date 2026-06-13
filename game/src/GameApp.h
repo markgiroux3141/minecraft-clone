@@ -5,8 +5,10 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
+#include "vox/audio/AudioEngine.h"
 #include "vox/core/Application.h"
 #include "vox/renderer/Camera.h"
 #include "vox/renderer/Shader.h"
@@ -18,6 +20,7 @@
 #include "Particles.h"
 #include "Player.h"
 #include "ViewModel.h"
+#include "audio/Sounds.h"
 #include "ui/Widgets.h"
 #include "world/World.h"
 
@@ -64,6 +67,12 @@ private:
     // Tosses an item entity forward from the eye (Q key, container throws).
     void ThrowItem(const vc::ItemStack& stack);
 
+    // M22 audio. m_audio is declared first so it outlives m_sounds (which
+    // holds a pointer to it) and the furnace-loop voices; OnShutdown also
+    // tears it down explicitly before the world goes away.
+    vox::AudioEngine m_audio;
+    vc::GameSounds m_sounds;
+
     vox::PerspectiveCamera m_camera;
     Player m_player{m_camera};
 
@@ -95,6 +104,23 @@ private:
     std::unique_ptr<vc::ParticleSystem> m_particles;
     std::unique_ptr<vc::ViewModel> m_viewModel;
     double m_chipAccum = 0.0; // dig hit-chip spawn pacing (one per tick)
+
+    // M22 audio runtime state.
+    struct IVec3Hash {
+        size_t operator()(const glm::ivec3& v) const {
+            return (static_cast<size_t>(static_cast<uint32_t>(v.x)) * 73856093u) ^
+                   (static_cast<size_t>(static_cast<uint32_t>(v.y)) * 19349663u) ^
+                   (static_cast<size_t>(static_cast<uint32_t>(v.z)) * 83492791u);
+        }
+    };
+    // One crackle voice per currently-lit furnace, reconciled each frame.
+    std::unordered_map<glm::ivec3, vox::VoiceHandle, IVec3Hash> m_furnaceLoops;
+    double m_digSoundAccum = 0.0; // mining-tick dig sound pacing
+    double m_stepDistance = 0.0;  // horizontal travel since the last footstep
+    glm::vec3 m_lastFootPos{0.0f};
+    bool m_footInit = false;
+    bool m_wasGrounded = true;
+    bool m_wasInWater = false;
 
     // Frustum-surviving chunks for the frame's multi-draws (reused scratch):
     // opaque front-to-back, then water back-to-front in the blended pass.

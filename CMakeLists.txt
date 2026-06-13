@@ -7,9 +7,12 @@ include(ProjectDefaults)
 
 # Drop MSVC's /RTC1 from Debug so hot worker files can opt into /O2 (the
 # two are mutually exclusive). Debug stays unoptimized everywhere else;
-# see the set_source_files_properties block in game/CMakeLists.txt.
+# see the set_source_files_properties block in game/CMakeLists.txt and the
+# miniaudio target in third_party/CMakeLists.txt (stb_vorbis.c is C, hence
+# the C-flags variant too).
 if(MSVC)
     string(REPLACE "/RTC1" "" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+    string(REPLACE "/RTC1" "" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
 endif()
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)

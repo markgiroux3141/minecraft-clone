@@ -65,6 +65,7 @@ BlockDef Plant(std::string name, uint16_t tile) {
     def.cross = true;
     def.replaceable = true;
     def.hardness = 0.0f; // vanilla: plants break instantly
+    def.soundType = SoundType::Grass;
     return def;
 }
 
@@ -74,6 +75,7 @@ BlockDef LogDef(std::string name, uint16_t sideTile, uint16_t topTile) {
     def.faceTiles[static_cast<size_t>(BlockFace::NegY)] = topTile;
     def.hardness = 2.0f; // vanilla BlockLog
     def.toolClass = ToolClass::Axe;
+    def.soundType = SoundType::Wood;
     return def;
 }
 
@@ -84,6 +86,7 @@ BlockDef LeavesDef(std::string name, uint16_t tile) {
     def.lightOpacity = 1;
     def.hardness = 0.2f;     // vanilla BlockLeaves
     def.drop = blocks::Air;  // nothing without shears/saplings (M18 table)
+    def.soundType = SoundType::Grass;
     return def;
 }
 
@@ -110,6 +113,7 @@ void RegisterDefaults() {
     BlockDef dirt = BlockDef::Uniform("dirt", 1);
     dirt.hardness = 0.5f;
     dirt.toolClass = ToolClass::Shovel;
+    dirt.soundType = SoundType::Gravel; // vanilla soft "ground" dig
     Dirt = registry.Register(std::move(dirt));
 
     BlockDef grass = BlockDef::Uniform("grass", 2);
@@ -117,6 +121,7 @@ void RegisterDefaults() {
     grass.faceTiles[static_cast<size_t>(BlockFace::NegY)] = 1;
     grass.hardness = 0.6f;
     grass.toolClass = ToolClass::Shovel;
+    grass.soundType = SoundType::Grass;
     Grass = registry.Register(std::move(grass));
 
     BlockDef glowstone = BlockDef::Uniform("glowstone", 4);
@@ -128,6 +133,7 @@ void RegisterDefaults() {
     sand.gravity = true;
     sand.hardness = 0.5f;
     sand.toolClass = ToolClass::Shovel;
+    sand.soundType = SoundType::Sand;
     Sand = registry.Register(std::move(sand));
 
     Log = registry.Register(LogDef("log", 6, 7));
@@ -143,6 +149,7 @@ void RegisterDefaults() {
     water.liquid = true;
     water.liquidLevel = 8;  // source
     water.lightOpacity = 3; // vanilla: skylight fades 3/block of depth
+    water.soundType = SoundType::None; // splash handled separately, no dig/step
     Water = registry.Register(std::move(water));
 
     // Flow levels share the source's look and properties; the level only
@@ -154,6 +161,7 @@ void RegisterDefaults() {
         flow.liquid = true;
         flow.liquidLevel = static_cast<uint8_t>(level);
         flow.lightOpacity = 3;
+        flow.soundType = SoundType::None;
         WaterFlows[static_cast<size_t>(level - 1)] = registry.Register(std::move(flow));
     }
 
@@ -164,6 +172,7 @@ void RegisterDefaults() {
     snowyGrass.faceTiles[static_cast<size_t>(BlockFace::NegY)] = 1;
     snowyGrass.hardness = 0.6f;
     snowyGrass.toolClass = ToolClass::Shovel;
+    snowyGrass.soundType = SoundType::Snow;
     SnowyGrass = registry.Register(std::move(snowyGrass));
 
     // M16 plants (appended after SnowyGrass): cross-meshed, alpha-tested,
@@ -183,6 +192,7 @@ void RegisterDefaults() {
     BlockDef cactus = LogDef("cactus", 22, 23);
     cactus.hardness = 0.4f; // vanilla (LogDef defaulted it to wood's 2.0)
     cactus.toolClass = ToolClass::None; // vanilla cactus material: no tool
+    cactus.soundType = SoundType::Cloth; // vanilla cactus material (LogDef set Wood)
     Cactus = registry.Register(std::move(cactus));
 
     // M16: sandstone (tiles 24 side / 25 top / 26 bottom) — the vanilla
@@ -215,6 +225,7 @@ void RegisterDefaults() {
     BlockDef planks = BlockDef::Uniform("planks", 39);
     planks.hardness = 2.0f;
     planks.toolClass = ToolClass::Axe;
+    planks.soundType = SoundType::Wood;
     Planks = registry.Register(std::move(planks));
 
     BlockDef craftingTable = BlockDef::Uniform("crafting table", 41);
@@ -223,6 +234,7 @@ void RegisterDefaults() {
     craftingTable.faceTiles[static_cast<size_t>(BlockFace::PosX)] = 42;
     craftingTable.hardness = 2.5f;
     craftingTable.toolClass = ToolClass::Axe;
+    craftingTable.soundType = SoundType::Wood;
     CraftingTable = registry.Register(std::move(craftingTable));
 
     // M21 ores (tiles 50/51, after the M19 item sprites at 43..49).
@@ -269,6 +281,7 @@ void RegisterDefaults() {
     glass.cutout = true;
     glass.hardness = 0.3f;
     glass.drop = blocks::Air;
+    glass.soundType = SoundType::Glass; // break = random/glass; dig/step fall back to stone
     Glass = registry.Register(std::move(glass));
 
     // M21 follow-up: torch (tile 62, after the M21 item sprites at
@@ -282,6 +295,7 @@ void RegisterDefaults() {
     torch.replaceable = true;
     torch.hardness = 0.0f;
     torch.emission = 14;
+    torch.soundType = SoundType::Wood;
     // The mesher's torch top cap reads faceTiles[PosY]: a dedicated
     // opaque flame-top sprite (tile 63), not the side post (tile 62).
     torch.faceTiles[static_cast<size_t>(BlockFace::PosY)] = 63;

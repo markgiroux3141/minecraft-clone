@@ -160,7 +160,19 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   250 uses). Follow-up: floor-standing torches (light 14, vanilla
   4-inset-plane mesh riding spare packed-vertex bits, coal + stick ->
   4); wall mounting waits for block orientation data.
-- **Backlog**: deeper world (kWorldHeightChunks 4 → 8), audio engine,
+- **M22 — Audio** ✅: `vox::AudioEngine` (miniaudio high-level engine +
+  stb_vorbis pre-decode to PCM, 3D spatialized one-shots, looping voices,
+  Master/Sfx/Music/Ambient buses, generation-tagged voice handles) behind
+  a PIMPL facade; `BlockDef::soundType` (vanilla StepSound classes) driving
+  per-material dig/break/place/footstep sounds, item-pickup pop, water
+  splash, per-lit-furnace crackle loop (reconciled each frame, World stays
+  audio-free via `ForEachLitFurnace`), dark-cave ambient, and sparse
+  background music (decoded on demand, one track at a time). Real 1.12
+  `.ogg`s import from the MCP source's hashed object store
+  (`mcp940/jars/assets`, resolved via `indexes/1.12.json`) into gitignored
+  `assets/mc/sounds/` (zero distribution); a clean clone loads invalid
+  handles and runs silent.
+- **Backlog**: deeper world (kWorldHeightChunks 4 → 8),
   tall-grass wheat seeds (1/8 chance, BlockTallGrass — pairs
   with farming), animated water, lava, stars, world-list scrolling,
   settings screen, vanilla's 14/16 cactus inset, 3D-extruded item

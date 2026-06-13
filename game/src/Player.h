@@ -41,6 +41,7 @@ public:
     // Persisted into the world save on exit.
     glm::vec3 Position() const { return m_position; } // feet center
     bool Grounded() const { return m_grounded; } // vanilla dig-speed penalty input
+    bool InWater() const { return m_inWater; }    // M22: footstep/splash audio
     float Yaw() const { return m_yaw; }
     float Pitch() const { return m_pitch; }
 
@@ -71,6 +72,7 @@ private:
     float m_yaw = -90.0f;
     float m_pitch = 0.0f;
     bool m_grounded = false;
+    bool m_inWater = false;     // cached in TickWalk for footstep/splash audio
     bool m_inputEnabled = true; // this tick's input flag (see Tick)
     Mode m_mode = Mode::Walk;
 

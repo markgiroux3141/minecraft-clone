@@ -18,6 +18,13 @@ enum class BlockFace : uint8_t { PosX = 0, NegX, PosY, NegY, PosZ, NegZ };
 // kind of tool the item is).
 enum class ToolClass : uint8_t { None, Pickaxe, Axe, Shovel };
 
+// M22: vanilla Block.StepSound class — picks the dig/break/place/step sound
+// set. Names map to the assets/mc/sounds/sound/{dig,step}/<material>N.ogg
+// families (cloth/grass/gravel/sand/snow/stone/wood). None = silent (air,
+// water). Glass has only a break sound (random/glass); its dig/step/place
+// fall back to the stone set (vanilla parity).
+enum class SoundType : uint8_t { None, Stone, Wood, Grass, Gravel, Sand, Snow, Cloth, Glass };
+
 struct BlockDef {
     std::string name;
     bool opaque = true;   // hides adjacent faces
@@ -64,6 +71,10 @@ struct BlockDef {
     // reach this for the block to drop (0 = wood suffices, 1 = stone+,
     // 2 = iron+). Only meaningful when needsPickaxe is set.
     uint8_t harvestLevel = 0;
+    // M22: which dig/break/place/step sound set this block uses. Stone is the
+    // sensible default (most of the world is stony); helpers/RegisterDefaults
+    // override per material.
+    SoundType soundType = SoundType::Stone;
     std::array<uint16_t, 6> faceTiles{}; // texture-array layer per face
 
     uint16_t ResolveDrop(BlockId self) const { return drop == kDropSelf ? self : drop; }

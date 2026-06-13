@@ -253,6 +253,13 @@ void GameApp::OnInit() {
 
     m_camera.SetPerspective(70.0f, 0.1f, 1000.0f);
     m_camera.SetViewportSize(GetWindow().Width(), GetWindow().Height());
+
+    // M22 audio: open the device and load the sound sets. Init failure (no
+    // device) leaves a silent no-op engine — the game runs on mute. Clips load
+    // from the gitignored assets/mc/sounds/ overlay; a clean clone is silent.
+    m_audio.Init();
+    m_sounds.Load(m_audio);
+
     // Starts on the title screen: no world yet, cursor free for the menu.
 }
 
@@ -308,6 +315,7 @@ void GameApp::EnterWorld(const std::string& name, int defaultSeed) {
 
     m_state = State::Playing;
     m_target.reset();
+    m_footInit = false; // re-seed footstep tracking at the new spawn
     GetWindow().SetCursorCaptured(true);
     // Same guard as unpausing: buttons held through the menu click must be
     // re-pressed before they edit the world.
@@ -328,6 +336,11 @@ void GameApp::CreateNewWorld() {
 
 void GameApp::ExitToTitle() {
     PersistPlayerState();
+    // Stop any furnace crackle loops before the world (and its furnaces) vanish.
+    for (auto& [pos, voice] : m_furnaceLoops) {
+        m_sounds.StopFurnaceLoop(voice);
+    }
+    m_furnaceLoops.clear();
     m_world.reset(); // ~World saves edited chunks and force-flushes the store
     m_target.reset();
     m_state = State::Title;
@@ -374,13 +387,56 @@ void GameApp::OnTick(double dt) {
         // reach (1.0, 0.5, 1.0); whatever the bag can't hold stays put.
         const glm::vec3 feet = m_player.Position();
         const glm::vec3 reach{Player::kHalfWidth + 1.0f, 0.5f, Player::kHalfWidth + 1.0f};
+        bool pickedUp = false;
         m_world->PickupItems(feet - reach,
                              feet + glm::vec3{0.0f, Player::kHeight, 0.0f} + reach,
                              [&](uint16_t id, int count, int damage) {
                                  const vc::ItemStack leftover =
                                      m_inventory.Add({id, count, damage});
-                                 return count - leftover.count;
+                                 const int taken = count - leftover.count;
+                                 if (taken > 0) pickedUp = true;
+                                 return taken;
                              });
+        if (pickedUp) m_sounds.PlayPickup(); // one pop per tick max
+
+        // M22: footsteps, landing thud, and a splash when entering water. The
+        // supporting block's SoundType picks the footstep set; None (air/water)
+        // makes PlayStep a no-op.
+        constexpr float kStepStride = 1.7f; // blocks travelled between footsteps
+        const auto soundUnder = [&](const glm::vec3& f) {
+            const vc::BlockId b =
+                m_world->GetBlock(static_cast<int>(std::floor(f.x)),
+                                  static_cast<int>(std::floor(f.y - 0.2f)),
+                                  static_cast<int>(std::floor(f.z)));
+            return vc::BlockRegistry::Get().Def(b).soundType;
+        };
+        const bool grounded = m_player.Grounded();
+        const bool inWater = m_player.InWater();
+        if (!m_footInit) {
+            m_lastFootPos = feet;
+            m_wasGrounded = grounded;
+            m_wasInWater = inWater;
+            m_footInit = true;
+        }
+        if (inWater && !m_wasInWater) {
+            m_sounds.PlaySplash(feet + glm::vec3{0.0f, 0.2f, 0.0f});
+        }
+        if (grounded && !m_wasGrounded && !inWater) {
+            m_sounds.PlayLand(soundUnder(feet), feet);
+            m_stepDistance = 0.0;
+        }
+        if (grounded && !inWater && m_state == State::Playing) {
+            const float dx = feet.x - m_lastFootPos.x;
+            const float dz = feet.z - m_lastFootPos.z;
+            m_stepDistance += std::sqrt(dx * dx + dz * dz);
+            if (m_stepDistance >= kStepStride) {
+                m_stepDistance = 0.0;
+                m_sounds.PlayStep(soundUnder(feet), feet);
+            }
+        }
+        m_lastFootPos = feet;
+        m_wasGrounded = grounded;
+        m_wasInWater = inWater;
 
         m_worldTime += 1.0;
         if (m_state == State::Playing && vox::Input::IsKeyDown(vox::Key::T)) {
@@ -502,9 +558,11 @@ void GameApp::HandleInput(double frameDt, int scroll) {
         if (breakDown && m_target && (!m_breakWasDown || m_breakCooldown == 0.0)) {
             const vc::BlockId targetId =
                 m_world->GetBlock(m_target->block.x, m_target->block.y, m_target->block.z);
-            if (!vc::BlockRegistry::Get().Def(targetId).unbreakable) {
+            const vc::BlockDef& def = vc::BlockRegistry::Get().Def(targetId);
+            if (!def.unbreakable) {
                 m_world->SetBlock(m_target->block, vc::blocks::Air);
                 m_particles->SpawnBlockDestroy(*m_world, m_target->block, targetId);
+                m_sounds.PlayBreak(def.soundType, glm::vec3(m_target->block) + 0.5f);
                 m_viewModel->TriggerSwing();
             }
             m_breakCooldown = kEditRepeatDelay;
@@ -529,6 +587,7 @@ void GameApp::HandleInput(double frameDt, int scroll) {
             if (!m_digCell || *m_digCell != m_target->block) {
                 m_digCell = m_target->block;
                 m_digProgress = 0.0f;
+                m_digSoundAccum = 1.0; // play a dig sound on the first hit
             }
             if (m_breakCooldown == 0.0) {
                 // Vanilla digging feedback: continuous arm swing + one
@@ -539,6 +598,12 @@ void GameApp::HandleInput(double frameDt, int scroll) {
                     m_chipAccum = 0.0;
                     m_particles->SpawnBlockHit(*m_world, m_target->block, m_target->normal,
                                                targetId);
+                }
+                // Dig sound on the vanilla ~4-tick mining cadence.
+                m_digSoundAccum += frameDt;
+                if (m_digSoundAccum >= 0.2) {
+                    m_digSoundAccum = 0.0;
+                    m_sounds.PlayDig(def.soundType, glm::vec3(m_target->block) + 0.5f);
                 }
                 vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
                 const vc::ItemDef* tool = vc::ItemRegistry::Get().Find(hand.id);
@@ -568,6 +633,7 @@ void GameApp::HandleInput(double frameDt, int scroll) {
                 if (m_digProgress >= 1.0f) {
                     m_world->SetBlock(m_target->block, vc::blocks::Air);
                     m_particles->SpawnBlockDestroy(*m_world, m_target->block, targetId);
+                    m_sounds.PlayBreak(def.soundType, glm::vec3(m_target->block) + 0.5f);
                     if (canHarvest) {
                         m_world->SpawnBlockDrop(m_target->block, def.ResolveDrop(targetId), 1);
                     }
@@ -629,6 +695,8 @@ void GameApp::HandleInput(double frameDt, int scroll) {
             if (!hand.Empty() && vc::IsBlockItem(hand.id) && supported &&
                 !m_world->IsSolid(cell.x, cell.y, cell.z) && !m_player.Intersects(cell)) {
                 m_world->SetBlock(cell, static_cast<vc::BlockId>(hand.id));
+                m_sounds.PlayPlace(vc::BlockRegistry::Get().Def(hand.id).soundType,
+                                   glm::vec3(cell) + 0.5f);
                 m_viewModel->TriggerSwing();
                 if (--hand.count <= 0) {
                     hand = {};
@@ -766,6 +834,41 @@ void GameApp::OnRender(double alpha, double frameDt) {
             HandleInput(frameDt, scroll);
         }
         m_world->Update(m_camera.Position());
+
+        // M22 audio: the listener rides the camera; Update reaps finished
+        // one-shots and advances fades. These run every frame (even paused) so
+        // tails finish cleanly.
+        const glm::vec3 eye = m_camera.Position();
+        m_audio.SetListener(eye, m_camera.Forward(), glm::vec3{0.0f, 1.0f, 0.0f});
+        m_audio.Update(frameDt);
+
+        if (playing || ContainerOpen()) {
+            // Keep one crackle loop per lit furnace: start new ones, stop those
+            // that went out or unloaded (ForEachLitFurnace skips unloaded).
+            std::vector<glm::ivec3> litThisFrame;
+            m_world->ForEachLitFurnace([&](const glm::ivec3& pos) {
+                litThisFrame.push_back(pos);
+                auto it = m_furnaceLoops.find(pos);
+                if (it == m_furnaceLoops.end() || !m_audio.IsVoiceActive(it->second)) {
+                    m_furnaceLoops[pos] = m_sounds.StartFurnaceLoop(glm::vec3(pos) + 0.5f);
+                }
+            });
+            for (auto it = m_furnaceLoops.begin(); it != m_furnaceLoops.end();) {
+                if (std::find(litThisFrame.begin(), litThisFrame.end(), it->first) ==
+                    litThisFrame.end()) {
+                    m_sounds.StopFurnaceLoop(it->second);
+                    it = m_furnaceLoops.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+
+            // Cave ambient when the eye sits in near-darkness; sparse music.
+            const uint8_t light = m_world->PackedLightAt(glm::ivec3(glm::floor(eye)));
+            const bool inDarkness = (light >> 4) < 4 && (light & 0x0F) < 4;
+            m_sounds.UpdateAmbient(inDarkness, frameDt, eye);
+            m_sounds.UpdateMusic(frameDt);
+        }
     }
 
     vox::Renderer::Clear();
@@ -1036,5 +1139,6 @@ void GameApp::OnResize(uint32_t width, uint32_t height) {
 
 void GameApp::OnShutdown() {
     PersistPlayerState(); // window-close path; ExitToTitle covers the menu path
+    m_audio.Shutdown();   // stop the audio thread before members tear down
     GAME_INFO("Voxcraft shutting down after {} ticks", m_totalTicks);
 }

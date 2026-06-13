@@ -1,12 +1,11 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-12, written for a FRESH CONTEXT. M0-M20 are all done
-and USER-VERIFIED (M20 "perfect" after two follow-up fixes: arm
-orientation + mouse-wheel hotbar scroll). M21 (ORES +
-FURNACE/SMELTING) is CODE COMPLETE awaiting user verification — see
-its section at the bottom for what was built and what to test. Read
-alongside `ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md`
-(build commands, conventions).
+Updated: 2026-06-13, written for a FRESH CONTEXT. M0-M20 and M22 (AUDIO)
+are all done and USER-VERIFIED (M22: "beautiful, it all works"). M21
+(ORES + FURNACE/SMELTING + torches) is CODE COMPLETE awaiting explicit
+user verification — see its section at the bottom for what was built and
+what to test. Read alongside `ARCHITECTURE.md` (layering rules, roadmap)
+and `CLAUDE.md` (build commands, conventions).
 
 IMPORTANT RESOURCE: the user has Minecraft's Java source (MCP 9.40 =
 1.12) at `D:\Minecraft source code` — look up exact game dynamics there
@@ -1057,18 +1056,129 @@ ground); dig out the block under one -> it pops as a drop; flowing
 water washes it away (drop pops). Breaking is instant; quit/reload
 keeps placed torches (they're normal blocks).
 
-## Next: audio engine (DECIDED with the user, 2026-06-12)
+## M22 — Audio engine (how it works)
 
-Agreed: torches landed as the M21 follow-up, the NEXT MILESTONE IS
-AUDIO, in a fresh context. Dig/place sounds complete the mining feel.
-Start by surveying the 1.12 sound assets — the M14 notes mention the
-.ogg hashed-store layout (sounds.json maps names -> hashed files in
-the assets store; check what the local source tree actually has at
-D:\Minecraft source code). Engine work: an audio module under
-engine/src/vox/ (miniaudio is the obvious single-header backend),
-game work: block dig/break/place sounds keyed by a BlockDef sound
-class, item pickup pop, maybe ambient cave/music later. Scope the
-milestone with the user before building.
+USER-VERIFIED 2026-06-13 ("beautiful, it all works"). Build + gentest +
+savetest all pass; a clean-exit launch was good (device opened at 48 kHz,
+113 SFX clips decoded in ~220 ms, 12 music tracks kept as paths, 82 ticks
+of gameplay, clean "audio shutting down"). Scope DECIDED with the user:
+"Full pass" — SFX + footsteps + ambient + furnace crackle + music.
+
+- ASSET FINDING (the prior session was RIGHT — I briefly doubted it and
+  was wrong): vanilla `.ogg`s ARE in the MCP source, in the launcher-style
+  HASHED object store at `D:\Minecraft source code\mcp940\jars\assets`.
+  `indexes/1.12.json` maps a name ("minecraft/sounds/dig/stone1.ogg") to a
+  SHA1 hash; the bytes live at `objects/<hash[:2]>/<hash>` with NO `.ogg`
+  extension — which is why a naive `find -iname *.ogg` (or a `sounds.json`
+  search) turns up nothing. The 1.12 index has 1085 sound entries:
+  `sounds/{dig,step}/<mat>N.ogg` (cloth/grass/gravel/sand/snow/stone/wood),
+  `sounds/random/{pop,glass1-3}`, `sounds/ambient/cave/cave1-18`,
+  `sounds/liquid/{splash,splash2,swim,...}`, `sounds/fire/{fire,ignite}`,
+  `sounds/music/game/{calm,hal,piano,nuance}*`. (The user's Technic install
+  has a 1.7.10 `virtual/legacy` store with real filenames too — equivalent
+  for these sounds — but we use mcp940 since it's the same canonical source
+  tree as the textures and needs no launcher install.)
+- ENGINE (`engine/src/vox/audio/AudioEngine.{h,cpp}`, namespace `vox`):
+  PIMPL facade over miniaudio's high-level engine (mirrors how
+  `vox::Renderer` hides glad — miniaudio.h never leaks into the header;
+  linked PRIVATE). Backend chosen after checking: miniaudio's built-in
+  decoders are WAV/FLAC/MP3 only, and its example Vorbis backends need
+  external libvorbis. So we PRE-DECODE each `.ogg` to s16 PCM with
+  stb_vorbis (`stb_vorbis_decode_filename`) at load and feed miniaudio
+  via per-voice `ma_audio_buffer_ref` (each ref carries its own read
+  cursor, so one cached clip plays concurrently). No custom decoding
+  vtable, no resource-manager config, no external deps. API: `Init`/
+  `Shutdown` (idempotent; Init returns false -> silent no-op engine if
+  no device), `LoadClip` (decode+cache; missing file -> invalid handle,
+  silent), `Play2D`/`Play3D` fire-and-forget one-shots (volume+pitch),
+  `PlayLoop3D`/`PlayLoop2D` + `StopVoice`/`FadeOutVoice`/`SetVoice*`/
+  `IsVoiceActive` (generation-tagged `VoiceHandle` -> stale Stop is a
+  safe no-op), `SetListener` (per frame from the camera),
+  `SetBusVolume` (Master via engine volume, Sfx/Music/Ambient via
+  `ma_sound_group`s), `Update` (reaps finished one-shot voices + advances
+  fades — voices are ONLY uninited here, never from a trigger site).
+  3D voices use linear attenuation, min 4 / max 48 blocks.
+- THIRD PARTY (`third_party/miniaudio/`): vendored `miniaudio.h`
+  (0.11.25) + `stb_vorbis.c` (public domain) + `miniaudio_impl.cpp`
+  (the single TU defining `MA_IMPLEMENTATION` + `MA_NO_ENCODING` — the
+  ODR guard; stb_vorbis.c compiles as its own C TU). CMake: a `miniaudio`
+  static lib (+ `ole32 winmm` on WIN32). These ARE committed (like glad);
+  the `.ogg`s are gitignored.
+- GAME taxonomy: `BlockDef::soundType` (`SoundType` enum: None/Stone/
+  Wood/Grass/Gravel/Sand/Snow/Cloth/Glass — vanilla StepSound classes),
+  assigned in `blocks::RegisterDefaults` and the Plant/Log/Leaves
+  helpers (dirt->Gravel like vanilla, cactus->Cloth, water/flows->None,
+  glass->Glass). `vc::GameSounds` (`game/src/audio/Sounds.{h,cpp}`) owns
+  every `ClipHandle`, loads from `vox::assets::Resolve("mc/sounds/...")`
+  (the game owns the overlay-prefix policy; engine just loads a path),
+  probes up to 6 variants per material (keeps the ones that exist), and
+  exposes semantic triggers that pick a random variant + jitter pitch:
+  `PlayDig` (mining tick, quiet/low), `PlayBreak` (loud; Glass ->
+  random/glass shatter), `PlayPlace`, `PlayPickup` (random/pop, high
+  pitch), `PlayStep`/`PlayLand`, `PlaySplash`, `StartFurnaceLoop`/
+  `StopFurnaceLoop`, `UpdateAmbient`, `UpdateMusic`.
+- WIRING (`GameApp`): `m_audio` + `m_sounds` members (m_audio declared
+  first so it outlives m_sounds; `OnShutdown` also calls
+  `m_audio.Shutdown()` explicitly before teardown). `OnInit`:
+  `m_audio.Init(); m_sounds.Load(m_audio)`. `OnRender` (in the
+  `if (m_world)` block): listener follows the camera + `m_audio.Update`;
+  then while Playing/container-open: a FURNACE-LOOP RECONCILE
+  (`World::ForEachLitFurnace` — a template iterating m_furnaces whose
+  block == LitFurnace, skipping unloaded chunks; GameApp diffs against
+  `m_furnaceLoops` keyed by ivec3, starts/stops voices — World stays
+  audio-free), cave ambient when the eye-cell packed light is dark
+  (sky&block both < 4), and sparse music (`AudioEngine::PlayMusic` decodes
+  one track on demand on the Music bus, ~6-12 min start-to-start gap,
+  gated on `!MusicActive()`). `HandleInput`: dig sound on the existing
+  ~4-tick mining cadence (`m_digSoundAccum`, re-armed when the dig cell
+  changes), break sound at destroy (survival + fly branches), place
+  sound after the place `SetBlock`. `OnTick`: pickup pop in the
+  PickupItems accept path (<=1/tick), and footsteps/landing/splash from
+  `Player` state — added `Player::InWater()` (caches the existing
+  `inWater` from TickWalk; false in fly) feeding stride-based footsteps
+  (~1.7 blocks while grounded & dry, block-under-feet picks the set),
+  a landing thud on the grounded transition, and a splash on entering
+  water. `EnterWorld` re-seeds footstep tracking; `ExitToTitle` stops
+  all furnace loops before the world drops.
+- KNOWN M22 LIMITS / future: SFX clip load is synchronous at startup
+  (~220 ms for 113 clips — the miniaudio lib, incl. stb_vorbis, is forced
+  to /O2 even in Debug via third_party + the C-flags /RTC1 strip in the
+  root CMakeLists, else ogg decode was ~8.8 s; could async-load if it
+  grows); music decodes one track on demand (a brief hitch when a track
+  starts, every ~10 min — acceptable; could thread it) and has no
+  crossfade (long gaps mean tracks never overlap); cave ambient uses a
+  simple darkness gate + random timer, not vanilla's exact probability;
+  no UI to set bus volumes yet (the buses + `SetBusVolume` exist — a
+  settings screen is the natural home); footsteps don't vary by walk vs
+  sprint cadence beyond the distance threshold; no block-place "use"
+  sounds for doors/etc (no such blocks yet); ladder/anvil/metal sound
+  classes unused (no such blocks). Debug builds log nothing for missing
+  clips (expected: variant probing + clean clone) — the GameSounds
+  "loaded sound sets (music tracks: N)" line is the success signal.
+
+What the user should test (NO new world needed; assets already imported
+via `python scripts/import_mc_assets.py`): dig any block -> a per-material
+dig sound repeats while mining, a louder break sound at the moment it
+pops; place a block -> place thunk; walk and sprint over grass/stone/sand/
+gravel -> footsteps match the surface; jump and land -> a thud; walk into
+water -> a splash; pick up a dropped item -> a high "pop"; craft + place a
+furnace, light it -> a fire crackle loop you can hear positionally (louder
+up close), that stops when the fuel/input runs out, when you break it, or
+when its chunk unloads (walk far away); stand in a dark cave -> occasional
+cave ambience; leave the game running a while -> a music track every several
+minutes. Fly mode break still pops + sounds. Quit to title -> furnace loops
+stop. A machine with no audio device (or a clean clone with no
+`assets/mc/sounds/`) should run totally silent without crashing.
+
+## Next milestone (open — scope with the user)
+
+Audio (M22) is done. Strong candidates from the backlog below: deeper
+world (kWorldHeightChunks 4 -> 8, rebase topology + cave start heights —
+discussed and deferred twice now), a settings screen (the audio buses +
+`AudioEngine::SetBusVolume` already exist and want a UI; also occlusion/
+render-distance/sensitivity), or block orientation data (crafting table/
+furnace fronts face +X regardless of placement; wall torches). Decide
+with the user before building.
 
 Other backlog: deeper world (kWorldHeightChunks 4 -> 8, rebase
 topology + cave start heights — discussed 2026-06-12, deferred),

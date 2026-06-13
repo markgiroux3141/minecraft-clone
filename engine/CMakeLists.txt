@@ -1,4 +1,6 @@
 add_library(vox_engine STATIC
+    src/vox/audio/AudioEngine.cpp
+    src/vox/audio/AudioEngine.h
     src/vox/core/Application.cpp
     src/vox/core/Application.h
     src/vox/core/Assert.h
@@ -39,7 +41,7 @@ target_include_directories(vox_engine PUBLIC src)
 
 target_link_libraries(vox_engine
     PUBLIC glad glm::glm spdlog::spdlog
-    PRIVATE glfw stb
+    PRIVATE glfw stb miniaudio
 )
 
 # Keep GLFW from dragging system GL headers into translation units;
