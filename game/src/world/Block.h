@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+#include <glm/glm.hpp>
+
 namespace vc {
 
 // Index into BlockRegistry. 0 is always air. uint16_t leaves room for far
@@ -25,6 +27,28 @@ enum class ToolClass : uint8_t { None, Pickaxe, Axe, Shovel };
 // fall back to the stone set (vanilla parity).
 enum class SoundType : uint8_t { None, Stone, Wood, Grass, Gravel, Sand, Snow, Cloth, Glass };
 
+// One axis-aligned box of a block model, mirroring a vanilla model
+// "element": a cuboid from/to in 1/16-block "pixel" units (0..16) with a
+// per-face texture layer + UV sub-rect. Blocks whose shape isn't a full
+// cube (torches now, slabs/stairs/fences/panes later) carry a list of
+// these in BlockDef::model; the mesher emits them into the float-position
+// "model" vertex stream (see ModelVertex in ChunkMesher.h) instead of the
+// packed cubic stream, so the geometry needs no bit-stealing in the packed
+// format. UVs are in the same 0..16 pixel units, v measured UP (the side
+// face of a bottom slab samples the tile's lower half), matching the cube
+// mesher's orientation. A face with on=false is not emitted (interior /
+// hidden faces).
+struct ModelBox {
+    struct Face {
+        bool on = false;
+        uint16_t tile = 0;                       // texture-array layer
+        glm::vec4 uv{0.0f, 0.0f, 16.0f, 16.0f};  // u0, v0, u1, v1 in 0..16 px
+    };
+    glm::vec3 from{0.0f}; // 0..16
+    glm::vec3 to{16.0f};  // 0..16
+    std::array<Face, 6> faces{}; // BlockFace order
+};
+
 struct BlockDef {
     std::string name;
     bool opaque = true;   // hides adjacent faces
@@ -33,9 +57,9 @@ struct BlockDef {
                           // are alpha-tested away in chunk.frag (leaves)
     bool cross = false;   // plant: two diagonal alpha-tested quad pairs instead of
                           // a cube; targetable by raycast but never collides
-    bool torch = false;   // vanilla torch shape: four one-sided alpha-tested
-                          // planes inset 7/16 and 9/16 from the cell walls;
-                          // targetable, never collides, needs solid ground
+    bool torch = false;   // gameplay flag: targetable, never collides, needs
+                          // solid ground, washed away by water. The shape
+                          // lives in `model` (the float model stream), not here.
     bool replaceable = false; // liquids flow into it and falling blocks crush it
                               // (tall grass, flowers — destroyed, not blocking)
     bool liquid = false;  // meshed into the blended pass; liquid-liquid faces cull
@@ -76,6 +100,10 @@ struct BlockDef {
     // override per material.
     SoundType soundType = SoundType::Stone;
     std::array<uint16_t, 6> faceTiles{}; // texture-array layer per face
+    // Non-cube geometry, in the float model stream. Empty for ordinary
+    // cubes/cutouts/crosses/liquids; non-empty makes the mesher emit these
+    // boxes instead of a greedy-merged cube (torch; slabs/stairs later).
+    std::vector<ModelBox> model;
 
     uint16_t ResolveDrop(BlockId self) const { return drop == kDropSelf ? self : drop; }
 

@@ -78,6 +78,8 @@ private:
 
     std::unique_ptr<vc::World> m_world;
     std::shared_ptr<vox::Shader> m_chunkShader;
+    // Non-cube box geometry (torches): float model stream, same chunk.frag.
+    std::shared_ptr<vox::Shader> m_modelShader;
     std::shared_ptr<vox::Texture2DArray> m_blockTextures;
 
     // Targeted-block wireframe.
@@ -126,6 +128,7 @@ private:
     // opaque front-to-back, then water back-to-front in the blended pass.
     std::vector<vox::MeshPool::DrawItem> m_drawItems;
     std::vector<vox::MeshPool::DrawItem> m_drawItemsTransparent;
+    std::vector<vox::MeshPool::DrawItem> m_drawItemsModel; // torches etc.
 
     // 2D overlay (crosshair, hotbar; menus from M10 stage 2).
     std::unique_ptr<vox::UiRenderer> m_ui;

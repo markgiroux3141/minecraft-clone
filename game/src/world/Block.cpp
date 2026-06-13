@@ -296,9 +296,36 @@ void RegisterDefaults() {
     torch.hardness = 0.0f;
     torch.emission = 14;
     torch.soundType = SoundType::Wood;
-    // The mesher's torch top cap reads faceTiles[PosY]: a dedicated
-    // opaque flame-top sprite (tile 63), not the side post (tile 62).
-    torch.faceTiles[static_cast<size_t>(BlockFace::PosY)] = 63;
+    // Geometry: vanilla's template_torch. Two thin full-height slabs cross
+    // at the cell center, each showing only its outward faces — the post
+    // pixels live in the texture's middle columns, the alpha test trims the
+    // rest, and from any angle one X plane + one Z plane read as a 3D post.
+    // A small top cap sits at the post's flame height (y = 10/16, exact now
+    // that the model stream stores float positions — the old packed format
+    // could only quantise it to ninths and had to bias it low to avoid a
+    // gap). The cap samples the dedicated opaque flame-core sprite (tile
+    // 63); the planes sample the torch tile (62).
+    constexpr float kPlaneSide = 16.0f; // full-cell extent of the side planes
+    {
+        ModelBox xPlanes; // the two planes perpendicular to X (faces -X/+X)
+        xPlanes.from = {7.0f, 0.0f, 0.0f};
+        xPlanes.to = {9.0f, kPlaneSide, kPlaneSide};
+        xPlanes.faces[static_cast<size_t>(BlockFace::NegX)] = {true, 62, {0, 0, 16, 16}};
+        xPlanes.faces[static_cast<size_t>(BlockFace::PosX)] = {true, 62, {0, 0, 16, 16}};
+
+        ModelBox zPlanes; // the two planes perpendicular to Z (faces -Z/+Z)
+        zPlanes.from = {0.0f, 0.0f, 7.0f};
+        zPlanes.to = {kPlaneSide, kPlaneSide, 9.0f};
+        zPlanes.faces[static_cast<size_t>(BlockFace::NegZ)] = {true, 62, {0, 0, 16, 16}};
+        zPlanes.faces[static_cast<size_t>(BlockFace::PosZ)] = {true, 62, {0, 0, 16, 16}};
+
+        ModelBox cap; // top of the central 2x2 post, at the flame height
+        cap.from = {7.0f, 0.0f, 7.0f};
+        cap.to = {9.0f, 10.0f, 9.0f};
+        cap.faces[static_cast<size_t>(BlockFace::PosY)] = {true, 63, {0, 0, 16, 16}};
+
+        torch.model = {xPlanes, zPlanes, cap};
+    }
     Torch = registry.Register(std::move(torch));
 
     // M18 drop table (vanilla-ish; cross-references resolve here, after

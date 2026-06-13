@@ -1,11 +1,12 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-13, written for a FRESH CONTEXT. M0-M20 and M22 (AUDIO)
-are all done and USER-VERIFIED (M22: "beautiful, it all works"). M21
-(ORES + FURNACE/SMELTING + torches) is CODE COMPLETE awaiting explicit
-user verification — see its section at the bottom for what was built and
-what to test. Read alongside `ARCHITECTURE.md` (layering rules, roadmap)
-and `CLAUDE.md` (build commands, conventions).
+Updated: 2026-06-13, written for a FRESH CONTEXT. M0-M20, M22 (AUDIO), and
+M23 (MODEL-BLOCK STREAM) are all done and USER-VERIFIED (M22: "beautiful,
+it all works"; M23: "everything looks perfect and the torch cap is where
+it should be"). M21 (ORES + FURNACE/SMELTING + torches) is CODE COMPLETE
+awaiting explicit user verification — see its section for what was built
+and what to test. Read alongside `ARCHITECTURE.md` (layering rules,
+roadmap) and `CLAUDE.md` (build commands, conventions).
 
 IMPORTANT RESOURCE: the user has Minecraft's Java source (MCP 9.40 =
 1.12) at `D:\Minecraft source code` — look up exact game dynamics there
@@ -361,12 +362,12 @@ Stage 3 — LOD shell:
 ## M12 perf polish (how it works)
 
 - ChunkVertex = two uint32s (8 B; was 48 B of floats):
-  data0 = x:5|y:5|z:5|normal:3|ao:2|sky:4|block:4|xIn:2|zIn:2
+  data0 = x:5|y:5|z:5|normal:3|ao:2|sky:4|block:4 (bits 28..31 free)
   (positions are cell corners 0..16, normal indexes BlockFace order;
-  xIn/zIn are the M21-torch sub-block insets — 0, +7/16, or +9/16 —
-  zero everywhere else), data1 = u:5|v:5|layer:16|yoff:4 (UVs tile
-  0..16 across merged quads; yoff lowers y by N/9 — liquid surface
-  drop or torch-cap height). Packed in EmitQuad,
+  bits 28..31 once held the M21-torch insets — torches moved to the M23
+  float model stream and the bits are free again), data1 =
+  u:5|v:5|layer:16|yoff:4 (UVs tile 0..16 across merged quads; yoff
+  lowers y by N/9 — liquid surface drop only now). Packed in EmitQuad,
   decoded bitwise in chunk.vert (kNormals table); the MeshPool layout is
   two UInt attributes (VertexArray routes Int/UInt types through
   glVertexArrayAttribIFormat). gentest includes a pack/decode smoke test
@@ -970,48 +971,29 @@ near-spawn chunks you've edited keep their pre-ore stone).
   IsSolid below; GameApp refuses placement without solid ground
   (instead of place-then-pop). Raycast targets torches like cross
   plants.
-  - THE MESH (the interesting bit): vanilla's template_torch — four
-    ONE-SIDED full-cell side planes inset 7/16 and 9/16 from the cell
-    walls (EmitTorchCell in ChunkMesher.cpp), PLUS a small +Y top cap
-    at the flame height. The texture's middle 2px column survives the
-    alpha test, so any angle shows one X plane + one Z plane as a 3D
-    post. The packed vertex format stores INTEGER corners only, so
-    the insets ride the four spare bits of data0 (28..31: xIn:2 |
-    zIn:2, 0 = none / 1 = +7/16 / 2 = +9/16) decoded by a table add
-    in chunk.vert — every other emitter leaves them zero, so the
-    format change is backward compatible. The cap (added after the
-    user noticed the missing top face — vanilla's central-post upper
-    face) is inset on BOTH axes and raised to ~10/16 via the existing
-    per-vertex Y-offset field (data1 26..29 — renamed `drop` ->
-    `yoff` in the docs since liquids AND the torch cap now use it; it
-    just means "lower y by N/9"); it samples the torch block's +Y
-    face tile, a dedicated opaque flame-top sprite (atlas layer 63,
-    cropped from torch_on's flame core in the importer). Own-cell
-    light, AO 3, +Y normal, regular alpha-tested stream. gentest
-    checks 4 planes (one-axis inset) + a 4-vert cap (both-axis inset,
-    raised).
-  - WHY NOT THE "RIGHT" WAY (and when to do it): vanilla represents
-    ALL non-cube blocks (torches, and the slabs/stairs/fences/panes
-    we'll likely want) with arbitrary float positions + sub-tile UVs
-    — its DefaultVertexFormats.BLOCK is POSITION_3F + COLOR_4UB +
-    TEX_2F + TEX_2S (~28 B, no packing, no greedy merge; models bake
-    once and stamp per instance). It gets fractional geometry for
-    free because it never imposed our packing. Our 8-byte packed
-    vertex + greedy meshing is the right call for cubic terrain (the
-    99% case) and is exactly why sub-cube blocks are awkward. The
-    torch's xIn/zIn insets + yoff reuse are legit (free bits / a
-    field used for its real purpose), NOT bit-stealing hacks — but
-    they're the FIRST accretion. The clean long-term home for
-    irregular blocks is a SECOND per-cell chunk vertex stream with a
-    fatter, general vertex (float-ish position + sub-sprite UV, its
-    own MeshPool + shader) — mirroring vanilla's model path and our
-    existing fully-float entity path (block_entity.vert). DECISION
-    (with the user, 2026-06-12): keep the torch's minimal packed-
-    format approach for now; when the SECOND irregular block lands
-    (stairs/slabs are foreseen), build that model-block stream and
-    subsume the torch special-casing into it rather than adding more
-    inset codes. That's the line in the sand — don't grow the packed
-    format past the torch.
+  - THE MESH: vanilla's template_torch — two thin crossed slabs (four
+    one-sided full-cell side planes inset 7/16 and 9/16) plus a small
+    +Y top cap at the flame height. The texture's middle 2px column
+    survives the alpha test, so any angle shows one X plane + one Z
+    plane as a 3D post. ORIGINALLY this rode spare bits of the packed
+    cubic vertex (data0 28..31 insets + data1 yoff for the cap); M23
+    SUPERSEDED that — the torch is now the first client of the float
+    model stream (see the M23 section). Its geometry lives in
+    `BlockDef::model` (three ModelBox elements) and the cap finally
+    sits at the EXACT 10/16 flame height instead of the old
+    ninths-quantized ~0.56-biased-low fudge.
+  - WHY THE MODEL STREAM (the decision, now executed): vanilla
+    represents ALL non-cube blocks (torches, slabs/stairs/fences/panes)
+    with arbitrary float positions + sub-tile UVs — its
+    DefaultVertexFormats.BLOCK is POSITION_3F + COLOR_4UB + TEX_2F +
+    TEX_2S, no packing, no greedy merge. Our 8-byte packed vertex +
+    greedy meshing is the right call for cubic terrain (the 99% case)
+    and is exactly why sub-cube blocks were awkward. The torch's packed
+    inset bits were a legit first accretion, but the line in the sand
+    (set with the user 2026-06-12) was: don't grow the packed format
+    past the torch — when the second irregular block looms, build a
+    second float vertex stream and subsume the torch into it. M23 did
+    exactly that.
   - Sprite rendering (bonus fix): new `RenderAsSprite(ItemId)`
     (Item.h) — registry items PLUS cross/torch blocks now draw as
     flat quads instead of mini cubes, both as world drops (GameApp
@@ -1170,6 +1152,71 @@ minutes. Fly mode break still pops + sounds. Quit to title -> furnace loops
 stop. A machine with no audio device (or a clean clone with no
 `assets/mc/sounds/`) should run totally silent without crashing.
 
+## M23 — model-block stream (how it works)
+
+USER-VERIFIED 2026-06-13 ("everything looks perfect and the torch cap is
+where it should be"). This is the "right way" the M21 torch notes promised:
+a SECOND chunk vertex stream for non-cube geometry, so fractional blocks
+stop stealing bits from the packed cubic vertex. Torch is its first client;
+slabs/stairs/fences/panes are the foreseen next ones.
+
+- THE STREAM: `ChunkMesh` grew `modelVertices` alongside `vertices`
+  (opaque/cutout/cross) and `transparentVertices` (liquids). `ModelVertex`
+  (ChunkMesher.h) is 24 B — float x/y/z (chunk-local block units, cell +
+  fraction), float u/v (tile-space UV, 1.0 = one tile, sub-rects sample
+  within a tile), and one packed uint (layer:16 | normal:3 | ao:4 | sky:4 |
+  block:4). Decoded by `assets/shaders/model_block.vert`, which emits the
+  SAME varyings as chunk.vert (v_normal/v_uvw/v_worldPos/v_ao/v_sky/v_block)
+  so both streams share `chunk.frag` unchanged (alpha-tested, lit, fogged).
+- THE POOL: a second `vox::MeshPool` (`World::m_modelPool`, accessor
+  `ModelMeshes()`) because its layout differs from the cubic one
+  (Float3 + Float2 + UInt vs two UInts). The engine MeshPool is fully
+  generic — zero engine changes; `ModelVertexLayout()` + a smaller initial
+  capacity (models are rare) is all it took. `ChunkEntry` carries a third
+  handle `meshM`/`indexCountM`; `UploadModelMesh` mirrors `UploadMesh`;
+  `processMesh` uploads it (counted in the same per-frame upload budget);
+  unload frees it. LOD has NO model stream (torches/cross are skipped at
+  LOD distance, same as before).
+- THE DRAW: `CollectVisibleChunks` gained an `outModel` list, filled at the
+  same sites as opaque (same per-draw vec4: chunk min + scale 1). GameApp
+  draws it right AFTER the opaque cubic pass and BEFORE the entity cubes /
+  water, with `m_modelShader` (model_block.vert + chunk.frag) and the same
+  lighting/fog uniforms — opaque GL state (cull on, depth write on, blend
+  off), since model faces are alpha-tested cutouts.
+- BLOCK MODELS: `BlockDef::model` is a `std::vector<ModelBox>` (Block.h).
+  A `ModelBox` is a vanilla-style "element": `from`/`to` in 1/16 "pixel"
+  units (0..16) + a per-face {on, tile, uv-rect (0..16 px)} in BlockFace
+  order. Empty = ordinary cube/cutout/cross/liquid. The mesher's per-cell
+  pass (after liquids/cross) calls `EmitModelCell` -> `EmitModelBox` per
+  box per enabled face: reuses the cube mesher's FaceBasis for CCW-outward
+  winding and v-up texture orientation, so full-tile faces render exactly
+  like cube faces (the torch sides exercise only full-tile UVs; arbitrary
+  sub-rect UV orientation is supported by the format but should be eyeballed
+  when slabs first use it). Lighting is the cell's own light (max with the
+  block's emission) and full-bright AO — these are small decorative shapes,
+  not surfaces wanting neighbor gradients.
+- THE TORCH (ported + bug fixed): `blocks::Torch` now defines three
+  ModelBoxes — two thin crossed full-height slabs (the four outward side
+  planes, tile 62) and a top cap. The cap is a +Y face of box
+  [7,0,7]->[9,10,9], so it sits at the EXACT 10/16 flame height (vanilla's
+  central-post upper face), sampling the flame-core sprite (tile 63) — this
+  fixes the M21 wart where the cap rode the ninths-quantized yoff field
+  (~0.56) and had to be biased low to hide a gap. `BlockDef::torch` survives
+  as the GAMEPLAY flag (targetable, never collides, needs solid ground,
+  washes away); the SHAPE moved entirely to `model`. The old `EmitTorchCell`
+  and the data0 xIn/zIn inset bits + chunk.vert `kInset` table are GONE;
+  data0 bits 28..31 are free again. gentest's torch check now asserts the
+  model stream (no cubic geometry, 4 planes + 4-vert cap, cap at 10/16).
+- WHEN ADDING A SLAB/STAIR (the playbook): give the block a `model` (its
+  boxes), leave `opaque=false`, add a per-cell flag path only if a new
+  gameplay rule is needed; the mesher + pool + draw already handle it.
+  Watch: real per-face light sampling (current code uses own-cell light —
+  fine for torches, probably too flat for a big slab face), partial
+  COLLISION boxes in Player physics (torches dodge this by never colliding;
+  slabs/stairs can't), and LOD (still skipped — fine for small blocks).
+  Sub-rect UV orientation: verify visually the first time a half-tile face
+  is used.
+
 ## Next milestone (open — scope with the user)
 
 Audio (M22) is done. Strong candidates from the backlog below: deeper
@@ -1190,17 +1237,17 @@ sprites in hand + view bobbing (M20 polish), block orientation data
 (crafting table/furnace fronts face +X regardless of placement; wall
 torches).
 
-## How to verify (UPDATED working agreement)
+## How to verify (working agreement — reinforced 2026-06-13)
 
-Do NOT launch the game and inject input from the agent — the user runs
-the game themselves. Build it, do at most a quick launch + screenshot
-sanity check if needed, then tell the user exactly what to test; they
-report back with screenshots and observations. (The user is often in
-calls/recordings — popping windows + capturing the cursor is
-disruptive.)
+Do NOT launch the game, take screenshots, or inject input from the agent
+AT ALL. The user runs the game themselves and reports back. The agent's
+job is: build (to confirm it compiles) + run the headless tests
+(gentest/savetest), then hand the user a precise test checklist. (The user
+is often in calls/recordings — popping windows + capturing the cursor is
+disruptive, and they asked twice now to keep verification on their side.)
 
 ## Working agreements (see memory too)
 
-- Milestone at a time; verify with build + run + screenshot before claiming
-  done; tick the milestone in ARCHITECTURE.md.
+- Milestone at a time; verify with a build + headless tests, then a user
+  test pass before claiming done; tick the milestone in ARCHITECTURE.md.
 - Keep this file updated at each milestone boundary or when context runs low.

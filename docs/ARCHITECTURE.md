@@ -172,6 +172,15 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   (`mcp940/jars/assets`, resolved via `indexes/1.12.json`) into gitignored
   `assets/mc/sounds/` (zero distribution); a clean clone loads invalid
   handles and runs silent.
+- **M23 — Model-block stream** ✅: a second per-cell chunk vertex stream
+  (`ChunkMesh::modelVertices`, 24 B float-position `ModelVertex`, own
+  `vox::MeshPool` + `model_block.vert` sharing `chunk.frag`) for non-cube
+  geometry, so fractional blocks no longer steal bits from the packed cubic
+  vertex. `BlockDef::model` is a list of vanilla-style `ModelBox` elements
+  (from/to in 1/16 units + per-face tile/UV); the mesher emits them via
+  `EmitModelBox`. The torch is the first client (its old packed-inset hack
+  removed), with its flame cap now at the exact 10/16 height. Foreseen next
+  clients: slabs/stairs/fences/panes.
 - **Backlog**: deeper world (kWorldHeightChunks 4 → 8),
   tall-grass wheat seeds (1/8 chance, BlockTallGrass — pairs
   with farming), animated water, lava, stars, world-list scrolling,

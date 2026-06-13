@@ -23,7 +23,7 @@ struct PaddedVolume {
     std::array<uint8_t, kPadVolume> opaque;
     std::array<uint8_t, kPadVolume> cutout; // alpha-tested cubes (leaves)
     std::array<uint8_t, kPadVolume> cross;  // plants: X-shaped quad pairs
-    std::array<uint8_t, kPadVolume> torch;  // torches: inset one-sided planes
+    std::array<uint8_t, kPadVolume> model;  // non-cube box models (torches)
     std::array<uint8_t, kPadVolume> liquid;
     std::array<uint8_t, kPadVolume> level; // liquidLevel (8 source, 7..1 flow)
     std::array<uint8_t, kPadVolume> light; // packed sky<<4 | block
@@ -45,7 +45,7 @@ void FillPadded(const ChunkSnapshot& snapshot, PaddedVolume& out) {
                 out.opaque[p] = def.opaque ? 1 : 0;
                 out.cutout[p] = def.cutout ? 1 : 0;
                 out.cross[p] = def.cross ? 1 : 0;
-                out.torch[p] = def.torch ? 1 : 0;
+                out.model[p] = def.model.empty() ? 0 : 1;
                 out.liquid[p] = def.liquid ? 1 : 0;
                 out.level[p] = def.liquidLevel;
 
@@ -315,81 +315,69 @@ void EmitCrossCell(ChunkMesh& mesh, const PaddedVolume& vol, int x, int y, int z
     }
 }
 
-// Torches render as vanilla's template_torch: four one-sided full-cell
-// side planes inset 7/16 and 9/16 from the cell walls (the post pixels
-// live in the texture's middle columns; the alpha test trims the rest,
-// and from any angle one X plane + one Z plane read as a 3D post), plus
-// a small top cap at the flame height (vanilla's central-post upper
-// face). The sub-block insets ride the spare packed bits (data0 28..31,
-// decoded in chunk.vert) — everything else still emits integer corners;
-// the cap's fractional height rides the per-vertex Y-offset field (the
-// same ninths field liquids use for their surface drop). Lighting
-// mirrors the cross plants: the cell's own light (the BFS seeds it at
-// the torch's emission), full-bright AO, +Y normal.
-void EmitTorchCell(ChunkMesh& mesh, const PaddedVolume& vol, int x, int y, int z) {
-    const int p = PadIndex(x, y, z);
-    const BlockDef& def = BlockRegistry::Get().Def(vol.id[p]);
-    const auto layer = static_cast<uint32_t>(def.faceTiles[0]);
-    const auto sky = static_cast<uint32_t>(ChunkLight::Sky(vol.light[p]));
-    const auto block = static_cast<uint32_t>(ChunkLight::Block(vol.light[p]));
-    const uint32_t shade = 2u << 15 | 3u << 18 | sky << 20 | block << 24;
-
-    // Per plane: which axis is inset, the inset code (1 = +7/16,
-    // 2 = +9/16), and the u direction keeping the winding CCW from the
-    // plane's outward side (cross(u, +Y) = outward normal).
-    struct Plane {
-        int axis;       // 0 = inset on x, 1 = inset on z
-        uint32_t inset; // packed code
-        int du;         // +1: u runs low->high on the other axis; -1: reversed
-    };
-    constexpr Plane kPlanes[4] = {
-        {0, 1, +1}, // x + 7/16, faces -X, u = +Z
-        {0, 2, -1}, // x + 9/16, faces +X, u = -Z
-        {1, 1, -1}, // z + 7/16, faces -Z, u = -X
-        {1, 2, +1}, // z + 9/16, faces +Z, u = +X
-    };
+// Emit one model box (BlockDef::ModelBox) into the float model stream.
+// Each requested face becomes a quad with arbitrary fractional corners and
+// UVs — the packed cubic vertex can't hold these, which is the whole point
+// of the second stream. Reuses the cube mesher's FaceBasis so winding (CCW
+// from outside, backface-culled) and the v-up texture orientation match
+// the rest of the world. Lighting is the cell's own light and full-bright
+// AO, like the cross plants — these are small emissive/decorative shapes,
+// not surfaces that want neighbor-sampled gradients.
+void EmitModelBox(ChunkMesh& mesh, int cellX, int cellY, int cellZ, const ModelBox& box,
+                  uint32_t sky, uint32_t block) {
+    constexpr float kInv16 = 1.0f / 16.0f;
+    const float cell[3] = {static_cast<float>(cellX), static_cast<float>(cellY),
+                           static_cast<float>(cellZ)};
     constexpr int cu[4] = {0, 1, 1, 0};
     constexpr int cv[4] = {0, 0, 1, 1};
 
-    for (const Plane& plane : kPlanes) {
-        const uint32_t nudge = plane.inset << (plane.axis == 0 ? 28 : 30);
+    for (int face = 0; face < 6; ++face) {
+        const ModelBox::Face& bf = box.faces[face];
+        if (!bf.on) {
+            continue;
+        }
+        const FaceBasis& fb = kFaces[face];
+        const float plane = (fb.s > 0 ? box.to[fb.n] : box.from[fb.n]) * kInv16;
+        const float uLo = box.from[fb.uAxis] * kInv16;
+        const float uHi = box.to[fb.uAxis] * kInv16;
+        const float vLo = box.from[fb.vAxis] * kInv16;
+        const float vHi = box.to[fb.vAxis] * kInv16;
+        // BlockFace order matches the model-stream normal index.
+        const uint32_t packed = static_cast<uint32_t>(bf.tile) |
+                                static_cast<uint32_t>(face) << 16 | 15u << 19 | sky << 23 |
+                                block << 27;
         for (int k = 0; k < 4; ++k) {
-            const int t = plane.du > 0 ? cu[k] : 1 - cu[k];
-            const int px = plane.axis == 0 ? x : x + t;
-            const int pz = plane.axis == 0 ? z + t : z;
-            mesh.vertices.push_back({
-                static_cast<uint32_t>(px) | static_cast<uint32_t>(y + cv[k]) << 5 |
-                    static_cast<uint32_t>(pz) << 10 | shade | nudge,
-                static_cast<uint32_t>(cu[k]) | static_cast<uint32_t>(cv[k]) << 5 |
-                    layer << 10,
+            float pos[3];
+            pos[fb.n] = plane;
+            pos[fb.uAxis] = cu[k] ? uHi : uLo;
+            pos[fb.vAxis] = cv[k] ? vHi : vLo;
+            // UV from the face's sub-rect; swapUv keeps texture-up aligned
+            // with world-up on the faces whose mask axes are transposed.
+            const float tu = (cu[k] ? bf.uv.z : bf.uv.x) * kInv16;
+            const float tv = (cv[k] ? bf.uv.w : bf.uv.y) * kInv16;
+            mesh.modelVertices.push_back({
+                cell[0] + pos[0],
+                cell[1] + pos[1],
+                cell[2] + pos[2],
+                fb.swapUv ? tv : tu,
+                fb.swapUv ? tu : tv,
+                packed,
             });
         }
     }
+}
 
-    // Top cap: a +Y quad spanning the post's 7/16..9/16 walls (both axes
-    // inset at once — the codes are independent bits), sitting at the
-    // flame top. The height rides the Y-offset field (data1 26..29), but
-    // it's quantized to ninths and the side-plane flame top lands at a
-    // texture-dependent cell-height (~0.59 on the MC atlas, ~0.66 on the
-    // procedural one). (y+1) - 4/9 ≈ y + 0.56 sits just BELOW both, so
-    // the cap overlaps the post with no gap — a float reads worse than a
-    // hairline overlap. Uses the torch's own +Y face tile (a dedicated
-    // opaque flame-top sprite, so the alpha test keeps it). One-sided,
-    // only seen from above; corner order matches the mesher's +Y winding
-    // so backface culling keeps it.
-    const auto capLayer =
-        static_cast<uint32_t>(def.faceTiles[static_cast<size_t>(BlockFace::PosY)]);
-    constexpr uint32_t kCapYOff = 4u << 26; // lower y+1 by 4/9 to just under the flame top
-    constexpr uint32_t kCapXIn[4] = {1, 1, 2, 2}; // +7/16, +7/16, +9/16, +9/16
-    constexpr uint32_t kCapZIn[4] = {1, 2, 2, 1}; // +7/16, +9/16, +9/16, +7/16
-    for (int k = 0; k < 4; ++k) {
-        mesh.vertices.push_back({
-            static_cast<uint32_t>(x) | static_cast<uint32_t>(y + 1) << 5 |
-                static_cast<uint32_t>(z) << 10 | shade | kCapXIn[k] << 28 |
-                kCapZIn[k] << 30,
-            static_cast<uint32_t>(cu[k]) | static_cast<uint32_t>(cv[k]) << 5 |
-                capLayer << 10 | kCapYOff,
-        });
+// A model-block cell emits all of its boxes. Light is the cell's own
+// (the BFS seeds emissive blocks like the torch at their emission); AO is
+// full-bright. Future model blocks (slabs/stairs) just declare boxes.
+void EmitModelCell(ChunkMesh& mesh, const PaddedVolume& vol, int x, int y, int z) {
+    const int p = PadIndex(x, y, z);
+    const BlockDef& def = BlockRegistry::Get().Def(vol.id[p]);
+    const auto sky = static_cast<uint32_t>(ChunkLight::Sky(vol.light[p]));
+    const auto block = std::max(static_cast<uint32_t>(ChunkLight::Block(vol.light[p])),
+                                static_cast<uint32_t>(def.emission));
+    for (const ModelBox& box : def.model) {
+        EmitModelBox(mesh, x, y, z, box, sky, block);
     }
 }
 
@@ -558,7 +546,7 @@ ChunkMesh ChunkMesher::Build(const ChunkSnapshot& snapshot) {
     }
 
     // Per-cell passes: liquids (corner-sampled surface heights), plant
-    // crosses, and torches — none can greedy-merge.
+    // crosses, and model boxes (torches) — none can greedy-merge.
     for (int y = 0; y < Chunk::kSize; ++y) {
         for (int z = 0; z < Chunk::kSize; ++z) {
             for (int x = 0; x < Chunk::kSize; ++x) {
@@ -567,8 +555,8 @@ ChunkMesh ChunkMesher::Build(const ChunkSnapshot& snapshot) {
                     EmitLiquidCell(mesh, vol, x, y, z);
                 } else if (vol.cross[p]) {
                     EmitCrossCell(mesh, vol, x, y, z);
-                } else if (vol.torch[p]) {
-                    EmitTorchCell(mesh, vol, x, y, z);
+                } else if (vol.model[p]) {
+                    EmitModelCell(mesh, vol, x, y, z);
                 }
             }
         }

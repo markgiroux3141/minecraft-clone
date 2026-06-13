@@ -40,8 +40,11 @@ struct ChunkEntry {
     // meshT is the chunk's liquid faces, drawn in the blended pass.
     vox::MeshPool::MeshHandle mesh = vox::MeshPool::kInvalidMesh;
     vox::MeshPool::MeshHandle meshT = vox::MeshPool::kInvalidMesh;
+    // Non-cube box geometry (torches), in the separate float model pool.
+    vox::MeshPool::MeshHandle meshM = vox::MeshPool::kInvalidMesh;
     uint32_t indexCount = 0;
     uint32_t indexCountT = 0;
+    uint32_t indexCountM = 0;
     VisibilityBits visibility = 0; // face connectivity, valid once meshedVersion != 0
     bool edited = false; // diverges from the save store — persist before unload
 };
@@ -244,7 +247,8 @@ public:
     // back-to-front by chunk center for the blended pass.
     void CollectVisibleChunks(const glm::vec3& eye, const vox::Frustum& frustum, bool occlusion,
                               std::vector<vox::MeshPool::DrawItem>& out,
-                              std::vector<vox::MeshPool::DrawItem>& outTransparent);
+                              std::vector<vox::MeshPool::DrawItem>& outTransparent,
+                              std::vector<vox::MeshPool::DrawItem>& outModel);
 
     template <typename Fn> // fn(chunkCoord, meshHandle, indexCount)
     void ForEachRenderableChunk(Fn&& fn) const {
@@ -255,9 +259,12 @@ public:
         }
     }
 
-    // All chunk meshes live here; the renderer draws them in one
+    // All cubic chunk meshes live here; the renderer draws them in one
     // glMultiDrawElementsIndirect via Meshes().Draw(items).
     vox::MeshPool& Meshes() { return m_meshPool; }
+    // Non-cube box geometry (torches; slabs/stairs later) — a separate pool
+    // because its vertex layout (float pos + UV) differs from the cubic one.
+    vox::MeshPool& ModelMeshes() { return m_modelPool; }
 
     // The on-disk store (player state lives in its manifest). Main thread only.
     WorldSave& SaveStore() { return m_save; }
@@ -328,6 +335,9 @@ private:
     // first. Called per stream (opaque and transparent).
     void UploadMesh(vox::MeshPool::MeshHandle& handle, uint32_t& indexCount,
                     const std::vector<ChunkVertex>& vertices);
+    // Same, for the float model stream / m_modelPool.
+    void UploadModelMesh(vox::MeshPool::MeshHandle& handle, uint32_t& indexCount,
+                         const std::vector<ModelVertex>& vertices);
     ChunkSnapshot SnapshotFor(const glm::ivec3& coord) const;
     // Mesh gating: all 26 neighbors have blocks, and the whole 3x3x3
     // neighborhood (center included) has light.
@@ -357,6 +367,7 @@ private:
     WorldSave m_save; // declared before m_generator: its manifest provides the seed
     TerrainGenerator m_generator; // stateless — shared by all workers
     vox::MeshPool m_meshPool;     // main-thread-only, like all GL
+    vox::MeshPool m_modelPool;    // non-cube box geometry (torches)
     ChunkMap m_chunks;
     ColumnMap m_columns;
     LodColumnMap m_lodColumns; // entry exists = gen submitted; cells null until it lands

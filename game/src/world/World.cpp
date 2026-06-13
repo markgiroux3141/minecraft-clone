@@ -32,6 +32,20 @@ vox::BufferLayout ChunkVertexLayout() {
     };
 }
 
+// Float position + float UV + one packed uint, decoded in model_block.vert
+// (see ModelVertex). The fatter, general layout for non-cube blocks.
+vox::BufferLayout ModelVertexLayout() {
+    return {
+        {vox::ShaderDataType::Float3, "a_pos"},
+        {vox::ShaderDataType::Float2, "a_uv"},
+        {vox::ShaderDataType::UInt, "a_packed"},
+    };
+}
+
+// Model geometry is rare (a torch here and there), so start the pool small
+// — it grows by copy if a torch-heavy build ever needs it.
+constexpr uint32_t kInitialModelPoolVertices = 1u << 14;
+
 int FloorDivChunk(float worldCoord) {
     return static_cast<int>(std::floor(worldCoord / static_cast<float>(Chunk::kSize)));
 }
@@ -104,6 +118,7 @@ bool FaceSlabDiffers(const ChunkLight& a, const ChunkLight& b, int axis, int sid
 World::World(int defaultSeed, std::filesystem::path saveDir)
     : m_save(std::move(saveDir), defaultSeed), m_generator(m_save.Seed()),
       m_meshPool(ChunkVertexLayout(), kQuadPattern, 4, kInitialPoolVertices),
+      m_modelPool(ModelVertexLayout(), kQuadPattern, 4, kInitialModelPoolVertices),
       m_lastAutosave(std::chrono::steady_clock::now()) {
     // Furnace block entities saved with the world; slots holding ids from
     // a newer build than this one are dropped rather than crashing.
@@ -986,6 +1001,20 @@ void World::UploadMesh(vox::MeshPool::MeshHandle& handle, uint32_t& indexCount,
     indexCount = m_meshPool.IndexCount(handle);
 }
 
+void World::UploadModelMesh(vox::MeshPool::MeshHandle& handle, uint32_t& indexCount,
+                            const std::vector<ModelVertex>& vertices) {
+    if (handle != vox::MeshPool::kInvalidMesh) {
+        m_modelPool.Free(handle);
+        handle = vox::MeshPool::kInvalidMesh;
+        indexCount = 0;
+    }
+    if (vertices.empty()) {
+        return;
+    }
+    handle = m_modelPool.Allocate(vertices.data(), static_cast<uint32_t>(vertices.size()));
+    indexCount = m_modelPool.IndexCount(handle);
+}
+
 bool World::LodNeighborsReady(const glm::ivec2& lodColumn) const {
     for (int dz = -1; dz <= 1; ++dz) {
         for (int dx = -1; dx <= 1; ++dx) {
@@ -1221,9 +1250,11 @@ void World::DrainCompletedJobs() {
         if (meshed.version == entry.dataVersion) {
             uploadedBytes += (meshed.mesh.vertices.size() +
                               meshed.mesh.transparentVertices.size()) *
-                             sizeof(ChunkVertex);
+                                 sizeof(ChunkVertex) +
+                             meshed.mesh.modelVertices.size() * sizeof(ModelVertex);
             UploadMesh(entry.mesh, entry.indexCount, meshed.mesh.vertices);
             UploadMesh(entry.meshT, entry.indexCountT, meshed.mesh.transparentVertices);
+            UploadModelMesh(entry.meshM, entry.indexCountM, meshed.mesh.modelVertices);
             entry.meshedVersion = meshed.version;
             entry.visibility = meshed.mesh.visibility;
         }
@@ -1312,16 +1343,19 @@ void SortBackToFront(const glm::vec3& eye, std::vector<vox::MeshPool::DrawItem>&
 
 void World::CollectVisibleChunks(const glm::vec3& eye, const vox::Frustum& frustum,
                                  bool occlusion, std::vector<vox::MeshPool::DrawItem>& out,
-                                 std::vector<vox::MeshPool::DrawItem>& outTransparent) {
+                                 std::vector<vox::MeshPool::DrawItem>& outTransparent,
+                                 std::vector<vox::MeshPool::DrawItem>& outModel) {
     out.clear();
     outTransparent.clear();
+    outModel.clear();
     const int centerX = FloorDivChunk(eye.x);
     const int centerZ = FloorDivChunk(eye.z);
 
     if (!occlusion) {
         for (const auto& [coord, entry] : m_chunks) {
             if (entry.mesh == vox::MeshPool::kInvalidMesh &&
-                entry.meshT == vox::MeshPool::kInvalidMesh) {
+                entry.meshT == vox::MeshPool::kInvalidMesh &&
+                entry.meshM == vox::MeshPool::kInvalidMesh) {
                 continue;
             }
             const glm::vec3 min = glm::vec3(coord * Chunk::kSize);
@@ -1331,6 +1365,9 @@ void World::CollectVisibleChunks(const glm::vec3& eye, const vox::Frustum& frust
                 }
                 if (entry.meshT != vox::MeshPool::kInvalidMesh) {
                     outTransparent.push_back({entry.meshT, glm::vec4(min, 1.0f)});
+                }
+                if (entry.meshM != vox::MeshPool::kInvalidMesh) {
+                    outModel.push_back({entry.meshM, glm::vec4(min, 1.0f)});
                 }
             }
         }
@@ -1371,13 +1408,17 @@ void World::CollectVisibleChunks(const glm::vec3& eye, const vox::Frustum& frust
         if (it != m_chunks.end()) {
             const glm::vec3 min = glm::vec3(coord * Chunk::kSize);
             if ((it->second.mesh != vox::MeshPool::kInvalidMesh ||
-                 it->second.meshT != vox::MeshPool::kInvalidMesh) &&
+                 it->second.meshT != vox::MeshPool::kInvalidMesh ||
+                 it->second.meshM != vox::MeshPool::kInvalidMesh) &&
                 frustum.IntersectsAABB(min, min + glm::vec3(Chunk::kSize))) {
                 if (it->second.mesh != vox::MeshPool::kInvalidMesh) {
                     out.push_back({it->second.mesh, glm::vec4(min, 1.0f)});
                 }
                 if (it->second.meshT != vox::MeshPool::kInvalidMesh) {
                     outTransparent.push_back({it->second.meshT, glm::vec4(min, 1.0f)});
+                }
+                if (it->second.meshM != vox::MeshPool::kInvalidMesh) {
+                    outModel.push_back({it->second.meshM, glm::vec4(min, 1.0f)});
                 }
             }
         }
@@ -1515,6 +1556,9 @@ void World::Update(const glm::vec3& cameraPos) {
         }
         if (it->second.meshT != vox::MeshPool::kInvalidMesh) {
             m_meshPool.Free(it->second.meshT);
+        }
+        if (it->second.meshM != vox::MeshPool::kInvalidMesh) {
+            m_modelPool.Free(it->second.meshM);
         }
         m_chunks.erase(it);
     }

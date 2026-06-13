@@ -113,6 +113,9 @@ void GameApp::OnInit() {
     vc::Recipes::RegisterDefaults();
 
     m_chunkShader = vox::Shader::FromFiles("shaders/chunk.vert", "shaders/chunk.frag");
+    // Model blocks (torches): float-position vertex shader, but the SAME
+    // fragment shader as the cubic chunks — it produces identical varyings.
+    m_modelShader = vox::Shader::FromFiles("shaders/model_block.vert", "shaders/chunk.frag");
     m_blockTextures =
         vox::Texture2DArray::FromFileStrip(PreferMcAsset("textures/atlas.png"), 16);
 
@@ -954,8 +957,32 @@ void GameApp::OnRender(double alpha, double frameDt) {
 
         const auto frustum = vox::Frustum::FromViewProjection(viewProj);
         m_world->CollectVisibleChunks(m_camera.Position(), frustum, m_occlusionCulling,
-                                      m_drawItems, m_drawItemsTransparent);
+                                      m_drawItems, m_drawItemsTransparent, m_drawItemsModel);
         m_world->Meshes().Draw(m_drawItems);
+
+        // Model blocks (torches): float-position geometry, alpha-tested in
+        // the opaque pass (cull on, depth write on, blend off — the state
+        // the chunk draw just left). Shares the chunk fragment shader, so it
+        // takes the same lighting/fog uniforms.
+        if (!m_drawItemsModel.empty()) {
+            m_modelShader->Bind();
+            m_modelShader->SetMat4("u_viewProj", viewProj);
+            m_modelShader->SetInt("u_atlas", 0);
+            m_modelShader->SetFloat3("u_sunDir", dayNight.lightDir);
+            m_modelShader->SetFloat("u_sunLight", dayNight.sunLight);
+            m_modelShader->SetFloat3("u_skyTint", dayNight.skyTint);
+            m_modelShader->SetFloat3("u_eyePos", eye);
+            if (EyeInWater()) {
+                m_modelShader->SetFloat3("u_fogColor",
+                                         glm::vec3(0.05f, 0.18f, 0.40f) * dayNight.sunLight);
+                m_modelShader->SetFloat2("u_fogRange", {2.0f, 28.0f});
+            } else {
+                m_modelShader->SetFloat3("u_fogColor", dayNight.horizon);
+                m_modelShader->SetFloat2("u_fogRange", {320.0f, 500.0f});
+            }
+            m_world->ModelMeshes().Draw(m_drawItemsModel);
+            m_chunkShader->Bind();
+        }
 
         // Entity cubes — falling blocks, item drops, and the dig crack
         // overlay share one shader and the unit-cube VAO. Opaque (alpha-

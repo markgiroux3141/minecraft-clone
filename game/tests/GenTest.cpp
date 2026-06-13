@@ -5,6 +5,7 @@
 // leaves or truncated trunks. Exits 0 on pass, 1 on the first failure.
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <unordered_map>
@@ -329,10 +330,11 @@ int main() {
               "packed water vertices decode to the block corners");
     }
 
-    // Torch mesh (M21 follow-up): four inset one-sided planes riding the
-    // spare packed bits — every vertex carries exactly one sub-block
-    // inset code (1 = 7/16 or 2 = 9/16) on exactly one axis, anchored to
-    // the torch's own cell corners.
+    // Torch mesh (M23): vanilla template_torch in the float MODEL stream —
+    // two thin crossed slabs (4 outward side planes spanning the cell) plus
+    // a top cap at the EXACT flame height (10/16). With float positions the
+    // cap lands pixel-true; the old packed format could only quantise it to
+    // ninths. Torches emit no cubic geometry now.
     {
         vc::ChunkSnapshot snapshot;
         auto center = std::make_shared<vc::Chunk>();
@@ -341,35 +343,38 @@ int main() {
         snapshot.skyAbove = true;
 
         const vc::ChunkMesh mesh = vc::ChunkMesher::Build(snapshot);
+        Check(mesh.vertices.empty(), "torch emits no cubic geometry");
         // Four one-sided side planes (4 verts each) + a four-vert top cap.
-        Check(mesh.vertices.size() == 20, "lone torch meshes to 4 planes + a cap");
+        Check(mesh.modelVertices.size() == 20, "lone torch meshes to 4 planes + a cap");
+
+        constexpr float kI7 = 7.0f / 16.0f;
+        constexpr float kI9 = 9.0f / 16.0f;
+        constexpr float kCapY = 10.0f / 16.0f;
+        const auto near = [](float a, float b) { return std::fabs(a - b) < 1e-4f; };
+        const auto inset = [&](float v) { return near(v, kI7) || near(v, kI9); };
         int sidePlaneVerts = 0;
         int capVerts = 0;
-        bool insetsOk = true;
-        for (const auto& vertex : mesh.vertices) {
-            const uint32_t x = vertex.data0 & 31u;
-            const uint32_t y = (vertex.data0 >> 5) & 31u;
-            const uint32_t z = (vertex.data0 >> 10) & 31u;
-            const uint32_t xIn = (vertex.data0 >> 28) & 3u;
-            const uint32_t zIn = vertex.data0 >> 30;
-            const uint32_t yoff = (vertex.data1 >> 26) & 15u;
-            insetsOk &= x >= 8 && x <= 9 && y >= 8 && y <= 9 && z >= 8 && z <= 9;
-            insetsOk &= xIn != 3 && zIn != 3; // codes are 1 or 2 only
-            if (xIn != 0 && zIn != 0) {
-                // Cap: inset on both axes, raised to the post top via yoff,
-                // and anchored to the cell's top corner (y+1 = 9).
+        bool geomOk = true;
+        for (const auto& vtx : mesh.modelVertices) {
+            const float lx = vtx.x - 8.0f, ly = vtx.y - 8.0f, lz = vtx.z - 8.0f;
+            const uint32_t normal = (vtx.packed >> 16) & 7u;
+            const uint32_t ao = (vtx.packed >> 19) & 15u;
+            geomOk &= normal < 6 && ao == 15; // full-bright AO
+            if (near(ly, kCapY)) {
+                // Cap: both horizontal axes inset to the 2x2 post, raised to
+                // the exact flame height.
                 ++capVerts;
-                insetsOk &= yoff > 0 && y == 9;
+                geomOk &= inset(lx) && inset(lz);
             } else {
-                // Side plane: exactly one axis inset, no Y offset.
+                // Side plane: exactly one axis inset; the other spans the
+                // full cell (0 or 1); full height (y in 0..1).
                 ++sidePlaneVerts;
-                insetsOk &= (xIn == 0) != (zIn == 0);
-                insetsOk &= yoff == 0;
+                geomOk &= inset(lx) != inset(lz);
+                geomOk &= ly >= -1e-4f && ly <= 1.0f + 1e-4f;
             }
         }
-        Check(sidePlaneVerts == 16 && capVerts == 4,
-              "torch is 4 side planes + a 4-vert cap");
-        Check(insetsOk, "torch verts: side planes one-axis inset, cap both-axis + raised");
+        Check(sidePlaneVerts == 16 && capVerts == 4, "torch is 4 side planes + a 4-vert cap");
+        Check(geomOk, "torch verts: planes one-axis inset full height, cap both-axis at 10/16");
     }
 
     if (g_failures == 0) {
