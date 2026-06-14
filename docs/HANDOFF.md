@@ -7,8 +7,10 @@ it should be"). M21 (ORES + FURNACE/SMELTING + torches), M24 (BLOCK
 ORIENTATION / FACING), M25 (DEEPER WORLD — 128 tall, vanilla
 underground depth), and M26 (LAVA) are CODE COMPLETE awaiting explicit user
 verification — see their sections for what was built and what to test (M25
-and M26 need a NEW WORLD). The next milestone is open (slabs/stairs are the
-leading candidate — see the Backlog); scope it with the user.
+and M26 need a NEW WORLD). The DECIDED next milestone is M27 (WATER
+GENERATION — lakes + oceans), scoped with the user 2026-06-14 after they
+noticed the post-M25 world has almost no surface water; spec + the root-cause
+analysis are in the M27 PLANNED section near the bottom. Start there.
 Read alongside `ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md`
 (build commands, conventions).
 
@@ -1507,11 +1509,88 @@ Filled bucket: RMB on a block face → dumps the source there + empties. Note
 the lava-source obsidian rule means a water bucket emptied onto a lava SOURCE
 makes obsidian.
 
-## Backlog (after M26)
+## M27 — water generation: lakes + oceans (PLANNED, not started)
+
+DECIDED with the user 2026-06-14 as the next milestone. The user noticed the
+post-M25 world is a "drought" — only rare 1-block puddles in sand bowls (a
+screenshot confirmed it). ROOT CAUSE (verified in code + the 1.12 source):
+the ONLY water mechanism is M11's heightmap fill ("fill air with water up to
+`kSeaLevel`"), which fires only where terrain noise dips below sea level.
+After M25 (sea 14→63, `height = kSeaLevel + 3 + base*18 + n*(3 + var*30)` in
+`TerrainGen.cpp`), EVERY biome has a POSITIVE `base` (plains/desert 0.125,
+forest 0.1, snowy 0.2) plus a +3 lift, so the floor sits ~y64 and terrain
+almost never reaches y63. No biome dips, so no water.
+
+VANILLA HAS TWO SEPARATE WATER SYSTEMS (both confirmed in the local source —
+look up, don't recall):
+1. OCEANS — biome+noise driven. Ocean biomes carry a NEGATIVE `baseHeight`:
+   Ocean -1.0, Deep Ocean -1.8, variation 0.1 (`Biome.java:473/497`). Those
+   negative bases drop whole regions far below sea level; the fill floods
+   them. The clone has NO ocean biome and no negative-base biome, so it can't
+   form an ocean basin.
+2. LAKES — `WorldGenLakes` (`WorldGenLakes.java`), a POPULATE feature
+   INDEPENDENT of the heightmap. Per chunk, skip desert, 1/4 water
+   (`waterLakeChance=4`); lava ~1/80 and deep-biased
+   (`ChunkGeneratorOverworld.java:412-430`). Walk down from a random y to
+   ground, drop 4, carve a blob of 4-7 overlapping ellipsoids (≤16×8×16),
+   fill the bottom 4 layers with liquid + air above — ONLY if the shell is
+   SEALED (sides/bottom solid, no liquid in the upper half). Rim dirt→grass;
+   freeze top in cold biomes; lava lakes wrap exposed faces in stone. KEY
+   PROPERTY: it digs and seals its OWN basin, so lakes appear on dry flat
+   above-sea terrain regardless of sea level — these are the field/forest
+   ponds the user remembers.
+
+PART A — OCEANS (do FIRST: bigger visual payoff, simpler, lower risk):
+- Add a low-frequency "continentalness" OpenSimplex field (freq ~0.0015-
+  0.0020, below the 0.0030 climate fields → ~500-700-block features). In
+  `biomeAt`: continentalness < oceanThreshold → Ocean; < deepThreshold →
+  DeepOcean; else fall through to the existing temp/moisture `ClassifyBiome`.
+  Add Ocean/DeepOcean to the `Biome` enum + `ParamsFor` (base -1.0/-1.8,
+  var 0.1).
+- The existing 5x5 `cellParams` blend already smooths base/variation across
+  biome-cell seams → coastlines slope naturally from land (base ~0.1) into
+  ocean (base -1.0). The beach band (`height <= sea+2 → sand`) gives sandy
+  shores for free. With base -1.0 the height lands ~y48 (15 below sea), deep
+  ocean ~y33 — real depth. M11's fill floods it with no new render work.
+  Verify the "halved weight when neighbor is higher" cliff trick behaves
+  with negative bases (it's linear — should be fine).
+- Knock-ons: trees/plants already gate on grass-only ground (no underwater
+  trees — M11 note); the analytic ocean-breach test in `CaveGen` already
+  stops carved air touching worldgen water (gentest asserts it) but is now
+  exercised far more — re-check. Spawn (`kSpawnPos`) may land over ocean →
+  either a ground/sea-surface search or accept the swim (no fall damage);
+  note it. gentest: "oceans generate" + "deep ocean floor lower than shallow."
+
+PART B — LAKES (`WorldGenLakes` port, do SECOND: the harder half):
+- CHALLENGE: the clone's worldgen is stateless + deterministic PER CHUNK (no
+  sequential populate phase), but a lake blob crosses chunk seams, so
+  neighbors must regenerate identical lake cells. Use the SAME pattern trees
+  & caves already use: enumerate every lake-origin candidate whose blob could
+  reach this chunk (origin neighborhood ±1 chunk — blob radius ≤8 plus the
+  +8/+16 offset), seed each by its chunk coord (hash salt), replay
+  deterministically, write only the cells landing in THIS chunk. Mirror
+  `CaveGen`'s origin-replay loop.
+- DETERMINISM CAVEAT (main design risk): vanilla's shell-seal check reads the
+  LIVE world (order-dependent). The port must instead check against
+  `heightAt` + the cave `CarveMask` (pure functions) so every chunk agrees —
+  a lake sits where its blob is fully below the local surface and clear of
+  carved caves. Get this right or lakes will seam.
+- Reuse: lava lakes use the SAME generator with `blocks::Lava` (composes with
+  M26). Place lakes after caves; decide order vs plants (probably before, so
+  plants don't grow in the basin).
+- gentest: "water lakes generate and are sealed (no liquid on air sides)" +
+  "lake cells are identical across a chunk seam."
+
+ORDER/SCOPE: oceans (commit 1) → user-verify → lakes (commit 2). NEW WORLD
+required (worldgen changes); old saves seam against new chunks as usual.
+VANILLA REFERENCE: `WorldGenLakes.java`, `ChunkGeneratorOverworld.java:
+412-430`, `Biome.java:473/497`.
+
+## Backlog (after M27)
 
 The per-block metadata layer M24 added makes SLABS/STAIRS the natural
 follow-on (half/shape state + the partial-collision work M23 deferred) —
-the leading candidate for the next milestone. Other open candidates, to
+the leading candidate after M27. Other open candidates, to
 scope with the user:
 full 256-tall world (would want
 empty-air-chunk culling first); a settings screen (the audio
