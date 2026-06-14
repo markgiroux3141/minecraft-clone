@@ -7,10 +7,10 @@ it should be"). M21 (ORES + FURNACE/SMELTING + torches), M24 (BLOCK
 ORIENTATION / FACING), M25 (DEEPER WORLD — 128 tall, vanilla
 underground depth), and M26 (LAVA) are CODE COMPLETE awaiting explicit user
 verification — see their sections for what was built and what to test (M25
-and M26 need a NEW WORLD). The DECIDED next milestone is M27 (WATER
-GENERATION — lakes + oceans), scoped with the user 2026-06-14 after they
-noticed the post-M25 world has almost no surface water; spec + the root-cause
-analysis are in the M27 PLANNED section near the bottom. Start there.
+and M26 need a NEW WORLD). M27 (WATER GENERATION — oceans + lakes) is now
+CODE COMPLETE too (oceans user-verified "looks good"; lakes awaiting
+verification) — see the M27 section. The next milestone is open again
+(slabs/stairs is the leading Backlog candidate); scope it with the user.
 Read alongside `ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md`
 (build commands, conventions).
 
@@ -1509,12 +1509,12 @@ Filled bucket: RMB on a block face → dumps the source there + empties. Note
 the lava-source obsidian rule means a water bucket emptied onto a lava SOURCE
 makes obsidian.
 
-## M27 — water generation: lakes + oceans (PART A OCEANS CODE COMPLETE; PART B LAKES PLANNED)
+## M27 — water generation: lakes + oceans (CODE COMPLETE)
 
-PART A (OCEANS) is CODE COMPLETE 2026-06-14, awaiting user verification (build
-+ gentest pass) — see "PART A — OCEANS" below for exactly what shipped. PART B
-(WorldGenLakes) is still PLANNED — spec below. NEW WORLD REQUIRED (worldgen
-changed).
+CODE COMPLETE 2026-06-14, awaiting user verification (build + gentest +
+savetest pass). PART A (oceans) was verified by the user ("looks good"); PART B
+(lakes) is code-complete awaiting verification. See the PART A / PART B
+sections below for exactly what shipped. NEW WORLD REQUIRED (worldgen changed).
 
 DECIDED with the user 2026-06-14 as the next milestone. The user noticed the
 post-M25 world is a "drought" — only rare 1-block puddles in sand bowls (a
@@ -1581,28 +1581,54 @@ PART A — OCEANS (CODE COMPLETE 2026-06-14, all in `TerrainGen.cpp`):
   loaded at EnterWorld (deferred, same as M25's note). Oceans in snowy
   climate don't freeze (no ice block — out of scope).
 
-PART B — LAKES (`WorldGenLakes` port, do SECOND: the harder half):
-- CHALLENGE: the clone's worldgen is stateless + deterministic PER CHUNK (no
-  sequential populate phase), but a lake blob crosses chunk seams, so
-  neighbors must regenerate identical lake cells. Use the SAME pattern trees
-  & caves already use: enumerate every lake-origin candidate whose blob could
-  reach this chunk (origin neighborhood ±1 chunk — blob radius ≤8 plus the
-  +8/+16 offset), seed each by its chunk coord (hash salt), replay
-  deterministically, write only the cells landing in THIS chunk. Mirror
-  `CaveGen`'s origin-replay loop.
-- DETERMINISM CAVEAT (main design risk): vanilla's shell-seal check reads the
-  LIVE world (order-dependent). The port must instead check against
-  `heightAt` + the cave `CarveMask` (pure functions) so every chunk agrees —
-  a lake sits where its blob is fully below the local surface and clear of
-  carved caves. Get this right or lakes will seam.
-- Reuse: lava lakes use the SAME generator with `blocks::Lava` (composes with
-  M26). Place lakes after caves; decide order vs plants (probably before, so
-  plants don't grow in the basin).
-- gentest: "water lakes generate and are sealed (no liquid on air sides)" +
-  "lake cells are identical across a chunk seam."
+PART B — LAKES (CODE COMPLETE 2026-06-14, new files `LakeGen.h/.cpp`):
+- A port of `WorldGenLakes` (4-7 overlapping ellipsoids in a 16x16x8 blob,
+  bottom half liquid / top half air) as a deterministic chunk-pure populate
+  step, called from `TerrainGenerator::Generate` AFTER ores and BEFORE trees/
+  plants (vanilla order). Water and lava share the code (`blocks::Lava`
+  composes with M26); rarity per chunk: water 1/3, lava 1/40.
+- THE DETERMINISM TRICK (the crux — read before touching it): instead of
+  vanilla's live-world seal check (order-dependent), leaks/seams are made
+  IMPOSSIBLE BY CONSTRUCTION:
+  1. Each lake anchors to ONE chunk's 16x16 footprint (NO jitter) and the blob
+     only sets interior cells (1..14), so every lake keeps a >=1-column solid
+     margin — adjacent chunks' lakes can never touch/overlap (the first bug:
+     random jitter made neighbours overlap at different levels -> exposed
+     faces).
+  2. The blob anchors BELOW the LOWEST surface across its footprint
+     (`blobMinY = minGround - 4`), so every non-blob neighbour of a water cell
+     is below every column's surface -> provably solid. No per-cell seal check;
+     depends only on the global `heightAt`, so all chunks agree.
+  3. The blob is constrained to fit in ONE vertical chunk
+     (`blobMinY/16 == (blobMinY+7)/16`), so a single chunk owns + writes the
+     whole lake and can cave-reject it locally — no cross-Y-seam coordination.
+- CAVE REJECT: a lake whose liquid band/floor intersects a carved cell is
+  dropped (uses this chunk's `caves::CarveMask`, which covers the whole blob
+  since it fits in one chunk). Closes the last leak source (water over a cave)
+  — gentest's seal scan went 39 exposed faces -> 0.
+- DECORATION VETO: `lakes::LakeMask` (XZ columns, chunk + 2 skirt, filled from
+  the same +-1 origin enumeration every chunk runs) lets the tree + plant gates
+  skip a pond's footprint, like `CarveMask` does for cave mouths. (Lakes had to
+  move BEFORE decoration for this; placing them after left undermined plants —
+  the second bug.)
+- PERF: `lakes::Place` early-outs (after one `heightAt`) for vertical chunks
+  not near the surface band, so only the surface chunk(s) per column pay the
+  256-column min/max footprint scan — keeps streaming cheap (6 of 8 vertical
+  chunks skip it).
+- gentest: "lakes generate above sea level" + "lake liquid has no exposed air
+  face (sealed + seam-consistent)" (the seal scan IS the seam test — a
+  truncated lake would show a cut face). The lava-band check relaxed to "no
+  cave lava leaks into the mid-depths (y11..50)" since surface lava LAKES
+  (always >= y56) are now legitimate. To keep the suite fast the lake scan
+  reuses the structural region and the ocean transect was trimmed to ~1.5
+  wavelengths (gentest ~33s; the cost is cave replay, not lakes).
+- KNOWN LIMITS: lakes centre on a 16-block (chunk) grid — scattered enough with
+  the flatness + rarity gates that it doesn't read as gridded, but a future
+  tweak could add a safe sub-chunk offset. A cave-rejected lake site can leave
+  a small tree-clearing with no pond (the veto mask is filled before the cave
+  reject, and neighbours can't see this chunk's caves) — rare, cosmetic. No
+  freezing/ice, no rim grass conversion (vanilla extras, skipped).
 
-ORDER/SCOPE: oceans (commit 1) → user-verify → lakes (commit 2). NEW WORLD
-required (worldgen changes); old saves seam against new chunks as usual.
 VANILLA REFERENCE: `WorldGenLakes.java`, `ChunkGeneratorOverworld.java:
 412-430`, `Biome.java:473/497`.
 

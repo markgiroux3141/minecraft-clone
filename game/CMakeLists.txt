@@ -36,6 +36,8 @@ add_executable(game
     src/world/Furnace.cpp
     src/world/Furnace.h
     src/world/JavaRandom.h
+    src/world/LakeGen.cpp
+    src/world/LakeGen.h
     src/world/Light.h
     src/world/LightEngine.cpp
     src/world/LightEngine.h
@@ -56,6 +58,7 @@ if(MSVC)
     set_source_files_properties(
         src/world/CaveGen.cpp
         src/world/ChunkMesher.cpp
+        src/world/LakeGen.cpp
         src/world/LightEngine.cpp
         src/world/OreGen.cpp
         src/world/TerrainGen.cpp
@@ -83,6 +86,7 @@ add_executable(gentest
     src/world/Block.cpp
     src/world/CaveGen.cpp
     src/world/ChunkMesher.cpp
+    src/world/LakeGen.cpp
     src/world/OreGen.cpp
     src/world/TerrainGen.cpp
 )

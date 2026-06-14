@@ -8,6 +8,7 @@
 #include <FastNoiseLite.h>
 
 #include "world/CaveGen.h"
+#include "world/LakeGen.h"
 #include "world/Light.h" // kWorldHeightBlocks
 #include "world/OreGen.h"
 
@@ -398,6 +399,20 @@ void TerrainGenerator::Generate(Chunk& chunk, const glm::ivec3& chunkCoord) cons
     // deposit into open caves — vanilla's generation/population order).
     ores::Place(chunk, chunkCoord, m_seed);
 
+    // Lakes before decoration (vanilla populate order): scattered self-sealing
+    // water/lava ponds dug into flat ground. Chunk-pure via origin replay (see
+    // LakeGen.h); the lake mask lets the tree/plant gates avoid the pond,
+    // exactly like the cave mask.
+    auto lakeMask = std::make_unique<lakes::LakeMask>();
+    lakes::Place(
+        chunk, chunkCoord, m_seed, heightAt,
+        [&](int wx, int wz) {
+            const Biome b = biomeAt(wx, wz);
+            return b == Biome::Ocean || b == Biome::DeepOcean;
+        },
+        [&](int wx, int wz) { return biomeAt(wx, wz) == Biome::Desert; }, mask.get(),
+        lakeMask.get());
+
     // Decoration: every tree whose canopy can reach this chunk. Cells are
     // visited in the same (ascending) order from every chunk, so overlapping
     // trees resolve identically no matter which chunk generates first.
@@ -420,6 +435,9 @@ void TerrainGenerator::Generate(Chunk& chunk, const glm::ivec3& chunkCoord) cons
             const int ground = heightAt(tx, tz);
             if (ground <= kBeachTop) {
                 continue; // grass only — no beach or underwater trees
+            }
+            if (lakeMask->InLake(tx - origin.x, tz - origin.z)) {
+                continue; // a lake claimed this column — no trees in the pond
             }
             // Species: snowy climate and alpine caps grow spruce; forests
             // mix in birch; everything else is oak. Spruce/birch run a
@@ -462,6 +480,9 @@ void TerrainGenerator::Generate(Chunk& chunk, const glm::ivec3& chunkCoord) cons
             }
             if (mask->Carved(x, height - origin.y, z)) {
                 continue;
+            }
+            if (lakeMask->InLake(x, z)) {
+                continue; // no plants growing out of a pond
             }
             const Biome biome = biomeAt(wx, wz);
             const float r = Hash01(m_seed, wx, wz, 5);

@@ -217,9 +217,13 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   `Ocean`/`DeepOcean` biomes with NEGATIVE base height (-1.0/-1.8, vanilla
   values); the existing param blend + beach band + M11 water fill turn that
   into sloping sandy coastlines and basins (~25% ocean, deep floors ~y31)
-  with no render changes. PART B — LAKES (planned): port `WorldGenLakes` as a
-  deterministic origin-replay populate step (self-sealing water/lava ponds on
-  dry land). New world required.
+  with no render changes. PART B — LAKES ✅: `WorldGenLakes` ported as a
+  deterministic populate step (`LakeGen`, before tree/plant decoration).
+  Self-sealing water/lava ponds dug into flat ground; leaks/seams are
+  impossible by construction (chunk-aligned footprint with an interior margin,
+  anchored below the lowest footprint surface, fit to one vertical chunk, and
+  cave-rejected via the carve mask). A `LakeMask` vetoes trees/plants in the
+  pond. New world required.
 - **Backlog**: slabs/stairs (reuse M24 meta + partial collision),
   full 256-tall world (wants empty-air-chunk culling
   first), tall-grass wheat seeds (1/8 chance, BlockTallGrass — pairs with

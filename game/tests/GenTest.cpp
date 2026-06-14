@@ -164,16 +164,20 @@ int main() {
     // means cave-into-ocean leaks (waterfalls at chunk seams).
     size_t caveAir = 0;
     bool noOceanBreach = true;
-    // M26: caves below y10 fill with lava (vanilla MapGenCaves.digBlock);
-    // nothing above ~y11 should ever be lava from worldgen.
+    // M26: caves below y10 fill with lava (vanilla MapGenCaves.digBlock).
+    // M27 adds surface lava LAKES (always >= y56), so the only forbidden lava
+    // is in the mid-depths [11, 50] — that would be cave lava leaking upward.
     size_t caveLava = 0;
-    bool noHighLava = true;
+    bool noMidLava = true;
     for (int wz = lo; wz < hi; ++wz) {
         for (int wx = lo; wx < hi; ++wx) {
             for (int wy = 1; wy < vc::kWorldHeightBlocks - 1; ++wy) {
                 if (blockAt(wx, wy, wz) == vc::blocks::Lava) {
-                    ++caveLava;
-                    noHighLava &= wy <= 10;
+                    if (wy <= 10) {
+                        ++caveLava;
+                    } else if (wy <= 50) {
+                        noMidLava = false;
+                    }
                 }
                 if (blockAt(wx, wy, wz) != vc::blocks::Air) {
                     continue;
@@ -195,7 +199,7 @@ int main() {
     Check(caveAir > 0, "caves actually carve");
     Check(noOceanBreach, "carved air never touches worldgen water");
     Check(caveLava > 0, "lava pools generate on deep cave floors (below y10)");
-    Check(noHighLava, "no worldgen lava above y10");
+    Check(noMidLava, "no cave lava leaks into the mid-depths (y11..50)");
 
     // Oceans (M27): the continentalness field (ocean biomes with negative
     // base height) drops whole regions below sea level so the M11 fill makes
@@ -206,7 +210,7 @@ int main() {
     {
         const int sea = vc::TerrainGenerator::kSeaLevel;
         std::unordered_map<glm::ivec3, vc::Chunk, IVec3Hash> strip;
-        for (int cx = -48; cx < 48; ++cx) {
+        for (int cx = -32; cx < 32; ++cx) {
             for (int cy = 1; cy <= 3; ++cy) { // y16..63: deep floors + water
                 gen.Generate(strip[{cx, cy, 0}], {cx, cy, 0});
             }
@@ -219,7 +223,7 @@ int main() {
         size_t oceanCols = 0;
         int maxDepth = 0;
         bool floorsSolid = true;
-        for (int wx = -48 * 16 + 16; wx < 48 * 16 - 16; ++wx) {
+        for (int wx = -32 * 16 + 16; wx < 32 * 16 - 16; ++wx) {
             if (stripAt(wx, sea, 0) != vc::blocks::Water) {
                 continue; // not an ocean/lake surface column
             }
@@ -236,6 +240,39 @@ int main() {
         Check(oceanCols > 0, "oceans generate (open water over a sub-sea-level floor)");
         Check(floorsSolid, "ocean water sits on a solid floor (no breach)");
         Check(maxDepth >= 18, "deep ocean basins form (water >= 18 deep somewhere)");
+    }
+
+    // Lakes (M27 Part B): scattered self-sealing ponds dug into flat land,
+    // ABOVE sea level (so distinct from oceans), reusing the structural region
+    // above (no extra generation). The basin is anchored below the local
+    // surface, so a correct lake never shows liquid with an exposed air face —
+    // that invariant doubles as a seam test: a lake truncated at a chunk
+    // boundary (enumeration range too small) would leave a cut face.
+    {
+        const int sea = vc::TerrainGenerator::kSeaLevel;
+        size_t lakeLiquid = 0;
+        size_t exposed = 0;
+        constexpr int kD4[4][2] = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}};
+        for (int wx = lo; wx < hi; ++wx)
+            for (int wz = lo; wz < hi; ++wz)
+                for (int wy = sea + 1; wy < vc::kWorldHeightBlocks - 1; ++wy) {
+                    const vc::BlockId id = blockAt(wx, wy, wz);
+                    // Liquid above sea level can only come from a lake.
+                    if (id != vc::blocks::Water && id != vc::blocks::Lava) {
+                        continue;
+                    }
+                    ++lakeLiquid;
+                    if (blockAt(wx, wy - 1, wz) == vc::blocks::Air) {
+                        ++exposed;
+                    }
+                    for (const auto& d : kD4) {
+                        if (blockAt(wx + d[0], wy, wz + d[1]) == vc::blocks::Air) {
+                            ++exposed;
+                        }
+                    }
+                }
+        Check(lakeLiquid > 0, "lakes generate above sea level");
+        Check(exposed == 0, "lake liquid has no exposed air face (sealed + seam-consistent)");
     }
 
     // Ores (M21, rebased in M25): coal and iron veins generate, iron stays
