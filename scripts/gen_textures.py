@@ -429,6 +429,56 @@ def torch_flame(x, y):
     return (242, 158, 48, 255)
 
 
+def lava(x, y):
+    # M26: molten rock — dark crust veined with hot yellow cracks. Mostly
+    # opaque dark orange with hash-gated bright spots, so it reads glowing
+    # (the block emits light 15) and fully opaque (alpha 255).
+    if hash01(x // 2, y // 2, 64) > 0.78:
+        return speckle((255, 224, 96), x, y, 64, 20)
+    if hash01(x, y, 64) > 0.6:
+        return speckle((226, 110, 24), x, y, 64, 24)
+    return speckle((158, 54, 12), x, y, 64, 18)
+
+
+def obsidian(x, y):
+    # M26: near-black volcanic glass with a faint purple sheen and sparse
+    # glints.
+    if hash01(x, y, 65) > 0.88:
+        return speckle((78, 60, 104), x, y, 65, 16)
+    return speckle((24, 18, 34), x, y, 65, 10)
+
+
+IRON_PAIL = (170, 170, 178)
+IRON_PAIL_DK = (120, 120, 128)
+
+
+def bucket_sprite(fill):
+    # A gray iron pail: trapezoid body (wider at the top) with a rim, on a
+    # transparent background. `fill` is an optional (r,g,b) for the liquid
+    # sitting in the top of the pail (None = empty).
+    def pixel(x, y):
+        # Body spans y 4..14; left/right edges slope inward toward the base.
+        if y < 4 or y > 14:
+            return (0, 0, 0, 0)
+        inset = (y - 4) // 4  # 0 near the rim, grows toward the base
+        left = 3 + inset
+        right = 12 - inset
+        if x < left or x > right:
+            return (0, 0, 0, 0)
+        if y == 4 or x == left or x == right or y == 14:
+            return speckle(IRON_PAIL_DK, x, y, 66, 8)  # rim + outline
+        if fill is not None and y <= 6:
+            return speckle(fill, x, y, 67, 12)  # liquid surface in the pail
+        return speckle(IRON_PAIL, x, y, 66, 10)
+
+    return pixel
+
+
+bucket_empty = bucket_sprite(None)
+bucket_water = bucket_sprite((60, 110, 210))
+bucket_lava = bucket_sprite((230, 110, 24))
+
+
 # Layer index in the texture array == position in this list.
 TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top, leaves, water,
          snow, grass_side_snowed, tall_grass, dandelion, poppy, dead_bush,
@@ -447,7 +497,11 @@ TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top,
          tool_sprite(IRON_HEAD, 59), tool_sprite(IRON_HEAD, 60), tool_sprite(IRON_HEAD, 61),
          # M21 follow-up: torch sides (62) + the flame-top cap tile (63,
          # the torch block's +Y face, drawn on the small post-top quad).
-         torch, torch_flame]
+         torch, torch_flame,
+         # M26: lava (64, still — used for source and all flow levels, like
+         # water) and obsidian (65, lava+water product), then bucket sprites
+         # (66 empty / 67 water / 68 lava).
+         lava, obsidian, bucket_empty, bucket_water, bucket_lava]
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:

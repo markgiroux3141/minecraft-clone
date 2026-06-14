@@ -164,9 +164,17 @@ int main() {
     // means cave-into-ocean leaks (waterfalls at chunk seams).
     size_t caveAir = 0;
     bool noOceanBreach = true;
+    // M26: caves below y10 fill with lava (vanilla MapGenCaves.digBlock);
+    // nothing above ~y11 should ever be lava from worldgen.
+    size_t caveLava = 0;
+    bool noHighLava = true;
     for (int wz = lo; wz < hi; ++wz) {
         for (int wx = lo; wx < hi; ++wx) {
             for (int wy = 1; wy < vc::kWorldHeightBlocks - 1; ++wy) {
+                if (blockAt(wx, wy, wz) == vc::blocks::Lava) {
+                    ++caveLava;
+                    noHighLava &= wy <= 10;
+                }
                 if (blockAt(wx, wy, wz) != vc::blocks::Air) {
                     continue;
                 }
@@ -186,6 +194,8 @@ int main() {
     }
     Check(caveAir > 0, "caves actually carve");
     Check(noOceanBreach, "carved air never touches worldgen water");
+    Check(caveLava > 0, "lava pools generate on deep cave floors (below y10)");
+    Check(noHighLava, "no worldgen lava above y10");
 
     // Ores (M21, rebased in M25): coal and iron veins generate, iron stays
     // in the lower half (vanilla y0..64; surface is now ~y65), and every ore
@@ -310,6 +320,17 @@ int main() {
         const vc::ChunkMesh mesh = vc::ChunkMesher::Build(snapshot);
         Check(mesh.vertices.size() == 24, "lone stone block meshes to 6 quads");
         Check(mesh.transparentVertices.size() == 24, "lone water block meshes transparently");
+
+        // M26: lava is a liquid (corner-sampled surface) but renders OPAQUE —
+        // its faces land in the opaque stream, not the blended one.
+        vc::ChunkSnapshot lavaSnap;
+        auto lavaChunk = std::make_shared<vc::Chunk>();
+        lavaChunk->Set(8, 8, 8, vc::blocks::Lava);
+        lavaSnap.chunks[vc::ChunkSnapshot::Index(1, 1, 1)] = lavaChunk;
+        lavaSnap.skyAbove = true;
+        const vc::ChunkMesh lavaMesh = vc::ChunkMesher::Build(lavaSnap);
+        Check(lavaMesh.vertices.size() == 24 && lavaMesh.transparentVertices.empty(),
+              "lone lava block meshes into the opaque stream (not transparent)");
 
         const auto cornersOk = [](const std::vector<vc::ChunkVertex>& vertices, uint32_t lo) {
             bool ok = true;

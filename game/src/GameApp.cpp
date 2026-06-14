@@ -309,14 +309,21 @@ void GameApp::EnterWorld(const std::string& name, int defaultSeed) {
             }
         }
     } else {
-        // New world or pre-M17 save: the legacy hotbar as a starter kit
-        // (slot 9 stays empty — the old empty-hand convention).
-        const vc::BlockId kit[] = {vc::blocks::Stone, vc::blocks::Dirt,  vc::blocks::Grass,
+        // New world or pre-M17 save: the legacy hotbar as a starter kit.
+        // Slot 9 carries lava (M26) so it's one keypress away for testing —
+        // water sits in slot 8 right beside it for mixing experiments.
+        const vc::BlockId kit[] = {vc::blocks::Stone, vc::blocks::Dirt,    vc::blocks::Grass,
                                    vc::blocks::Glowstone, vc::blocks::Sand, vc::blocks::Log,
-                                   vc::blocks::Leaves, vc::blocks::Water};
+                                   vc::blocks::Leaves, vc::blocks::Water,   vc::blocks::Lava};
         for (size_t i = 0; i < std::size(kit); ++i) {
             m_inventory.Slot(i) = {kit[i], vc::kMaxStackSize};
         }
+        // Debug kit (M26): buckets in the inventory grid (hotbar's full) —
+        // an empty stack to test fill, plus a pre-filled water + lava bucket
+        // to test dumping. Press E to grab them.
+        m_inventory.Slot(9) = {vc::items::Bucket, vc::ItemMaxStack(vc::items::Bucket)};
+        m_inventory.Slot(10) = {vc::items::WaterBucket, 1};
+        m_inventory.Slot(11) = {vc::items::LavaBucket, 1};
     }
 
     m_state = State::Playing;
@@ -678,18 +685,24 @@ void GameApp::HandleInput(double frameDt, int scroll) {
     m_dropKeyWasDown = dropKey;
 
     const bool placeDown = vox::Input::IsMouseButtonDown(vox::MouseButton::Right);
-    if (placeDown && m_target && (!m_placeWasDown || m_placeCooldown == 0.0)) {
+    if (placeDown && (!m_placeWasDown || m_placeCooldown == 0.0)) {
         const vc::BlockId targetId =
-            m_world->GetBlock(m_target->block.x, m_target->block.y, m_target->block.z);
-        if (targetId == vc::blocks::CraftingTable) {
+            m_target ? m_world->GetBlock(m_target->block.x, m_target->block.y, m_target->block.z)
+                     : vc::blocks::Air;
+        if (m_target && targetId == vc::blocks::CraftingTable) {
             // Use beats place (vanilla, sans sneak): open the 3x3 grid.
             OpenContainer(State::Crafting);
             m_placeCooldown = kEditRepeatDelay;
-        } else if (targetId == vc::blocks::Furnace || targetId == vc::blocks::LitFurnace) {
+        } else if (m_target &&
+                   (targetId == vc::blocks::Furnace || targetId == vc::blocks::LitFurnace)) {
             m_openFurnace = m_target->block;
             OpenContainer(State::Furnace);
             m_placeCooldown = kEditRepeatDelay;
-        } else {
+        } else if (TryUseBucket()) {
+            // Bucket fill/dump (or a no-op bucket click) — handled, no place.
+            // It does its own liquid raycast, so it works with no crosshair
+            // block target (aiming straight at water).
+        } else if (m_target) {
             const glm::ivec3 cell = m_target->block + m_target->normal;
             vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
             if (!hand.Empty() && vc::IsBlockItem(hand.id) &&
@@ -737,17 +750,68 @@ void GameApp::HandleInput(double frameDt, int scroll) {
     m_placeWasDown = placeDown;
 }
 
-bool GameApp::EyeInWater() const {
-    if (!m_world) {
+bool GameApp::TryUseBucket() {
+    vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
+    if (hand.Empty()) {
         return false;
     }
-    const glm::vec3 eye = m_camera.Position();
-    return vc::BlockRegistry::Get()
-        .Def(m_world->GetBlock(static_cast<int>(std::floor(eye.x)),
-                               static_cast<int>(std::floor(eye.y)),
-                               static_cast<int>(std::floor(eye.z))))
-        .liquid;
+    if (hand.id == vc::items::Bucket) {
+        // Fill: aim at a liquid SOURCE (the bucket's own ray sees liquids;
+        // the crosshair ray skips them). Flowing liquid can't be scooped.
+        const auto hit = m_world->RaycastBlocks(m_camera.Position(), m_camera.Forward(),
+                                                kReachDistance, /*includeLiquids=*/true);
+        if (hit) {
+            const vc::BlockId at = m_world->GetBlock(hit->block.x, hit->block.y, hit->block.z);
+            const vc::ItemId filled = vc::items::FilledBucketFor(at);
+            if (filled != 0) {
+                m_world->SetBlock(hit->block, vc::blocks::Air);
+                m_sounds.PlayBucketFill(at == vc::blocks::Lava, glm::vec3(hit->block) + 0.5f);
+                m_viewModel->TriggerSwing();
+                // One empty bucket becomes the filled one; from a larger
+                // stack, peel one off and stow the fill (toss if no room).
+                if (--hand.count <= 0) {
+                    hand = {filled, 1};
+                } else if (vc::ItemStack leftover = m_inventory.Add({filled, 1});
+                           !leftover.Empty()) {
+                    ThrowItem(leftover);
+                }
+                m_placeCooldown = kEditRepeatDelay;
+            }
+        }
+        return true; // holding a bucket: this click is a bucket action, not a place
+    }
+    const vc::BlockId liquid = vc::items::BucketLiquid(hand.id);
+    if (liquid == vc::blocks::Air) {
+        return false; // not a bucket
+    }
+    // Dump: place the source against the aimed face, like placing a block.
+    if (m_target) {
+        const glm::ivec3 cell = m_target->block + m_target->normal;
+        if (!m_world->IsSolid(cell.x, cell.y, cell.z) && !m_player.Intersects(cell)) {
+            m_world->SetBlock(cell, liquid);
+            m_sounds.PlayBucketEmpty(liquid == vc::blocks::Lava, glm::vec3(cell) + 0.5f);
+            m_viewModel->TriggerSwing();
+            hand = {vc::items::Bucket, 1};
+            m_placeCooldown = kEditRepeatDelay;
+        }
+    }
+    return true;
 }
+
+const vc::BlockDef& GameApp::EyeLiquid() const {
+    static const vc::BlockDef kAir; // air: liquid=false, liquidSource=0
+    if (!m_world) {
+        return kAir;
+    }
+    const glm::vec3 eye = m_camera.Position();
+    return vc::BlockRegistry::Get().Def(
+        m_world->GetBlock(static_cast<int>(std::floor(eye.x)), static_cast<int>(std::floor(eye.y)),
+                          static_cast<int>(std::floor(eye.z))));
+}
+
+bool GameApp::EyeInWater() const { return EyeLiquid().liquidSource == vc::blocks::Water; }
+
+bool GameApp::EyeInLava() const { return EyeLiquid().liquidSource == vc::blocks::Lava; }
 
 void GameApp::DrawTargetOutline() {
     if (!m_target) {
@@ -776,7 +840,10 @@ void GameApp::DrawUi() {
     const glm::vec2 mouse = vox::Input::MousePosition();
 
     m_ui->Begin(GetWindow().Width(), GetWindow().Height(), m_blockTextures.get());
-    if (EyeInWater()) {
+    if (EyeInLava()) {
+        // Submerged-in-lava tint: thick orange, almost blinding (vanilla).
+        m_ui->DrawRect({0.0f, 0.0f}, screen, {0.78f, 0.24f, 0.04f, 0.72f});
+    } else if (EyeInWater()) {
         // Underwater tint on top of the shader fog.
         m_ui->DrawRect({0.0f, 0.0f}, screen, {0.09f, 0.27f, 0.55f, 0.35f});
     }
@@ -969,7 +1036,11 @@ void GameApp::OnRender(double alpha, double frameDt) {
         m_chunkShader->SetFloat("u_sunLight", dayNight.sunLight);
         m_chunkShader->SetFloat3("u_skyTint", dayNight.skyTint);
         m_chunkShader->SetFloat3("u_eyePos", eye);
-        if (EyeInWater()) {
+        if (EyeInLava()) {
+            // Dense, glowing-orange fog — you can barely see in lava (vanilla).
+            m_chunkShader->SetFloat3("u_fogColor", {0.60f, 0.18f, 0.02f});
+            m_chunkShader->SetFloat2("u_fogRange", {0.25f, 2.5f});
+        } else if (EyeInWater()) {
             // Short, deep-blue fog; dims with the sky at night.
             m_chunkShader->SetFloat3("u_fogColor",
                                      glm::vec3(0.05f, 0.18f, 0.40f) * dayNight.sunLight);
@@ -998,7 +1069,10 @@ void GameApp::OnRender(double alpha, double frameDt) {
             m_modelShader->SetFloat("u_sunLight", dayNight.sunLight);
             m_modelShader->SetFloat3("u_skyTint", dayNight.skyTint);
             m_modelShader->SetFloat3("u_eyePos", eye);
-            if (EyeInWater()) {
+            if (EyeInLava()) {
+                m_modelShader->SetFloat3("u_fogColor", {0.60f, 0.18f, 0.02f});
+                m_modelShader->SetFloat2("u_fogRange", {0.25f, 2.5f});
+            } else if (EyeInWater()) {
                 m_modelShader->SetFloat3("u_fogColor",
                                          glm::vec3(0.05f, 0.18f, 0.40f) * dayNight.sunLight);
                 m_modelShader->SetFloat2("u_fogRange", {2.0f, 28.0f});

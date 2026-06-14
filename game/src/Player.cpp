@@ -22,6 +22,7 @@ constexpr float kWaterSinkSpeed = 1.5f;
 constexpr float kSwimSpeed = 4.0f;
 constexpr float kBreachSpeed = 8.5f;
 constexpr float kWaterDrag = 0.55f; // horizontal speed factor in water
+constexpr float kLavaDrag = 0.30f;  // M26: lava is molasses — slower still
 constexpr float kSprintMultiplier = 1.6f; // LeftControl
 constexpr float kFlySpeed = 16.0f;
 constexpr float kFlyBoostMultiplier = 4.0f; // LeftControl
@@ -122,15 +123,15 @@ void Player::TickWalk(const vc::World& world, float dt) {
         return;
     }
 
-    const auto waterAt = [&](float wx, float wy, float wz) {
-        return vc::BlockRegistry::Get()
-            .Def(world.GetBlock(static_cast<int>(std::floor(wx)),
-                                static_cast<int>(std::floor(wy)),
-                                static_cast<int>(std::floor(wz))))
-            .liquid;
+    const auto liquidAt = [&](float wx, float wy, float wz) -> const vc::BlockDef& {
+        return vc::BlockRegistry::Get().Def(world.GetBlock(static_cast<int>(std::floor(wx)),
+                                                           static_cast<int>(std::floor(wy)),
+                                                           static_cast<int>(std::floor(wz))));
     };
-    const bool inWater = waterAt(m_position.x, m_position.y + 0.4f, m_position.z);
-    const bool headInWater = waterAt(m_position.x, m_position.y + kEyeHeight, m_position.z);
+    const vc::BlockDef& bodyDef = liquidAt(m_position.x, m_position.y + 0.4f, m_position.z);
+    const bool inWater = bodyDef.liquid;
+    const bool inLava = bodyDef.liquidSource == vc::blocks::Lava; // M26: molasses swim
+    const bool headInWater = liquidAt(m_position.x, m_position.y + kEyeHeight, m_position.z).liquid;
     m_inWater = inWater; // M22: footstep/splash audio reads this
 
     float speed = kWalkSpeed;
@@ -141,17 +142,20 @@ void Player::TickWalk(const vc::World& world, float dt) {
     if (inWater) {
         // Swimming steers where you aim (W toward the look direction);
         // Space always swims straight up, with a breach kick at the
-        // surface so you can climb ashore.
-        speed *= kWaterDrag;
+        // surface so you can climb ashore. Lava drags harder and the
+        // vertical kicks are weaker — you wade through it slowly.
+        speed *= inLava ? kLavaDrag : kWaterDrag;
+        const float vScale = inLava ? kLavaDrag / kWaterDrag : 1.0f;
         const glm::vec3 wish = SwimWishDir();
         m_velocity.x = wish.x * speed;
         m_velocity.z = wish.z * speed;
         if (KeyDown(vox::Key::Space)) {
-            m_velocity.y = headInWater ? kSwimSpeed : kBreachSpeed;
+            m_velocity.y = (headInWater ? kSwimSpeed : kBreachSpeed) * vScale;
         } else if (wish.y != 0.0f) {
             m_velocity.y = wish.y * speed;
         } else {
-            m_velocity.y = std::max(m_velocity.y - kWaterGravity * dt, -kWaterSinkSpeed);
+            m_velocity.y =
+                std::max(m_velocity.y - kWaterGravity * dt, -kWaterSinkSpeed * vScale);
         }
     } else {
         const glm::vec3 wish = HorizontalWishDir();

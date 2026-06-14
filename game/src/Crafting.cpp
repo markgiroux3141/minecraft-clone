@@ -152,6 +152,9 @@ void Recipes::RegisterDefaults() {
     // Coal over a stick -> 4 torches (vanilla).
     g_recipes.push_back(
         Shaped({"C", "S"}, {{'C', {items::Coal}}, {'S', stick}}, {blocks::Torch, 4}));
+    // M26: three iron ingots in a V -> a bucket (vanilla).
+    g_recipes.push_back(
+        Shaped({"I I", " I "}, {{'I', {items::IronIngot}}}, {items::Bucket, 1}));
 
     GAME_INFO("Registered {} crafting recipes", g_recipes.size());
 }

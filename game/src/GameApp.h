@@ -61,7 +61,13 @@ private:
     void ExitToTitle(); // persists player state, drops the world
     void PersistPlayerState();
     void HandleInput(double frameDt, int scroll); // scroll: wheel clicks this frame
-    bool EyeInWater() const;
+    // M26: if the hand holds a bucket, do the fill/dump and return true so
+    // RMB doesn't also try to place a block. False for any non-bucket item.
+    bool TryUseBucket();
+    // The block the camera eye sits in (air's def when none/no world).
+    const vc::BlockDef& EyeLiquid() const;
+    bool EyeInWater() const; // eye inside water (drives tint + fog)
+    bool EyeInLava() const;  // eye inside lava (M26: orange tint + dense fog)
     void DrawTargetOutline();
     void DrawUi(); // HUD + menus; may change state (menu clicks)
     // Tosses an item entity forward from the eye (Q key, container throws).

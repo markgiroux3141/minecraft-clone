@@ -32,6 +32,10 @@ public:
     void PlayBreak(SoundType type, const glm::vec3& blockCenter); // on destroy
     void PlayPlace(SoundType type, const glm::vec3& blockCenter);
     void PlayPickup(); // random/pop, 2D (item vacuumed into the bag)
+    // M26 buckets: item/bucket/{fill,empty}[_lava]N. `lava` picks the lava
+    // variant (water otherwise).
+    void PlayBucketFill(bool lava, const glm::vec3& pos);
+    void PlayBucketEmpty(bool lava, const glm::vec3& pos);
 
     // --- Player locomotion -------------------------------------------------
     void PlayStep(SoundType type, const glm::vec3& feet);
@@ -69,6 +73,10 @@ private:
     std::array<ClipSet, kSoundTypeCount> m_step{};
     ClipSet m_glassBreak{}; // random/glass*
     ClipSet m_splash{};     // liquid/splash*
+    ClipSet m_bucketFill{};      // item/bucket/fill* (water)
+    ClipSet m_bucketFillLava{};  // item/bucket/fill_lava*
+    ClipSet m_bucketEmpty{};     // item/bucket/empty* (water)
+    ClipSet m_bucketEmptyLava{}; // item/bucket/empty_lava*
     ClipSet m_caveAmbient{};// ambient/cave/cave*
     vox::ClipHandle m_pop{};
     vox::ClipHandle m_fireLoop{};

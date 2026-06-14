@@ -247,6 +247,10 @@ int CornerNinths(const PaddedVolume& vol, int x, int y, int z, int dx, int dz) {
 void EmitLiquidCell(ChunkMesh& mesh, const PaddedVolume& vol, int x, int y, int z) {
     const BlockDef& def = BlockRegistry::Get().Def(vol.id[PadIndex(x, y, z)]);
     const int cell[3] = {x, y, z};
+    // Opaque liquids (lava) go in the depth-writing, back-face-culled opaque
+    // stream; translucent ones (water) in the blended pass. Same packed
+    // vertex format and shader either way — only the draw state differs.
+    auto& out = def.liquidOpaque ? mesh.vertices : mesh.transparentVertices;
 
     for (int face = 0; face < 6; ++face) {
         const FaceBasis& fb = kFaces[face];
@@ -283,7 +287,7 @@ void EmitLiquidCell(ChunkMesh& mesh, const PaddedVolume& vol, int x, int y, int 
             }
             const int u = fb.swapUv ? cv[k] : cu[k];
             const int v = fb.swapUv ? cu[k] : cv[k];
-            mesh.transparentVertices.push_back({
+            out.push_back({
                 static_cast<uint32_t>(pos[0]) | static_cast<uint32_t>(pos[1]) << 5 |
                     static_cast<uint32_t>(pos[2]) << 10 | static_cast<uint32_t>(face) << 15 |
                     static_cast<uint32_t>(corners[k].ao) << 18 |

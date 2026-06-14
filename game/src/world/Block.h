@@ -63,7 +63,13 @@ struct BlockDef {
                           // lives in `model` (the float model stream), not here.
     bool replaceable = false; // liquids flow into it and falling blocks crush it
                               // (tall grass, flowers — destroyed, not blocking)
-    bool liquid = false;  // meshed into the blended pass; liquid-liquid faces cull
+    bool liquid = false;  // meshed with corner-sampled surface heights; liquid-liquid faces cull
+    // Liquids only: render in the OPAQUE pass (depth-write on, back-face cull
+    // on) instead of the blended transparent pass. Lava is fully opaque, so
+    // the transparent pass's no-depth-write / no-cull setup made it look
+    // inside-out; the opaque pass sorts it correctly. Water stays false
+    // (it's translucent and needs the blended back-to-front pass).
+    bool liquidOpaque = false;
     bool gravity = false; // falls when unsupported (block-update ticks)
     bool unbreakable = false; // the break edit refuses it (bedrock; no
                               // hardness system, so a simple guard)
@@ -81,6 +87,12 @@ struct BlockDef {
     // Liquids only: 8 = source, 7..1 = flow strength (decays away from the
     // source; 0 on everything else). Drives the spread/recede block updates.
     uint8_t liquidLevel = 0;
+    // Liquids only (M26): the canonical SOURCE id of this liquid's family
+    // (water source for water + its flows, lava source for lava + its flows).
+    // 0 on non-liquids. The flow engine compares this to tell water from lava
+    // — only same-family neighbors feed a cell's level, and a different-family
+    // neighbor triggers the lava/water mixing rules instead of flowing.
+    BlockId liquidSource = 0;
     uint8_t emission = 0; // block light emitted, 0..15
     // Vanilla hardness: bare-hand break time is hardness * 1.5 seconds
     // (digSpeed 1 / hardness / 30 damage per tick at 20 TPS). 0 breaks
@@ -189,6 +201,16 @@ extern BlockId Glass; // smelted from sand; never generated
 // M21 follow-up: floor-standing torch (coal + stick), block light 14.
 // Wall mounting waits for block orientation data (see backlog).
 extern BlockId Torch;
+// M26 lava: source block (liquidLevel 8) — worldgen pools it on deep cave
+// floors (below y10), and it's placeable from the creative palette. Emits
+// light 15; spreads slower and shorter than water (decay 2, slow tick).
+extern BlockId Lava;
+// Flowing lava by strength: LavaFlows[level - 1] for levels 1..7 (mirrors
+// WaterFlows). Internal — never shown in the palette, never in saves' hands.
+extern std::array<BlockId, 7> LavaFlows;
+// M26: lava + water make obsidian (lava source) or stone/cobble (flow);
+// our obsidian harvests with an iron pickaxe (no diamond tier yet).
+extern BlockId Obsidian;
 
 // M18 crack overlay: destroy_stage_0..9 occupy ten consecutive texture
 // layers right after the block tiles — keep BOTH scripts/gen_textures.py

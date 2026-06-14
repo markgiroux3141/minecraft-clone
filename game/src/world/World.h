@@ -241,10 +241,12 @@ public:
         glm::ivec3 normal; // unit axis vector of the face that was hit
     };
 
-    // Amanatides & Woo voxel walk to the first solid block. Returns nothing
-    // if the ray starts inside a solid block or exhausts maxDistance.
+    // Amanatides & Woo voxel walk to the first targetable block. Returns
+    // nothing if the ray starts inside one or exhausts maxDistance.
+    // `includeLiquids` also stops on liquid cells (for the bucket: pick up
+    // the liquid you're aiming at, which the normal crosshair ray skips).
     std::optional<RaycastHit> RaycastBlocks(const glm::vec3& origin, const glm::vec3& dir,
-                                            float maxDistance) const;
+                                            float maxDistance, bool includeLiquids = false) const;
 
     const Chunk* GetChunk(const glm::ivec3& chunkCoord) const;
 
@@ -325,7 +327,11 @@ private:
         std::array<ChunkMesh, kLodHeightChunks> meshes;
     };
 
-    void DrainCompletedJobs();
+    // centerX/centerZ are the player's chunk coords — completed detail
+    // meshes upload nearest-first within the per-frame budget, so a player
+    // edit (its own chunk, distance 0) is never starved behind the streaming
+    // backlog (the bug where a broken block lingered ~0.5 s during load).
+    void DrainCompletedJobs(int centerX, int centerZ);
     void SubmitGenerate(const glm::ivec3& coord);
     void SubmitLight(const glm::ivec2& column);
     void SubmitMesh(const glm::ivec3& coord);
@@ -368,9 +374,15 @@ private:
     // (only sources do), and sideways spread is slope-seeking — it only
     // goes toward the directions nearest a drop within 4 blocks.
     void UpdateLiquid(const glm::ivec3& worldPos, int level);
+    // M26: a lava cell touching water solidifies (source -> obsidian, strong
+    // flow -> cobblestone). Returns true if it converted this cell.
+    bool CheckLavaMixing(const glm::ivec3& worldPos, int level);
     // Min path distance (1-based) through passable cells to a cell with a
-    // non-solid floor ("hole"), bounded at 4; 1000 when none in range.
-    int SlopeDistance(const glm::ivec3& worldPos, int distance, int fromDir) const;
+    // non-solid floor ("hole"), bounded at maxDist; 1000 when none in range.
+    // `source` is the flowing liquid's family, so its own sources block the
+    // path but a different liquid (or air) is passable.
+    int SlopeDistance(const glm::ivec3& worldPos, int distance, int fromDir, BlockId source,
+                      int maxDist) const;
     uint32_t DataVersionAt(const glm::ivec3& worldPos) const;
     // Has the mesh of the chunk containing worldPos caught up to (at
     // least) this dataVersion? True for unloaded chunks.

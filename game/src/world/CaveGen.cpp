@@ -175,7 +175,12 @@ struct Carver {
                             id != blocks::Sandstone) {
                             continue;
                         }
-                        chunk.Set(lx, ly, lz, blocks::Air);
+                        // M26: deep carved cells fill with lava instead of
+                        // air (vanilla MapGenCaves.digBlock: lava when the
+                        // block below sits under y10). Placed as a SOURCE so
+                        // the pools sit statically on the cave floor, lighting
+                        // it (emission 15) until the player disturbs them.
+                        chunk.Set(lx, ly, lz, wy <= 10 ? blocks::Lava : blocks::Air);
                         // A carved-open surface column regrows its own kind
                         // of grass on the dirt that becomes the new top.
                         if (surfaceId != blocks::Air && ly > 0 &&

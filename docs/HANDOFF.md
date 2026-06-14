@@ -4,13 +4,18 @@ Updated: 2026-06-13, written for a FRESH CONTEXT. M0-M20, M22 (AUDIO), and
 M23 (MODEL-BLOCK STREAM) are all done and USER-VERIFIED (M22: "beautiful,
 it all works"; M23: "everything looks perfect and the torch cap is where
 it should be"). M21 (ORES + FURNACE/SMELTING + torches), M24 (BLOCK
-ORIENTATION / FACING), and M25 (DEEPER WORLD — 128 tall, vanilla
-underground depth) are CODE COMPLETE awaiting explicit user verification —
-see their sections for what was built and what to test (M25 needs a NEW
-WORLD). The DECIDED next milestone is M26 (LAVA) — spec + open scope
-decisions are in its PLANNED section near the bottom; start there.
+ORIENTATION / FACING), M25 (DEEPER WORLD — 128 tall, vanilla
+underground depth), and M26 (LAVA) are CODE COMPLETE awaiting explicit user
+verification — see their sections for what was built and what to test (M25
+and M26 need a NEW WORLD). The next milestone is open (slabs/stairs are the
+leading candidate — see the Backlog); scope it with the user.
 Read alongside `ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md`
 (build commands, conventions).
+
+IMPORTANT after pulling on this machine: re-run `python
+scripts/import_mc_assets.py` — M26 added two atlas layers (lava 64,
+obsidian 65), so the gitignored `assets/mc/atlas.png` overlay is stale until
+re-imported (the committed placeholder atlas is already regenerated).
 
 IMPORTANT RESOURCE: the user has Minecraft's Java source (MCP 9.40 =
 1.12) at `D:\Minecraft source code` — look up exact game dynamics there
@@ -381,10 +386,17 @@ Stage 3 — LOD shell:
   (lone stone + water block) — run it after touching the format.
 - Upload budget (World::DrainCompletedJobs): detail and LOD mesh results
   share a 2 MB/frame upload cap; overflow carries to m_deferredMesh /
-  m_deferredLodMesh and processes first next frame (already counted out
+  m_deferredLodMesh and processes next frame (already counted out
   of m_jobsInFlight; meshingVersion/meshInFlight stay set while
   deferred, so nothing resubmits early; the first item each frame always
   processes so one huge mesh can't starve).
+  M26 follow-up fix: detail meshes upload NEAREST-FIRST (the carried
+  backlog + this frame's results are merged and sorted by chunk distance to
+  the player, so DrainCompletedJobs now takes centerX/centerZ). Before this,
+  a player edit's remesh queued BEHIND the whole streaming backlog during
+  world load, so a broken block lingered ~0.5 s until the backlog drained
+  (then was instant once settled — the user reported exactly this). Distance
+  ordering makes the player's own chunk (distance 0) always win the budget.
 
 ## M13 block updates (how it works)
 
@@ -1373,113 +1385,134 @@ shoreline, snow only on tall peaks). Caves feel deep and extensive. An OLD
 save still loads but its untouched chunks regenerate at the new heights and
 will seam against previously-edited areas (expected — start fresh).
 
-## M26 — lava (PLANNED, not started)
+## M26 — lava (how it works)
 
-Decided with the user 2026-06-13 as the next milestone, right after M25
-made caves deep enough for it to matter. Goal: lava as a real fluid —
-emissive, slow-spreading, pooling on deep cave floors like vanilla, with
-the water/lava interaction blocks. Reuses the M13 liquid machinery and the
-M11 partial-height liquid rendering; the main new work is generalizing
-`World::UpdateLiquid` (currently water-only) and the cave-floor worldgen.
+CODE COMPLETE 2026-06-13, awaiting user verification. Lava as a real fluid:
+emissive, slow-spreading, pooling on deep cave floors, with the lava/water
+interaction blocks. Decided with the user (scope): (a) FULL vanilla mixing
+incl. a new OBSIDIAN block harvested with the iron pickaxe (no diamond tier
+yet); (b) NO lava damage (no health system — you can swim in it harmlessly);
+(c) surface lava lakes DEFERRED (deep cave-floor lava is the headline).
+Reuses the M13 liquid engine and M11 partial-height liquid render; the work
+was generalizing the water-only `World::UpdateLiquid` to a per-liquid param
+set and the cave-floor worldgen.
 
-DECISIONS TO CONFIRM WITH THE USER FIRST (scope):
-- (a) Lava↔water interaction blocks: vanilla makes flowing lava + water →
-  cobblestone, lava SOURCE + water → obsidian, and water flowing onto lava
-  → stone. Cobblestone/stone already exist; OBSIDIAN would be a new block
-  (tile + very high hardness, needs-diamond in vanilla — but we have no
-  diamond tier, so it'd be unbreakable-ish or stone-tier for now).
-  RECOMMEND: include cobblestone + stone (free, blocks exist); include
-  obsidian as a new block but make it harvest with the iron pickaxe (no
-  diamond tier yet). Confirm.
-- (b) Lava damage: we still have NO health/damage system, so lava won't
-  hurt the player (you can swim in it). RECOMMEND: ship without damage,
-  note it; a health/damage milestone is its own thing. Confirm acceptable.
-- (c) Surface lava lakes (WorldGenLakes): vanilla scatters small lava pools
-  on the surface/underground. RECOMMEND: DEFER — the deep cave-floor lava
-  (below y10) is the headline; lakes can come later. Confirm.
+- BLOCKS (`Block.cpp`/`Block.h`): `Lava` source + `LavaFlows[7]` flow ids
+  mirror `Water`/`WaterFlows` (APPEND-ONLY — ids persist in saves), all at
+  tile 64 (lava still, used for source AND every flow level like water),
+  `liquid`, `opaque=false`, `solid=false`, `emission=15`, `lightOpacity=15`
+  (light can't pass THROUGH lava — vanilla full blocker — but emission still
+  floods out, lighting cave floors), `soundType=None`. `Obsidian` (tile 65):
+  hardness 50, Pickaxe class, `needsPickaxe`, `harvestLevel=2` (iron+). NEW
+  BlockDef field `liquidSource` tags each liquid id with its family's source
+  id (0 on non-liquids) — the flow engine uses it to tell water from lava.
+- FLOW ENGINE (`World::UpdateLiquid`, generalized): a `LiquidParams` lookup
+  ({source, flows, decay, slopeFind, infinite, lava}) keyed off
+  `liquidSource`. Water = {decay 1, slopeFind 4, infinite ON}; lava =
+  {decay 2, slopeFind 2, infinite OFF}. The whole rule set is now
+  family-aware — only SAME-family neighbors feed a cell's level / count as
+  spread targets; a different-family neighbor triggers mixing instead.
+  `SlopeDistance` takes the source id + max distance. `wake()` (in SetBlock)
+  schedules free-flowing lava at 30 ticks (vanilla overworld) vs water's 4 so
+  it oozes — BUT a lava cell that touches water is scheduled FAST (2 ticks),
+  because vanilla's mixing (`checkForMixing`) fires the instant a neighbor
+  changes, not on the slow lava tick. Spread strength: source pushes
+  `8 - decay` (water 7, lava 6 → lava reaches ~3 cells), falling columns 7,
+  other flows `level - decay`.
+- MIXING (`World::CheckLavaMixing`, from `BlockLiquid.checkForMixing` +
+  `BlockDynamicLiquid`): a lava cell touching water on any of its 5 non-down
+  faces solidifies FIRST in its update — a SOURCE → obsidian, ANY flow →
+  cobblestone. Lava pouring straight DOWN onto water turns the WATER cell to
+  STONE (vanilla's special down case). Water never flows into lava (a
+  different family is not a spread target), so the boundary always resolves
+  via the lava side. Place water beside lava → wakes the lava (fast) →
+  obsidian/cobble. VANILLA-ACCURATE threshold: SOURCE → obsidian, strong flow
+  (our level ≥ 4) → cobblestone, weakest tip (our level < 4) → nothing (two
+  pools that spread together only along their thin edges make no rock — same
+  as real MC, where cobblestone generators rely on the flow continuing). The
+  user briefly tried "any flow cobbles" but reverted to vanilla. NOTE: a
+  boundary that already SETTLED (no pending updates) won't retroactively
+  convert — only freshly-placed/flowing liquid triggers it.
+- RENDERING: lava uses `EmitLiquidCell` (BlockDef::liquid) for the
+  partial-height sloped surface, but `BlockDef::liquidOpaque` routes its
+  faces into the OPAQUE vertex stream (depth-write on, back-face cull on)
+  instead of the blended transparent pass. First cut left it in the blended
+  pass like water and it rendered inside-out (no depth write + no cull on a
+  fully-opaque block — user caught it); the opaque pass sorts it correctly
+  and back-face culls the inner faces. Same packed ChunkVertex format + same
+  chunk.vert/frag (the surface-drop yoff and the alpha test both still
+  apply), so the only difference is draw state. Texture alpha is 255 (the
+  importer forces `lava_still` opaque). Full-bright comes from the light
+  engine seeding block-light 15 in the lava cell (emission). Water stays
+  translucent in the blended pass (`liquidOpaque` false).
+- WORLDGEN (`CaveGen.cpp` carve): deep carved cells fill with a lava SOURCE
+  instead of air when `wy <= 10` (vanilla `MapGenCaves.digBlock`'s
+  `j2-1 < 10` rule) — pools sit statically on the cave floor (raw chunk
+  data, no scheduled updates, like worldgen oceans) until disturbed. The
+  analytic ocean-breach test is unaffected (it's about water, well above
+  y10). gentest gained "lava pools generate below y10" + "no worldgen lava
+  above y10" (both pass).
+- PLAYER (`Player.cpp`): a body-cell `liquidSource == Lava` check makes lava
+  swimming molasses — horizontal drag 0.30 (water 0.55) and the vertical
+  swim/sink kicks scaled by that ratio. No damage (decision b).
+- UI/FOG (`GameApp.cpp`): `EyeInWater()` is now water-FAMILY only; new
+  `EyeInLava()` drives a thick orange screen tint (0.78,0.24,0.04 @ .72) and
+  dense glowing-orange fog (range 0.25..2.5) on both the chunk and model
+  shaders. `EyeLiquid()` is the shared eye-block lookup.
+- PALETTE: lava SOURCE shows (the palette already lists only liquidLevel 0
+  or 8); the 7 lava flow ids are skipped for free. Obsidian shows (solid).
+- BUCKETS (M26 follow-up, added on user request for liquid pickup/dump):
+  three new ItemRegistry items (`items::Bucket` / `WaterBucket` / `LavaBucket`,
+  sprite tiles 66/67/68 in both atlas scripts; empty stacks to 16, filled to
+  1). Recipe: three iron ingots in a V (`I I` / ` I `). Use logic is
+  `GameApp::TryUseBucket()` (called from the RMB place path, AFTER the
+  crafting-table/furnace open checks so block-use still wins, BEFORE normal
+  placement, and OUTSIDE the `m_target` guard so it works aiming straight at
+  liquid). Empty bucket: a dedicated `RaycastBlocks(..., includeLiquids=true)`
+  (the crosshair ray still skips liquids) finds the aimed cell; if it's a
+  liquid SOURCE (`FilledBucketFor` != 0) it's removed and the matching filled
+  bucket is produced (peeled off a stack via `Inventory::Add`, tossed if no
+  room). Filled bucket: places its source (`BucketLiquid`) at `m_target +
+  normal` if empty/non-colliding and becomes an empty bucket. Flowing liquid
+  can't be scooped (only level-8 sources). `items::BucketLiquid` /
+  `FilledBucketFor` are the data-driven id↔block maps. Buckets appear in the
+  creative palette automatically (registry items) and round-trip in saves
+  (item ids). New-world starter kit seeds slots 9-11 with an empty bucket +
+  pre-filled water/lava buckets for testing. SOUNDS: vanilla
+  item/bucket/{fill,empty}[_lava]{1..3} — the importer's want_sound families
+  grew `item/bucket/`, GameSounds loads four ClipSets and exposes
+  PlayBucketFill/Empty(bool lava, pos), wired into TryUseBucket (lava picks
+  the _lava variant). Re-run import_mc_assets.py for the .ogg files.
 
-WORK BREAKDOWN (touch-points):
-1. BLOCKS (`Block.cpp` `RegisterDefaults`): a `Lava` source +
-   `LavaFlows[N]` flow ids, mirroring `Water`/`WaterFlows` (APPEND-ONLY —
-   ids persist in saves). Lava spreads only ~3-4 blocks in the overworld
-   (water 7), so it needs FEWER flow levels: vanilla overworld lava decays
-   by 2 per step. Simplest faithful option: keep liquidLevel 8 source /
-   7..1 flow like water but make lava's spread DECAY 2 per step (so it dies
-   after ~4 blocks) and use a slower tick. All lava ids: `liquid=true`,
-   `solid=false`, `emission=15`, `lightOpacity` high (lava is opaque — set
-   opaque-ish so light doesn't pour through; but it's a `liquid` so it
-   meshes in the liquid pass, see step 4), `soundType` = None/fire,
-   hardness 100/unbreakable (can't mine flowing lava). Texture tiles:
-   import the lava still/flow frames in BOTH `gen_textures.py` and
-   `import_mc_assets.py` (next free layers), keep the layer order in sync
-   with `blocks::RegisterDefaults` (see the M21/M15 layer-order notes).
-2. FLOW ENGINE (`World::UpdateLiquid` + `ProcessBlockUpdate`): generalize
-   the water-only code to a per-liquid param set — {source id, flow ids,
-   max spread distance, decay-per-step, tick delay, "infinite source" on/
-   off}. Water keeps its current behavior (7 spread, decay 1, fast,
-   infinite-source on). Lava: ~3-4 spread, decay 2, SLOW tick (vanilla
-   overworld lavaTickRate 30 vs water 5 — scale our `kLiquidUpdateDelay`
-   up for lava), infinite-source OFF (no infinite lava). `SetBlock`'s
-   `wake()` already reschedules liquids; give lava a longer delay.
-   Lava↔water checks go here: before placing a lava flow/source into a
-   cell, if a neighbor is water → cobblestone/obsidian/stone per (a).
-3. RENDERING (`ChunkMesher::EmitLiquidCell`): lava already routes through
-   the liquid path (BlockDef::liquid) → partial-height surface for free.
-   Two things to verify: (i) lava must render FULL-BRIGHT — the light BFS
-   already seeds emission=15 into the lava cell's block light, and
-   SampleCorner includes the (non-opaque) lava cell, so faces should read
-   bright; eyeball it. (ii) lava is OPAQUE — the liquid pass draws blended
-   with depth-write off; with lava's texture alpha = 1 it reads opaque, but
-   watch for sort artifacts behind glass/water (rare; note if seen). If it
-   looks wrong, the cleaner fix is a separate opaque-liquid sub-pass — only
-   if needed.
-4. WORLDGEN (`CaveGen.cpp` `digBlock`/carve): vanilla `MapGenCaves.digBlock`
-   fills a carved cell with FLOWING LAVA when `y < 10`, air otherwise — this
-   is the deep-cave lava "sea". Our carver currently writes air; make it
-   write a lava source (or flow) below y≈10 instead. Keep it a SOURCE so it
-   pools statically (or a low flow that settles). The analytic ocean-breach
-   test is about WATER; lava below y10 is well under the water table, so no
-   interaction there — but a cave that breaches into a y<10 region next to
-   worldgen water could now meet → the lava↔water rule handles it at tick
-   time. gentest: add "lava generates below y10 in caves" and "no lava
-   above ~y12".
-5. PLAYER (`Player.cpp` + `GameApp`): lava is already non-solid + liquid, so
-   swimming/eye-tint code keys off `BlockDef::liquid` and mostly works.
-   Add a lava EYE TINT (orange/red, like the blue water tint) and SLOWER
-   swim/sink in lava (vanilla lava is molasses). No damage (decision b).
-6. CREATIVE PALETTE: lava source shows in the palette like water (placeable
-   for testing). Flow ids stay internal (the palette already skips the 7
-   internal water-flow ids — extend that skip to the lava flow ids).
+SCOPE BOUNDARY: NOT in scope — lava damage (no health system), Nether-style
+fast lava, surface lava lakes (deferred), fire/flammability. (Buckets were
+originally out of scope but were added as the follow-up above.) OLD SAVES:
+worldgen (cave lava) + new append-only block/item ids — a NEW WORLD shows the
+cave lava; old saves keep their already-generated (lava-free) caves, new
+chunks get it.
 
-VANILLA REFERENCE (look up in `D:\Minecraft source code`, don't recall):
-`BlockDynamicLiquid` + `BlockLiquid` (the shared flow rules; lava differs by
-`getSlopeFindDistance`=2, `quantaPerBlock`, and `tickRate`=30 overworld),
-`MapGenCaves.digBlock` (the `y < 10 → lava` fill), `BlockLiquid.checkForMixing`
-/ the lava-water → stone/cobble/obsidian rules. Our water port already lives
-in `World::UpdateLiquid` — diff against it, don't rewrite.
-
-SCOPE BOUNDARY: lava fluid + emissive light + deep cave-floor lava +
-lava↔water blocks. NOT in scope: lava damage (no health system), buckets
-(no bucket item), Nether-style fast lava, surface lava lakes (defer),
-fire/flammability. OLD SAVES: this is worldgen (cave lava) + new block ids
-(append-only) — a NEW WORLD shows the cave lava; old saves keep their
-already-generated (lava-free) caves but new chunks get it. Test in a new
-world.
-
-WHAT THE USER SHOULD TEST (when M26 lands): new world, dig to the bottom →
-lava pools glowing on the cave floors below ~y10, lighting the area;
-place a lava source from the palette → it spreads a few blocks (less far
-than water) and SLOWLY; pour water onto flowing lava → cobblestone; water
-onto a lava source → obsidian (or per decision a); lava is bright from
-every angle; swimming in lava is slow (and harmless for now); quit/reload
-keeps placed lava.
+WHAT THE USER SHOULD TEST (NEW WORLD): dig to the bottom → glowing lava
+pools on cave floors below ~y10, lighting the area, bright from every angle.
+From the creative palette: place a lava source → it spreads ~3 blocks
+(shorter than water) and SLOWLY. Pour water onto flowing lava → cobblestone;
+water onto a lava source → obsidian; flowing lava down onto water → stone.
+Mine obsidian: only an iron pickaxe harvests it (slowish). Swim in lava →
+sluggish (and harmless for now); eye in lava → orange blinding tint + fog.
+Quit/reload → placed lava + obsidian persist. (Re-run import_mc_assets.py
+first so the real lava/obsidian/bucket textures are in the overlay.)
+BUCKETS: a new world starts with buckets in the inventory grid (press E).
+Craft one from 3 iron ingots (V shape). Empty bucket: aim at a water/lava
+SOURCE + RMB → it fills (aiming at a FLOW does nothing — sources only).
+Filled bucket: RMB on a block face → dumps the source there + empties. Note
+the lava-source obsidian rule means a water bucket emptied onto a lava SOURCE
+makes obsidian.
 
 ## Backlog (after M26)
 
 The per-block metadata layer M24 added makes SLABS/STAIRS the natural
-follow-on (half/shape state + the partial-collision work M23 deferred).
-The DECIDED next milestone is M26 (lava, spec above). Other open
-candidates, to scope with the user:
+follow-on (half/shape state + the partial-collision work M23 deferred) —
+the leading candidate for the next milestone. Other open candidates, to
+scope with the user:
 full 256-tall world (would want
 empty-air-chunk culling first); a settings screen (the audio
 buses + `AudioEngine::SetBusVolume` already exist and want a UI; also

@@ -63,6 +63,26 @@ int ItemMaxStack(ItemId id) {
 
 namespace items {
 
+BlockId BucketLiquid(ItemId id) {
+    if (id == WaterBucket) {
+        return blocks::Water;
+    }
+    if (id == LavaBucket) {
+        return blocks::Lava;
+    }
+    return blocks::Air;
+}
+
+ItemId FilledBucketFor(BlockId source) {
+    if (source == blocks::Water) {
+        return WaterBucket;
+    }
+    if (source == blocks::Lava) {
+        return LavaBucket;
+    }
+    return 0;
+}
+
 ItemId Stick = 0;
 ItemId WoodPickaxe = 0;
 ItemId WoodAxe = 0;
@@ -75,6 +95,9 @@ ItemId IronIngot = 0;
 ItemId IronPickaxe = 0;
 ItemId IronAxe = 0;
 ItemId IronShovel = 0;
+ItemId Bucket = 0;
+ItemId WaterBucket = 0;
+ItemId LavaBucket = 0;
 
 namespace {
 
@@ -131,6 +154,27 @@ void RegisterDefaults() {
     IronPickaxe = registry.Register(Tool("iron pickaxe", 59, ToolClass::Pickaxe, 6.0f, 250, 2));
     IronAxe = registry.Register(Tool("iron axe", 60, ToolClass::Axe, 6.0f, 250, 2));
     IronShovel = registry.Register(Tool("iron shovel", 61, ToolClass::Shovel, 6.0f, 250, 2));
+
+    // M26 follow-up: buckets (sprite tiles 66/67/68 — appended after the
+    // M26 lava/obsidian block tiles; keep BOTH atlas scripts in sync). The
+    // empty bucket stacks to 16 (vanilla); filled buckets to 1.
+    ItemDef bucket;
+    bucket.name = "bucket";
+    bucket.tile = 66;
+    bucket.maxStack = 16;
+    Bucket = registry.Register(std::move(bucket));
+
+    ItemDef waterBucket;
+    waterBucket.name = "water bucket";
+    waterBucket.tile = 67;
+    waterBucket.maxStack = 1;
+    WaterBucket = registry.Register(std::move(waterBucket));
+
+    ItemDef lavaBucket;
+    lavaBucket.name = "lava bucket";
+    lavaBucket.tile = 68;
+    lavaBucket.maxStack = 1;
+    LavaBucket = registry.Register(std::move(lavaBucket));
 
     // Coal ore's drop is the coal item — its id only exists now, after
     // item registration (same late-patch pattern as stone -> cobblestone).

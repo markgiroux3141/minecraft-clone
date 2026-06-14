@@ -126,6 +126,12 @@ def build_atlas(mc: Path, out_path: Path) -> None:
     # Water: frame 0 of the 16x512 animation strip (already tinted + alpha).
     water = Image.open(blocks / "water_still.png").convert("RGBA").crop((0, 0, TILE, TILE))
 
+    # Lava: frame 0 of lava_still's animation strip, forced opaque (vanilla
+    # lava is a full opaque block; we render it in the liquid pass but want
+    # alpha 255 so it doesn't read see-through). M26.
+    lava = Image.open(blocks / "lava_still.png").convert("RGBA").crop((0, 0, TILE, TILE))
+    lava.putalpha(255)
+
     # Layer index in the texture array == position in this list — must match
     # blocks::RegisterDefaults() (and gen_textures.py's TILES).
     tiles = [
@@ -200,6 +206,14 @@ def build_atlas(mc: Path, out_path: Path) -> None:
         # upper face to texels (7,6)-(9,8) — the flame core. Crop that and
         # scale to a full opaque tile for our cap quad's 0..1 UV.
         torch_flame_cap(blocks / "torch_on.png"),
+        # M26: lava still (64 — used for the source and every flow level,
+        # like water) and obsidian (65).
+        lava,
+        load_tile(blocks / "obsidian.png"),
+        # M26 buckets (66 empty / 67 water / 68 lava) — real item sprites.
+        load_tile(items / "bucket_empty.png"),
+        load_tile(items / "bucket_water.png"),
+        load_tile(items / "bucket_lava.png"),
     ]
 
     strip = Image.new("RGBA", (TILE * len(tiles), TILE))
@@ -231,7 +245,7 @@ def want_sound(rel: str) -> str | None:
     # rel = the index name minus "minecraft/sounds/". Returns the destination
     # path under assets/mc/sounds/, or None to skip. Music is flattened from
     # music/game/<name>.ogg to music/<name>.ogg (the game loads it flat).
-    for family in ("dig/", "step/", "ambient/cave/", "liquid/", "fire/"):
+    for family in ("dig/", "step/", "ambient/cave/", "liquid/", "fire/", "item/bucket/"):
         if rel.startswith(family):
             return rel
     if rel in ("random/pop.ogg", "random/glass1.ogg", "random/glass2.ogg",

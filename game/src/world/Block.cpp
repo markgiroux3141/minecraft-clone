@@ -55,6 +55,9 @@ BlockId Furnace = 0;
 BlockId LitFurnace = 0;
 BlockId Glass = 0;
 BlockId Torch = 0;
+BlockId Lava = 0;
+std::array<BlockId, 7> LavaFlows{};
+BlockId Obsidian = 0;
 
 namespace {
 
@@ -151,6 +154,7 @@ void RegisterDefaults() {
     water.lightOpacity = 3; // vanilla: skylight fades 3/block of depth
     water.soundType = SoundType::None; // splash handled separately, no dig/step
     Water = registry.Register(std::move(water));
+    registry.EditDef(Water).liquidSource = Water; // flow engine: water family tag
 
     // Flow levels share the source's look and properties; the level only
     // drives the spread/recede simulation (and, later, render height).
@@ -160,6 +164,7 @@ void RegisterDefaults() {
         flow.solid = false;
         flow.liquid = true;
         flow.liquidLevel = static_cast<uint8_t>(level);
+        flow.liquidSource = Water;
         flow.lightOpacity = 3;
         flow.soundType = SoundType::None;
         WaterFlows[static_cast<size_t>(level - 1)] = registry.Register(std::move(flow));
@@ -330,6 +335,43 @@ void RegisterDefaults() {
         torch.model = {xPlanes, zPlanes, cap};
     }
     Torch = registry.Register(std::move(torch));
+
+    // M26 lava (tile 64 still). Like water it meshes in the liquid pass
+    // (partial-height surface) but reads OPAQUE (texture alpha 255) and
+    // emits light 15. lightOpacity 15 means sky/block light can't pass
+    // THROUGH lava (vanilla: lava is a full light blocker) — the emission
+    // still floods out of the cell, so it lights deep cave floors. It's a
+    // SOURCE here (worldgen pools it statically); flows are appended next.
+    const auto lavaDef = [](std::string name, uint8_t level) {
+        BlockDef def = BlockDef::Uniform(std::move(name), 64);
+        def.opaque = false;
+        def.solid = false;
+        def.liquid = true;
+        def.liquidOpaque = true; // opaque pass — lava isn't see-through
+        def.liquidLevel = level;
+        def.emission = 15;
+        def.lightOpacity = 15;
+        def.soundType = SoundType::None;
+        return def;
+    };
+    Lava = registry.Register(lavaDef("lava", 8));
+    registry.EditDef(Lava).liquidSource = Lava; // flow engine: lava family tag
+    for (int level = 1; level <= 7; ++level) {
+        BlockDef flow = lavaDef("flowing_lava_" + std::to_string(level),
+                                static_cast<uint8_t>(level));
+        flow.liquidSource = Lava;
+        LavaFlows[static_cast<size_t>(level - 1)] = registry.Register(std::move(flow));
+    }
+
+    // M26 obsidian (tile 65): forms where a lava SOURCE meets water. Vanilla
+    // hardness 50 + diamond-pick gating; with no diamond tier yet it harvests
+    // with the iron pickaxe (harvestLevel 2). Drops itself.
+    BlockDef obsidian = BlockDef::Uniform("obsidian", 65);
+    obsidian.hardness = 50.0f;
+    obsidian.toolClass = ToolClass::Pickaxe;
+    obsidian.needsPickaxe = true;
+    obsidian.harvestLevel = 2;
+    Obsidian = registry.Register(std::move(obsidian));
 
     // M18 drop table (vanilla-ish; cross-references resolve here, after
     // every id exists). Leaves/tall grass/dead bush already drop nothing.

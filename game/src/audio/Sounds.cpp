@@ -61,6 +61,11 @@ void GameSounds::Load(vox::AudioEngine& audio) {
             m_splash.clips[m_splash.count++] = h;
         }
     }
+    // M26 buckets: item/bucket/{fill,fill_lava,empty,empty_lava}{1..3}.
+    m_bucketFill = LoadSet("item/bucket", "fill", 3);
+    m_bucketFillLava = LoadSet("item/bucket", "fill_lava", 3);
+    m_bucketEmpty = LoadSet("item/bucket", "empty", 3);
+    m_bucketEmptyLava = LoadSet("item/bucket", "empty_lava", 3);
     m_caveAmbient = LoadSet("ambient/cave", "cave", 18); // 1.12 has 18
     m_pop = audio.LoadClip(vox::assets::Resolve("mc/sounds/random/pop.ogg"));
     m_fireLoop = audio.LoadClip(vox::assets::Resolve("mc/sounds/fire/fire.ogg"));
@@ -125,6 +130,18 @@ void GameSounds::PlayPickup() {
     if (!m_audio) return;
     // Vanilla pop: high, randomly pitched.
     m_audio->Play2D(m_pop, vox::AudioBus::Sfx, 0.18f, Jitter(2.0f, 0.12f));
+}
+
+void GameSounds::PlayBucketFill(bool lava, const glm::vec3& pos) {
+    if (!m_audio) return;
+    m_audio->Play3D(Pick(lava ? m_bucketFillLava : m_bucketFill), pos, vox::AudioBus::Sfx, 0.7f,
+                    Jitter(1.0f, 0.05f));
+}
+
+void GameSounds::PlayBucketEmpty(bool lava, const glm::vec3& pos) {
+    if (!m_audio) return;
+    m_audio->Play3D(Pick(lava ? m_bucketEmptyLava : m_bucketEmpty), pos, vox::AudioBus::Sfx, 0.7f,
+                    Jitter(1.0f, 0.05f));
 }
 
 void GameSounds::PlayStep(SoundType type, const glm::vec3& feet) {

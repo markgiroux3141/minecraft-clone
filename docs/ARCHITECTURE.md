@@ -198,8 +198,20 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   flats sit ~y68 above the beach band (extreme hills ~y102), `kSnowLine`
   → 90, ore bands → vanilla (coal y2..124, iron y2..62), cave start heights
   doubled, spawn raised to y104. New world required (worldgen changed).
-- **Backlog**: slabs/stairs (reuse M24 meta + partial collision), lava
-  (deep cave floors), full 256-tall world (wants empty-air-chunk culling
+- **M26 — Lava** ✅: lava as a real emissive fluid. `World::UpdateLiquid`
+  generalized from water-only to a per-liquid param set (decay, slope-find,
+  infinite-source, tick rate) keyed off a new `BlockDef::liquidSource`
+  family tag; lava spreads ~3 blocks (decay 2) on a 30-tick clock, no
+  infinite source. Lava/water mixing (`CheckLavaMixing`, ported from
+  `BlockLiquid`): source+water → obsidian (new block, iron-pick harvest),
+  strong flow+water → cobblestone, lava-down onto water → stone. Worldgen
+  fills carved cells below y10 with lava (vanilla `MapGenCaves.digBlock`).
+  Orange eye tint + dense fog, molasses lava swimming, no damage (no health
+  system). Follow-up: BUCKETS (empty/water/lava items, 3-iron recipe, RMB
+  fill a source / dump a source via a liquid-aware raycast). New world
+  required (worldgen changed); re-import MC assets (new atlas layers 64-68).
+- **Backlog**: slabs/stairs (reuse M24 meta + partial collision),
+  full 256-tall world (wants empty-air-chunk culling
   first), tall-grass wheat seeds (1/8 chance, BlockTallGrass — pairs with
   farming), animated water, stars, world-list scrolling, settings screen,
   vanilla's 14/16 cactus inset, 3D-extruded item sprites in hand (flat

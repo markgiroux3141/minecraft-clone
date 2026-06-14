@@ -68,6 +68,19 @@ extern ItemId IronIngot;
 extern ItemId IronPickaxe;
 extern ItemId IronAxe;
 extern ItemId IronShovel;
+// M26 follow-up: buckets. Empty bucket (3 iron, stacks to 16) picks up a
+// liquid SOURCE on use and becomes the matching filled bucket (stack 1);
+// using a filled bucket places that liquid source back and empties it.
+extern ItemId Bucket;
+extern ItemId WaterBucket;
+extern ItemId LavaBucket;
+
+// The liquid SOURCE block a filled bucket places (Air for the empty bucket
+// or any non-bucket item) — lets the bucket use code stay data-driven.
+BlockId BucketLiquid(ItemId id);
+// The filled-bucket item for a given liquid source block (0 if that block
+// isn't a bucketable source).
+ItemId FilledBucketFor(BlockId source);
 
 // Call after blocks::RegisterDefaults() (item sprites follow the block
 // tiles in the atlas).

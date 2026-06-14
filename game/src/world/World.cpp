@@ -316,12 +316,32 @@ void World::SetBlock(const glm::ivec3& worldPos, BlockId id, uint8_t meta) {
     // Liquids pace themselves slower than gravity blocks (Minecraft-ish).
     constexpr int kEditUpdateDelay = 2;
     constexpr int kLiquidUpdateDelay = 4;
+    constexpr int kLavaUpdateDelay = 30; // vanilla overworld lavaTickRate (water 5)
     constexpr glm::ivec3 kFaceDirs[6] = {
         {1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1},
     };
+    const auto& reg = BlockRegistry::Get();
+    const auto touchesWater = [&](const glm::ivec3& pos) {
+        for (const auto& dir : kFaceDirs) {
+            const glm::ivec3 n = pos + dir;
+            if (reg.Def(GetBlock(n.x, n.y, n.z)).liquidSource == blocks::Water) {
+                return true;
+            }
+        }
+        return false;
+    };
     const auto wake = [&](const glm::ivec3& pos) {
-        const bool liquid = BlockRegistry::Get().Def(GetBlock(pos.x, pos.y, pos.z)).liquid;
-        ScheduleBlockUpdate(pos, liquid ? kLiquidUpdateDelay : kEditUpdateDelay);
+        const BlockDef& def = reg.Def(GetBlock(pos.x, pos.y, pos.z));
+        int delay = kEditUpdateDelay;
+        if (def.liquidSource == blocks::Lava) {
+            // Free-flowing lava oozes on the slow clock, but lava touching
+            // water solidifies fast — vanilla's checkForMixing runs the
+            // instant a neighbor changes, not on the lava tick.
+            delay = touchesWater(pos) ? kEditUpdateDelay : kLavaUpdateDelay;
+        } else if (def.liquid) {
+            delay = kLiquidUpdateDelay;
+        }
+        ScheduleBlockUpdate(pos, delay);
     };
     wake(worldPos);
     for (const auto& dir : kFaceDirs) {
@@ -701,87 +721,182 @@ void World::ProcessBlockUpdate(const glm::ivec3& worldPos) {
 namespace {
 
 constexpr glm::ivec3 kLiquidSides[4] = {{1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}};
-constexpr int kSlopeFindDistance = 4; // matches BlockDynamicLiquid
+
+// Per-liquid simulation parameters (M26 generalized the water-only engine).
+// `decay` is the strength lost per horizontal step (water 1 → spreads 7,
+// lava 2 → spreads ~3); `slopeFind` is how far the slope search looks for a
+// drop; `infinite` mints new sources from two adjacent ones (water yes, lava
+// no); `lava` enables the lava/water mixing rules and the slow tick.
+struct LiquidParams {
+    BlockId source;
+    const std::array<BlockId, 7>* flows;
+    int decay;
+    int slopeFind;
+    bool infinite;
+    bool lava;
+};
+
+// Resolves a liquid block id to its family params, or nullptr for non-liquids.
+// The statics initialize on first call (after blocks::RegisterDefaults), so
+// the family source ids are valid.
+const LiquidParams* LiquidParamsFor(BlockId id) {
+    const BlockId src = BlockRegistry::Get().Def(id).liquidSource;
+    if (src == 0) {
+        return nullptr;
+    }
+    static const LiquidParams water{blocks::Water, &blocks::WaterFlows, 1, 4, true, false};
+    static const LiquidParams lava{blocks::Lava, &blocks::LavaFlows, 2, 2, false, true};
+    return src == blocks::Lava ? &lava : &water;
+}
+
+// Block id for a given strength within a liquid family: <=0 air, >=8 source,
+// else the matching flow.
+BlockId LiquidIdForLevel(const LiquidParams& p, int level) {
+    if (level <= 0) {
+        return blocks::Air;
+    }
+    if (level >= 8) {
+        return p.source;
+    }
+    return (*p.flows)[static_cast<size_t>(level - 1)];
+}
 
 } // namespace
 
+// M26: a lava cell beside water solidifies — a SOURCE makes obsidian, a
+// strong flow (our level >= 4, i.e. vanilla's inverted <= 4) makes
+// cobblestone; the weakest spreading tip (our level < 4) is left alone, so
+// two pools that spread together only along their thin edges make no rock —
+// vanilla-accurate (cobblestone generators rely on the flow continuing).
+// Checks the 5 non-down neighbors (vanilla checkForMixing skips DOWN — a
+// falling lava column onto water makes STONE, in the flow path). Returns
+// true if it converted.
+bool World::CheckLavaMixing(const glm::ivec3& worldPos, int level) {
+    constexpr glm::ivec3 kMixDirs[5] = {
+        {1, 0, 0}, {-1, 0, 0}, {0, 0, 1}, {0, 0, -1}, {0, 1, 0},
+    };
+    bool touchesWater = false;
+    for (const auto& dir : kMixDirs) {
+        const glm::ivec3 pos = worldPos + dir;
+        const BlockDef& def = BlockRegistry::Get().Def(GetBlock(pos.x, pos.y, pos.z));
+        if (def.liquidSource == blocks::Water) {
+            touchesWater = true;
+            break;
+        }
+    }
+    if (!touchesWater) {
+        return false;
+    }
+    if (level >= 8) {
+        SetBlock(worldPos, blocks::Obsidian);
+        return true;
+    }
+    if (level >= 4) {
+        SetBlock(worldPos, blocks::Cobblestone);
+        return true;
+    }
+    return false;
+}
+
 void World::UpdateLiquid(const glm::ivec3& worldPos, int level) {
     const auto& registry = BlockRegistry::Get();
+    const LiquidParams* params = LiquidParamsFor(GetBlock(worldPos.x, worldPos.y, worldPos.z));
+    if (!params) {
+        return; // converted/removed between scheduling and processing
+    }
+    const LiquidParams& p = *params;
     const auto defAt = [&](const glm::ivec3& pos) -> const BlockDef& {
         return registry.Def(GetBlock(pos.x, pos.y, pos.z));
     };
+    // A neighbor is "the same liquid" only within this family — water and
+    // lava ignore each other's levels and mix instead (below).
+    const auto sameLiquid = [&](const BlockDef& def) { return def.liquidSource == p.source; };
     constexpr glm::ivec3 kUp{0, 1, 0};
     constexpr glm::ivec3 kDown{0, -1, 0};
-    const bool fedFromAbove = defAt(worldPos + kUp).liquid;
 
-    // Flow cells re-derive their level from their support: water above
+    // Lava solidifies on contact with water before doing anything else.
+    if (p.lava && CheckLavaMixing(worldPos, level)) {
+        return;
+    }
+
+    const bool fedFromAbove = sameLiquid(defAt(worldPos + kUp));
+
+    // Flow cells re-derive their level from their support: same-liquid above
     // sustains a near-full falling column, otherwise the strongest
-    // horizontal neighbor minus one (falling neighbors count as full
-    // strength, like Minecraft's depth-8 flag). Receding is the same rule
-    // — as the support decays, so does this cell, one step per update.
+    // horizontal neighbor minus the decay (falling neighbors count as full
+    // strength, like Minecraft's depth-8 flag). Receding is the same rule —
+    // as the support decays, so does this cell, one step per update.
     if (level < 8) {
         int support = fedFromAbove ? 7 : 0;
         int adjacentSources = 0;
         for (const auto& side : kLiquidSides) {
             const glm::ivec3 pos = worldPos + side;
             const BlockDef& neighbor = defAt(pos);
-            if (!neighbor.liquid) {
+            if (!sameLiquid(neighbor)) {
                 continue;
             }
             if (neighbor.liquidLevel == 8) {
                 ++adjacentSources;
             }
-            const int strength = defAt(pos + kUp).liquid ? 8 : neighbor.liquidLevel;
-            support = std::max(support, strength - 1);
+            const int strength = sameLiquid(defAt(pos + kUp)) ? 8 : neighbor.liquidLevel;
+            support = std::max(support, strength - p.decay);
         }
 
         // Two sources feeding a cell over solid ground (or a source) mint
-        // a new source — ponds self-heal (Minecraft's infinite water).
+        // a new source — ponds self-heal (Minecraft's infinite water). Lava
+        // has no infinite source (p.infinite false).
         const BlockDef& belowDef = defAt(worldPos + kDown);
-        if (adjacentSources >= 2 && (belowDef.solid || belowDef.liquidLevel == 8)) {
-            SetBlock(worldPos, blocks::Water);
+        if (p.infinite && adjacentSources >= 2 &&
+            (belowDef.solid || (sameLiquid(belowDef) && belowDef.liquidLevel == 8))) {
+            SetBlock(worldPos, p.source);
             return;
         }
 
         if (support != level) {
-            SetBlock(worldPos, support <= 0 ? blocks::Air
-                                            : blocks::WaterFlows[static_cast<size_t>(support - 1)]);
+            SetBlock(worldPos, LiquidIdForLevel(p, support));
             return; // the new state acts on its own next update
         }
     }
 
-    // Falling beats sideways: water over air (or a weaker flow) pours
-    // straight down as a near-full column.
+    // Falling beats sideways: liquid over air (or a weaker same-family flow)
+    // pours straight down as a near-full column.
     if (worldPos.y > 0) {
         const glm::ivec3 below = worldPos + kDown;
         const BlockId belowId = GetBlock(below.x, below.y, below.z);
         const BlockDef& belowDef = registry.Def(belowId);
+        // Lava pouring onto water turns the water cell to stone (vanilla).
+        if (p.lava && belowDef.liquidSource == blocks::Water) {
+            SetBlock(below, blocks::Stone);
+            return;
+        }
         if (belowId == blocks::Air || belowDef.replaceable ||
-            (belowDef.liquid && belowDef.liquidLevel < 7)) {
+            (sameLiquid(belowDef) && belowDef.liquidLevel < 7)) {
             CrushDrops(below); // crushed plants pop their drops
-            SetBlock(below, blocks::WaterFlows[6]);
+            SetBlock(below, LiquidIdForLevel(p, 7));
             return;
         }
         // Flows sheet sideways only when resting on SOLID ground. A flow
-        // over water is a falling column or an edge pour — it keeps
+        // over a liquid is a falling column or an edge pour — it keeps
         // feeding downward and never sheets at altitude. Sources still
-        // sheet over water (that's how a breached ocean floods in at
+        // sheet over liquid (that's how a breached ocean floods in at
         // every depth).
         if (level < 8 && !belowDef.solid) {
             return;
         }
     }
 
-    // Sideways spread: sources and waterfall landings push full strength,
-    // other flows their level minus one — into air or weaker flows only.
-    const int spreadLevel = (level == 8 || fedFromAbove) ? 7 : std::min(level - 1, 7);
+    // Sideways spread: a source pushes (8 - decay), a falling column the
+    // full 7, other flows their level minus the decay — into air or weaker
+    // same-family flows only (a different liquid is handled by mixing).
+    const int spreadLevel =
+        std::min((level == 8) ? (8 - p.decay) : (fedFromAbove ? 7 : level - p.decay), 7);
     if (spreadLevel < 1) {
         return;
     }
 
     // Slope-seeking (Minecraft's getPossibleFlowDirections): spread only
     // toward the direction(s) whose nearest drop is closest, within
-    // kSlopeFindDistance. On flat ground every direction ties and water
+    // p.slopeFind. On flat ground every direction ties and the liquid
     // sheets uniformly; near an edge it beelines for the drop.
     int cost[4];
     int best = 1000;
@@ -789,10 +904,10 @@ void World::UpdateLiquid(const glm::ivec3& worldPos, int level) {
         cost[d] = 1000 + 1; // unenterable sorts after "no hole found"
         const glm::ivec3 pos = worldPos + kLiquidSides[d];
         const BlockDef& neighbor = defAt(pos);
-        if (neighbor.solid || neighbor.liquidLevel == 8) {
+        if (neighbor.solid || (sameLiquid(neighbor) && neighbor.liquidLevel == 8)) {
             continue;
         }
-        cost[d] = defAt(pos + kDown).solid ? SlopeDistance(pos, 1, d ^ 1) : 0;
+        cost[d] = defAt(pos + kDown).solid ? SlopeDistance(pos, 1, d ^ 1, p.source, p.slopeFind) : 0;
         best = std::min(best, cost[d]);
     }
 
@@ -804,14 +919,15 @@ void World::UpdateLiquid(const glm::ivec3& worldPos, int level) {
         const BlockId neighbor = GetBlock(pos.x, pos.y, pos.z);
         const BlockDef& neighborDef = registry.Def(neighbor);
         if (neighbor == blocks::Air || neighborDef.replaceable ||
-            (neighborDef.liquid && neighborDef.liquidLevel < spreadLevel)) {
+            (sameLiquid(neighborDef) && neighborDef.liquidLevel < spreadLevel)) {
             CrushDrops(pos); // crushed plants pop their drops
-            SetBlock(pos, blocks::WaterFlows[static_cast<size_t>(spreadLevel - 1)]);
+            SetBlock(pos, LiquidIdForLevel(p, spreadLevel));
         }
     }
 }
 
-int World::SlopeDistance(const glm::ivec3& worldPos, int distance, int fromDir) const {
+int World::SlopeDistance(const glm::ivec3& worldPos, int distance, int fromDir, BlockId source,
+                         int maxDist) const {
     const auto& registry = BlockRegistry::Get();
     int best = 1000;
     for (int d = 0; d < 4; ++d) {
@@ -820,22 +936,22 @@ int World::SlopeDistance(const glm::ivec3& worldPos, int distance, int fromDir) 
         }
         const glm::ivec3 pos = worldPos + kLiquidSides[d];
         const BlockDef& def = registry.Def(GetBlock(pos.x, pos.y, pos.z));
-        if (def.solid || def.liquidLevel == 8) {
+        if (def.solid || (def.liquidSource == source && def.liquidLevel == 8)) {
             continue;
         }
         if (!registry.Def(GetBlock(pos.x, pos.y - 1, pos.z)).solid) {
             return distance; // a drop the flow can reach
         }
-        if (distance < kSlopeFindDistance) {
-            best = std::min(best, SlopeDistance(pos, distance + 1, d ^ 1));
+        if (distance < maxDist) {
+            best = std::min(best, SlopeDistance(pos, distance + 1, d ^ 1, source, maxDist));
         }
     }
     return best;
 }
 
 std::optional<World::RaycastHit> World::RaycastBlocks(const glm::vec3& origin,
-                                                      const glm::vec3& dir,
-                                                      float maxDistance) const {
+                                                      const glm::vec3& dir, float maxDistance,
+                                                      bool includeLiquids) const {
     const glm::vec3 d = glm::normalize(dir);
     glm::ivec3 cell{static_cast<int>(std::floor(origin.x)),
                     static_cast<int>(std::floor(origin.y)),
@@ -865,10 +981,10 @@ std::optional<World::RaycastHit> World::RaycastBlocks(const glm::vec3& origin,
         cell[axis] += step[axis];
         tMax[axis] += tDelta[axis];
         // Solids, plants, and torches are targetable (break/place);
-        // liquids and air are not. Plants/torches never collide — only
-        // the raycast sees them.
+        // liquids and air are not (unless includeLiquids — the bucket).
+        // Plants/torches never collide — only the raycast sees them.
         const BlockDef& def = BlockRegistry::Get().Def(GetBlock(cell.x, cell.y, cell.z));
-        if (def.solid || def.cross || def.torch) {
+        if (def.solid || def.cross || def.torch || (includeLiquids && def.liquid)) {
             glm::ivec3 normal{0};
             normal[axis] = -step[axis];
             return RaycastHit{cell, normal};
@@ -1165,7 +1281,7 @@ void World::SubmitLodMesh(const glm::ivec2& lodColumn) {
     });
 }
 
-void World::DrainCompletedJobs() {
+void World::DrainCompletedJobs(int centerX, int centerZ) {
     std::vector<GenResult> gens;
     std::vector<LightResult> lights;
     std::vector<MeshResult> meshes;
@@ -1286,14 +1402,31 @@ void World::DrainCompletedJobs() {
         }
     };
 
+    // Merge the carried-over backlog with this frame's results and upload
+    // NEAREST-FIRST, so a player edit (its own chunk, distance 0) always
+    // beats the streaming backlog to the GPU instead of waiting behind it.
+    std::vector<MeshResult> pending;
+    pending.reserve(m_deferredMesh.size() + meshes.size());
+    for (auto& meshed : m_deferredMesh) {
+        pending.push_back(std::move(meshed));
+    }
+    for (auto& meshed : meshes) {
+        pending.push_back(std::move(meshed));
+    }
+    const auto meshDist2 = [&](const MeshResult& m) {
+        const int dx = m.coord.x - centerX;
+        const int dz = m.coord.z - centerZ;
+        return dx * dx + dz * dz;
+    };
+    std::sort(pending.begin(), pending.end(),
+              [&](const MeshResult& a, const MeshResult& b) { return meshDist2(a) < meshDist2(b); });
+
     std::vector<MeshResult> stillDeferred;
-    for (auto* batch : {&m_deferredMesh, &meshes}) {
-        for (auto& meshed : *batch) {
-            if (uploadedBytes < kUploadBudgetBytes) {
-                processMesh(meshed);
-            } else {
-                stillDeferred.push_back(std::move(meshed));
-            }
+    for (auto& meshed : pending) {
+        if (uploadedBytes < kUploadBudgetBytes) {
+            processMesh(meshed);
+        } else {
+            stillDeferred.push_back(std::move(meshed));
         }
     }
     m_deferredMesh = std::move(stillDeferred);
@@ -1544,10 +1677,9 @@ void World::AppendLodDraws(int centerX, int centerZ, const vox::Frustum& frustum
 }
 
 void World::Update(const glm::vec3& cameraPos) {
-    DrainCompletedJobs();
-
     const int centerX = FloorDivChunk(cameraPos.x);
     const int centerZ = FloorDivChunk(cameraPos.z);
+    DrainCompletedJobs(centerX, centerZ);
 
     // Radius layering: meshes need light for their 3x3 columns, light
     // needs blocks for ITS 3x3 columns — so blocks extend two rings past
