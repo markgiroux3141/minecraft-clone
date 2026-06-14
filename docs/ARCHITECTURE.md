@@ -210,6 +210,16 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   system). Follow-up: BUCKETS (empty/water/lava items, 3-iron recipe, RMB
   fill a source / dump a source via a liquid-aware raycast). New world
   required (worldgen changed); re-import MC assets (new atlas layers 64-68).
+- **M27 — Water generation** 🚧: restore surface water lost after M25 made
+  the world deeper (every biome had positive base height, so terrain never
+  dipped below sea level). PART A — OCEANS ✅: a low-frequency
+  "continentalness" noise field (`TerrainGen.cpp`) flips columns to new
+  `Ocean`/`DeepOcean` biomes with NEGATIVE base height (-1.0/-1.8, vanilla
+  values); the existing param blend + beach band + M11 water fill turn that
+  into sloping sandy coastlines and basins (~25% ocean, deep floors ~y31)
+  with no render changes. PART B — LAKES (planned): port `WorldGenLakes` as a
+  deterministic origin-replay populate step (self-sealing water/lava ponds on
+  dry land). New world required.
 - **Backlog**: slabs/stairs (reuse M24 meta + partial collision),
   full 256-tall world (wants empty-air-chunk culling
   first), tall-grass wheat seeds (1/8 chance, BlockTallGrass — pairs with

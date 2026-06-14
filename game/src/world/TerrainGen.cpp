@@ -28,7 +28,20 @@ constexpr int kBeachTop = TerrainGenerator::kSeaLevel + 2;
 // moisture, ~300-block features) classify each column. Tree density and
 // the surface blocks follow the biome; the beach band overrides near sea
 // level.
-enum class Biome : uint8_t { Plains, Forest, Desert, Snowy };
+// M27 oceans: a third even-lower-frequency "continentalness" field overrides
+// the climate biome where it dips low — Ocean / DeepOcean carry vanilla's
+// NEGATIVE baseHeight (Biome.java: ocean -1.0, deep ocean -1.8), which the
+// height blend turns into basins well below sea level for the M11 water fill.
+enum class Biome : uint8_t { Plains, Forest, Desert, Snowy, Ocean, DeepOcean };
+
+// Continentalness thresholds on the raw [-1,1] field: below kOceanLevel is
+// ocean, below kDeepOceanLevel is deep ocean. The values sit on the negative
+// tail so land still dominates the map; the param blend (cellParams 5x5)
+// smooths base height across the threshold into a sloping coastline. Tuned
+// (measured on the seed-1337 field) to ~25% total ocean / ~13% deep ocean —
+// plenty of water but land-dominant so there's room to build.
+constexpr float kOceanLevel = -0.50f;
+constexpr float kDeepOceanLevel = -0.72f;
 
 Biome ClassifyBiome(float temperature, float moisture) {
     if (temperature > 0.65f && moisture < 0.40f) {
@@ -49,6 +62,8 @@ float TreeChance(Biome biome) {
     case Biome::Plains: return 0.18f;
     case Biome::Snowy: return 0.08f;
     case Biome::Desert: return 0.0f;
+    case Biome::Ocean: return 0.0f;
+    case Biome::DeepOcean: return 0.0f;
     }
     return 0.0f;
 }
@@ -70,6 +85,8 @@ BiomeParams ParamsFor(Biome biome) {
     case Biome::Plains: return {0.125f, 0.05f};
     case Biome::Forest: return {0.1f, 0.2f};
     case Biome::Snowy: return {0.2f, 0.2f};
+    case Biome::Ocean: return {-1.0f, 0.1f};      // vanilla Biome.java:473
+    case Biome::DeepOcean: return {-1.8f, 0.1f};  // vanilla Biome.java:497
     }
     return {0.1f, 0.2f};
 }
@@ -232,10 +249,22 @@ void TerrainGenerator::Generate(Chunk& chunk, const glm::ivec3& chunkCoord) cons
     FastNoiseLite rugged(m_seed + 303);
     rugged.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
     rugged.SetFrequency(0.0035f);
+    // M27 continentalness: lower frequency than climate (~660-block features)
+    // so oceans are large, coherent bodies, not noise speckle.
+    FastNoiseLite continental(m_seed + 404);
+    continental.SetNoiseType(FastNoiseLite::NoiseType_OpenSimplex2);
+    continental.SetFrequency(0.0015f);
 
     const auto biomeAt = [&](int wx, int wz) {
         const auto fx = static_cast<float>(wx);
         const auto fz = static_cast<float>(wz);
+        const float c = continental.GetNoise(fx, fz); // raw [-1,1]
+        if (c < kDeepOceanLevel) {
+            return Biome::DeepOcean;
+        }
+        if (c < kOceanLevel) {
+            return Biome::Ocean;
+        }
         return ClassifyBiome(temperature.GetNoise(fx, fz) * 0.5f + 0.5f,
                              moisture.GetNoise(fx, fz) * 0.5f + 0.5f);
     };

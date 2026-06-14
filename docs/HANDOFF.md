@@ -1509,7 +1509,12 @@ Filled bucket: RMB on a block face → dumps the source there + empties. Note
 the lava-source obsidian rule means a water bucket emptied onto a lava SOURCE
 makes obsidian.
 
-## M27 — water generation: lakes + oceans (PLANNED, not started)
+## M27 — water generation: lakes + oceans (PART A OCEANS CODE COMPLETE; PART B LAKES PLANNED)
+
+PART A (OCEANS) is CODE COMPLETE 2026-06-14, awaiting user verification (build
++ gentest pass) — see "PART A — OCEANS" below for exactly what shipped. PART B
+(WorldGenLakes) is still PLANNED — spec below. NEW WORLD REQUIRED (worldgen
+changed).
 
 DECIDED with the user 2026-06-14 as the next milestone. The user noticed the
 post-M25 world is a "drought" — only rare 1-block puddles in sand bowls (a
@@ -1540,26 +1545,41 @@ look up, don't recall):
    above-sea terrain regardless of sea level — these are the field/forest
    ponds the user remembers.
 
-PART A — OCEANS (do FIRST: bigger visual payoff, simpler, lower risk):
-- Add a low-frequency "continentalness" OpenSimplex field (freq ~0.0015-
-  0.0020, below the 0.0030 climate fields → ~500-700-block features). In
-  `biomeAt`: continentalness < oceanThreshold → Ocean; < deepThreshold →
-  DeepOcean; else fall through to the existing temp/moisture `ClassifyBiome`.
-  Add Ocean/DeepOcean to the `Biome` enum + `ParamsFor` (base -1.0/-1.8,
-  var 0.1).
-- The existing 5x5 `cellParams` blend already smooths base/variation across
-  biome-cell seams → coastlines slope naturally from land (base ~0.1) into
-  ocean (base -1.0). The beach band (`height <= sea+2 → sand`) gives sandy
-  shores for free. With base -1.0 the height lands ~y48 (15 below sea), deep
-  ocean ~y33 — real depth. M11's fill floods it with no new render work.
-  Verify the "halved weight when neighbor is higher" cliff trick behaves
-  with negative bases (it's linear — should be fine).
-- Knock-ons: trees/plants already gate on grass-only ground (no underwater
-  trees — M11 note); the analytic ocean-breach test in `CaveGen` already
-  stops carved air touching worldgen water (gentest asserts it) but is now
-  exercised far more — re-check. Spawn (`kSpawnPos`) may land over ocean →
-  either a ground/sea-surface search or accept the swim (no fall damage);
-  note it. gentest: "oceans generate" + "deep ocean floor lower than shallow."
+PART A — OCEANS (CODE COMPLETE 2026-06-14, all in `TerrainGen.cpp`):
+- A low-frequency "continentalness" OpenSimplex field (`m_seed + 404`, freq
+  0.0015 → ~660-block features) added next to the climate fields. `biomeAt`
+  now checks it FIRST: raw value < `kDeepOceanLevel` (-0.72) → DeepOcean,
+  < `kOceanLevel` (-0.50) → Ocean, else fall through to the temp/moisture
+  `ClassifyBiome`. New `Biome::Ocean`/`Biome::DeepOcean` enum values;
+  `ParamsFor` returns base/var -1.0/0.1 and -1.8/0.1 (vanilla
+  `Biome.java:473/497`); `TreeChance` returns 0 for both.
+- THRESHOLD TUNING: the continentalness distribution was measured directly
+  (a throwaway probe over a 1500-block grid): thr -0.30 = 36% ocean (too
+  much), -0.50 ~ 25%, -0.55 = 22%, -0.72 = 14%. Chose -0.50 / -0.72 ->
+  ~25% total ocean, ~13% deep — plenty of water but land-dominant so there's
+  room to build. To make oceans rarer/commoner, nudge `kOceanLevel`; basin
+  DEPTH is the biome base height, independent of the threshold.
+- The rest fell out of existing systems with NO new code: the 5x5
+  `cellParams` blend smooths base across the threshold -> sloping coastlines;
+  the beach band (`height <= sea+2 -> sand`) makes sandy shores AND sandy
+  ocean floors (the floor sits below the band, so it reads `sandy`); M11's
+  heightmap fill floods everything below `kSeaLevel` with `blocks::Water`
+  (all source -> flush + stable); trees/plants already gate on
+  `height > kBeachTop` so nothing grows underwater. Measured depths: shallow
+  ocean floor ~y42-54, deep ocean ~y27-40 (gentest saw maxDepth 32 -> floor
+  y31). NO render changes — water uses the existing transparent liquid pass.
+- gentest gained (a long transect scan, since oceans can miss a fixed
+  window): "oceans generate (open water over a sub-sea-level floor)", "ocean
+  water sits on a solid floor (no breach)", "deep ocean basins form (water
+  >= 18 deep)". The existing "carved air never touches worldgen water"
+  invariant still passes — the analytic `CaveGen` ocean-breach test is
+  sea-level-based and ocean-agnostic, so it handled the much-larger water
+  volume unchanged.
+- KNOWN LIMIT: spawn (`kSpawnPos`, GameApp) is still a naive drop at a fixed
+  XZ — on an ocean seed you splash into the sea and swim ashore (harmless: no
+  fall damage, water breaks the fall). A spawn search needs the spawn chunk
+  loaded at EnterWorld (deferred, same as M25's note). Oceans in snowy
+  climate don't freeze (no ice block — out of scope).
 
 PART B — LAKES (`WorldGenLakes` port, do SECOND: the harder half):
 - CHALLENGE: the clone's worldgen is stateless + deterministic PER CHUNK (no

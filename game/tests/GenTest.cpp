@@ -197,6 +197,47 @@ int main() {
     Check(caveLava > 0, "lava pools generate on deep cave floors (below y10)");
     Check(noHighLava, "no worldgen lava above y10");
 
+    // Oceans (M27): the continentalness field (ocean biomes with negative
+    // base height) drops whole regions below sea level so the M11 fill makes
+    // open water. Oceans are large (~660-block features), so a fixed window
+    // can miss them — scan a long transect that crosses several wavelengths.
+    // An ocean column reads as Water at exactly kSeaLevel sitting on a solid
+    // floor below it; depth = how far that floor sits under the sea.
+    {
+        const int sea = vc::TerrainGenerator::kSeaLevel;
+        std::unordered_map<glm::ivec3, vc::Chunk, IVec3Hash> strip;
+        for (int cx = -48; cx < 48; ++cx) {
+            for (int cy = 1; cy <= 3; ++cy) { // y16..63: deep floors + water
+                gen.Generate(strip[{cx, cy, 0}], {cx, cy, 0});
+            }
+        }
+        const auto stripAt = [&](int wx, int wy, int wz) -> vc::BlockId {
+            const glm::ivec3 coord{wx >> 4, wy >> 4, wz >> 4};
+            const auto it = strip.find(coord);
+            return it == strip.end() ? vc::blocks::Air : it->second.Get(wx & 15, wy & 15, wz & 15);
+        };
+        size_t oceanCols = 0;
+        int maxDepth = 0;
+        bool floorsSolid = true;
+        for (int wx = -48 * 16 + 16; wx < 48 * 16 - 16; ++wx) {
+            if (stripAt(wx, sea, 0) != vc::blocks::Water) {
+                continue; // not an ocean/lake surface column
+            }
+            ++oceanCols;
+            int floor = sea;
+            while (floor > 16 && stripAt(wx, floor, 0) == vc::blocks::Water) {
+                --floor;
+            }
+            // The block under the water must be solid (a sealed basin floor),
+            // never air — air under sea-level water would be a breach.
+            floorsSolid &= stripAt(wx, floor, 0) != vc::blocks::Air;
+            maxDepth = std::max(maxDepth, sea - floor);
+        }
+        Check(oceanCols > 0, "oceans generate (open water over a sub-sea-level floor)");
+        Check(floorsSolid, "ocean water sits on a solid floor (no breach)");
+        Check(maxDepth >= 18, "deep ocean basins form (water >= 18 deep somewhere)");
+    }
+
     // Ores (M21, rebased in M25): coal and iron veins generate, iron stays
     // in the lower half (vanilla y0..64; surface is now ~y65), and every ore
     // cell is buried like the stone it replaced — an ore floating in air or
