@@ -30,6 +30,19 @@ constexpr int kWorldSeed = 1337; // default for saves whose manifest lacks one
 constexpr float kReachDistance = 5.0f;
 constexpr double kEditRepeatDelay = 0.25; // held-button repeat, seconds
 
+// M28: which half a slab/stair takes when placed (vanilla BlockSlab/
+// BlockStairs rule): top if you clicked a downward face, bottom if you
+// clicked an upward face, else the half of the side face you clicked.
+bool PlaceTopHalf(const glm::ivec3& normal, const glm::vec3& hitPoint) {
+    if (normal.y > 0) {
+        return false; // clicked a top face -> rests on it (bottom half)
+    }
+    if (normal.y < 0) {
+        return true; // clicked a bottom face -> hangs under it (top half)
+    }
+    return hitPoint.y - std::floor(hitPoint.y) > 0.5f; // side face: upper half?
+}
+
 // M25: above the tallest terrain (~y99) in the 128-tall world, so a fresh
 // world drops the player onto the surface instead of inside a hill. No fall
 // damage system, so the short drop is harmless.
@@ -324,6 +337,15 @@ void GameApp::EnterWorld(const std::string& name, int defaultSeed) {
         m_inventory.Slot(9) = {vc::items::Bucket, vc::ItemMaxStack(vc::items::Bucket)};
         m_inventory.Slot(10) = {vc::items::WaterBucket, 1};
         m_inventory.Slot(11) = {vc::items::LavaBucket, 1};
+        // M28 debug kit: all eight slabs/stairs so they're one E-press away to
+        // test placement (half/facing/merge) and walking up them.
+        const vc::BlockId shapes[] = {
+            vc::blocks::StoneSlab,     vc::blocks::CobbleSlab,    vc::blocks::PlankSlab,
+            vc::blocks::SandstoneSlab, vc::blocks::StoneStairs,   vc::blocks::CobbleStairs,
+            vc::blocks::PlankStairs,   vc::blocks::SandstoneStairs};
+        for (size_t i = 0; i < std::size(shapes); ++i) {
+            m_inventory.Slot(12 + i) = {shapes[i], vc::kMaxStackSize};
+        }
     }
 
     m_state = State::Playing;
@@ -703,41 +725,69 @@ void GameApp::HandleInput(double frameDt, int scroll) {
             // It does its own liquid raycast, so it works with no crosshair
             // block target (aiming straight at water).
         } else if (m_target) {
-            const glm::ivec3 cell = m_target->block + m_target->normal;
             vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
-            if (!hand.Empty() && vc::IsBlockItem(hand.id) &&
-                !m_world->IsSolid(cell.x, cell.y, cell.z) && !m_player.Intersects(cell)) {
-                const auto blockId = static_cast<vc::BlockId>(hand.id);
-                const vc::BlockDef& def = vc::BlockRegistry::Get().Def(blockId);
-                // M24 orientation: torches mount on the clicked surface (top
-                // face -> floor, side face -> wall, ceiling refused);
-                // furnace/table fronts point back at the placer.
-                uint8_t meta = 0;
-                bool allowed = true;
-                if (def.torch) {
-                    const glm::ivec3 n = m_target->normal;
-                    if (n.y > 0) {
-                        allowed = m_world->IsSolid(cell.x, cell.y - 1, cell.z);
-                        meta = vc::facing::TorchFloor;
-                    } else if (n.y == 0) {
-                        // The clicked face normal is the way the torch points.
-                        const vc::BlockFace f = n.x > 0   ? vc::BlockFace::PosX
-                                                : n.x < 0 ? vc::BlockFace::NegX
-                                                : n.z > 0 ? vc::BlockFace::PosZ
-                                                          : vc::BlockFace::NegZ;
-                        allowed = m_world->IsSolid(m_target->block.x, m_target->block.y,
-                                                   m_target->block.z);
-                        meta = vc::facing::TorchWallMeta(f);
-                    } else {
-                        allowed = false; // bottom face: nothing to hang from
+            if (!hand.Empty() && vc::IsBlockItem(hand.id)) {
+                const auto handId = static_cast<vc::BlockId>(hand.id);
+                const vc::BlockDef& def = vc::BlockRegistry::Get().Def(handId);
+
+                glm::ivec3 placePos = m_target->block + m_target->normal;
+                vc::BlockId placeId = handId;
+                uint8_t placeMeta = 0;
+                bool allowed = false;
+
+                // M28 double-slab merge: clicking the matching slab so the new
+                // one completes the cell turns it into the full base block,
+                // in place, instead of placing a second slab in the neighbor.
+                const bool mergeSlab =
+                    def.slab && m_target->normal.y != 0 && targetId == handId &&
+                    (vc::facing::SlabIsTop(m_world->GetMeta(
+                         m_target->block.x, m_target->block.y, m_target->block.z))
+                         ? m_target->normal.y < 0
+                         : m_target->normal.y > 0);
+                if (mergeSlab) {
+                    placePos = m_target->block;
+                    placeId = def.slabBase;
+                    placeMeta = 0;
+                    allowed = true;
+                } else if (!m_world->IsSolid(placePos.x, placePos.y, placePos.z) &&
+                           !m_player.Intersects(placePos)) {
+                    allowed = true;
+                    // M24/M28 orientation: torches mount on the clicked surface;
+                    // furnace/table fronts point back at the placer; slabs/stairs
+                    // read the clicked half + (stairs) the look direction.
+                    if (def.torch) {
+                        const glm::ivec3 n = m_target->normal;
+                        if (n.y > 0) {
+                            allowed = m_world->IsSolid(placePos.x, placePos.y - 1, placePos.z);
+                            placeMeta = vc::facing::TorchFloor;
+                        } else if (n.y == 0) {
+                            const vc::BlockFace f = n.x > 0   ? vc::BlockFace::PosX
+                                                    : n.x < 0 ? vc::BlockFace::NegX
+                                                    : n.z > 0 ? vc::BlockFace::PosZ
+                                                              : vc::BlockFace::NegZ;
+                            allowed = m_world->IsSolid(m_target->block.x, m_target->block.y,
+                                                       m_target->block.z);
+                            placeMeta = vc::facing::TorchWallMeta(f);
+                        } else {
+                            allowed = false; // bottom face: nothing to hang from
+                        }
+                    } else if (def.horizontalFacing) {
+                        placeMeta = static_cast<uint8_t>(vc::facing::Opposite(
+                            vc::facing::HorizontalFromLook(m_camera.Forward())));
+                    } else if (def.slab) {
+                        placeMeta = PlaceTopHalf(m_target->normal, m_target->point)
+                                        ? vc::facing::SlabTopMeta
+                                        : vc::facing::SlabBottom;
+                    } else if (def.stairs) {
+                        placeMeta = vc::facing::StairsMeta(
+                            vc::facing::HorizontalFromLook(m_camera.Forward()),
+                            PlaceTopHalf(m_target->normal, m_target->point));
                     }
-                } else if (def.horizontalFacing) {
-                    meta = static_cast<uint8_t>(
-                        vc::facing::Opposite(vc::facing::HorizontalFromLook(m_camera.Forward())));
                 }
+
                 if (allowed) {
-                    m_world->SetBlock(cell, blockId, meta);
-                    m_sounds.PlayPlace(def.soundType, glm::vec3(cell) + 0.5f);
+                    m_world->SetBlock(placePos, placeId, placeMeta);
+                    m_sounds.PlayPlace(def.soundType, glm::vec3(placePos) + 0.5f);
                     m_viewModel->TriggerSwing();
                     if (--hand.count <= 0) {
                         hand = {};

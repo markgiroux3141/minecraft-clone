@@ -9,8 +9,12 @@ underground depth), and M26 (LAVA) are CODE COMPLETE awaiting explicit user
 verification — see their sections for what was built and what to test (M25
 and M26 need a NEW WORLD). M27 (WATER GENERATION — oceans + lakes) is now
 CODE COMPLETE too (oceans user-verified "looks good"; lakes awaiting
-verification) — see the M27 section. The next milestone is open again
-(slabs/stairs is the leading Backlog candidate); scope it with the user.
+verification) — see the M27 section. M28 (SLABS & STAIRS) is now CODE
+COMPLETE awaiting verification — stone/cobble/plank/sandstone slabs + straight
+stairs, with partial collision + a 0.6 auto-step so you walk up them; see the
+M28 section for the full design and the user test checklist. The next
+milestone is open again; scope it with the user (stair auto-corners and a
+settings screen are leading Backlog candidates).
 Read alongside `ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md`
 (build commands, conventions).
 
@@ -1632,12 +1636,133 @@ PART B — LAKES (CODE COMPLETE 2026-06-14, new files `LakeGen.h/.cpp`):
 VANILLA REFERENCE: `WorldGenLakes.java`, `ChunkGeneratorOverworld.java:
 412-430`, `Biome.java:473/497`.
 
-## Backlog (after M27)
+## M28 — slabs & stairs (CODE COMPLETE)
 
-The per-block metadata layer M24 added makes SLABS/STAIRS the natural
-follow-on (half/shape state + the partial-collision work M23 deferred) —
-the leading candidate after M27. Other open candidates, to
-scope with the user:
+CODE COMPLETE 2026-06-15, awaiting user verification (build + gentest +
+savetest pass; gentest now reports 54 block types). NO new world required
+(worldgen unchanged — slabs/stairs are never generated, only crafted/placed).
+Scope DECIDED with the user: materials = stone / cobblestone / planks /
+sandstone; STRAIGHT stairs only (no auto-corner inner/outer shaping); two
+matching slabs MERGE into the full base block. This is the milestone the
+M23/M24 notes kept pointing at — it reuses the float model stream (M23) for
+geometry and the per-cell meta layer (M24) for state, and finally does the
+partial COLLISION that both deferred.
+
+- BLOCKS (`Block.cpp`/`Block.h`, APPEND-ONLY ids after Obsidian):
+  `StoneSlab/CobbleSlab/PlankSlab/SandstoneSlab` +
+  `StoneStairs/CobbleStairs/PlankStairs/SandstoneStairs`. `ShapeDef` copies
+  the base material's def (textures + hardness + tool class + pickaxe gating +
+  sound), then sets `opaque=false`, `solid=true`, `slab`/`stairs`, clears
+  `model`, and forces `drop=kDropSelf` (a stone slab drops a stone SLAB, not
+  cobble). NO texture/atlas changes — slabs/stairs reuse `faceTiles`, so
+  neither `gen_textures.py` nor `import_mc_assets.py` was touched.
+  `BlockDef::slabBase` names the full block a slab merges into. New BlockDef
+  flags: `bool slab`, `bool stairs`, `BlockId slabBase`.
+- META (`Block.h` `namespace facing`): slab meta 0 = bottom, nonzero = top
+  (`SlabIsTop`/`SlabBottom`/`SlabTopMeta`). Stair meta packs the horizontal
+  facing in the low 3 bits (a BlockFace; max value 5) + bit 3 (8) = upside-down
+  — `StairsMeta(face,top)`/`StairsFacing`/`StairsIsTop`. Facing = the placer's
+  LOOK direction (vanilla BlockStairs uses getHorizontalFacing directly, NOT
+  the Opposite that furnace/table fronts use); the tall back sits on the
+  facing side.
+- RENDER (`ChunkMesher.cpp`): slabs/stairs set `out.model[p]=1` so the per-cell
+  model pass handles them. `EmitModelCell` branches: `BuildSlabBoxes` (1 box,
+  bottom/top half) / `BuildStairBoxes` (slab half + a quarter on the facing
+  side — mirrors vanilla `getCollQuarterBlock`). `ShapeBox` builds each box
+  with AUTO-UVs (each face samples the slice of its tile the box occupies, in
+  the face's (u,v) basis, v up) so the texture reads as if cut from a full
+  block. `EmitModelBox` gained `cullBoundary`: an axis-aligned box face lying
+  exactly on a cell boundary (0/16 on its normal axis) is dropped when the
+  neighbor that way is opaque — kills the z-fight of a slab's bottom on the
+  ground or a stair's back on a wall. It's a no-op for the torch (inset planes,
+  never on a boundary) and is OFF for oriented/rotated boxes. Lighting is still
+  the cell's own light + full-bright AO (the model-stream default) — a known
+  flatness limit on big slab faces (backlog: per-face light sampling).
+- COLLISION (the real new work): `World::CollisionBoxesAt(wx,wy,wz, BlockBox
+  out[2]) -> int` returns cell-local (0..1) AABBs — 0 for non-solid, 1 for a
+  full cube or slab half, 2 for a stair (matching the render boxes exactly).
+  `Player::MoveAxis` was rewritten to iterate these boxes (was: every solid
+  cell = a full unit cube) and now does a PERPENDICULAR-axis overlap test
+  before resolving (a half-slab box in a cell shouldn't block a move that
+  passes above it). It returns `bool collided` now.
+  - DIRECTIONAL GATE (critical fix — the user reported being "popped back to
+    the start of a staircase" every ~0.5s while descending, and an earlier
+    "jerk back" when brushing a stair's side): a box only clamps the move when
+    it lies AHEAD of the player's pre-move LEADING face on the move axis
+    (vanilla `AxisAlignedBB.calculateXOffset` semantics — `MoveAxis` computes
+    `preLead` from `m_position[axis] - delta`). WHY IT MATTERS: the player AABB
+    is 0.6 wide but a stair tread is a 0.5 half-cell, so standing on a stair
+    you ALWAYS straddle the tall quarter-box beside your feet. Without the gate,
+    moving AWAY from that box still resolved against it and shoved you to
+    `bMax + extent` — backward, up the stairs. The gate skips boxes you already
+    straddle on the move axis, so only boxes genuinely in your path block you.
+- AUTO-STEP (`Player::TickWalk`): without this you'd have to jump onto every
+  slab. After the normal grounded horizontal move, if it was blocked, retry the
+  same move lifted by `kStepHeight=0.6` (vanilla) then settle back DOWN by the
+  amount actually lifted (clamped by ceilings); keep it only if it advanced
+  farther horizontally (so a full wall still blocks — 0.6 < 1.0 — but a
+  slab/stair lip lets you walk up). Horizontal momentum is preserved across the
+  step. CONTINUOUS-FOOTING GATE (fix after the user reported being "jerked back
+  to the start of a staircase" when a jump/fall brushed its side): the step
+  requires grounded BOTH this tick and last tick (`m_wasGrounded`), so the
+  landing frame of a jump/fall can't trigger a climb — only genuine ground
+  walking into a lip does. (Vanilla Entity.move steps on the landing frame too;
+  we're deliberately stricter because preserved momentum + every-tick re-fire
+  made a glancing touch rocket the player up the staircase.)
+- PLACEMENT (`GameApp` place path, rewritten to compute placePos/Id/Meta then
+  one SetBlock): `RaycastHit` gained `glm::vec3 point` (exact hit, computed
+  from the DDA's entry t). `PlaceTopHalf(normal, point)` = vanilla rule (top
+  face→bottom, bottom face→top, side face→the half you clicked). Slab meta from
+  that; stair meta = `StairsMeta(HorizontalFromLook(forward), PlaceTopHalf)`.
+  DOUBLE-SLAB MERGE: clicking the matching slab on its open face (top of a
+  bottom slab / bottom of a top slab) sets that cell to `slabBase` (full block)
+  instead of placing a second slab in the neighbor.
+- CRAFTING (`Crafting.cpp`): per material, `MMM` → 6 slabs and the stair
+  triangle (`M  `/`MM `/`MMM`, mirror auto-tried) → 4 stairs. Starter kit
+  (`GameApp::EnterWorld`) seeds inventory slots 12-19 with all 8 shapes for
+  instant testing (slots 9-11 are still the M26 buckets).
+- PALETTE: all 8 appear in the creative palette automatically (non-liquid
+  blocks). ICON (follow-up fix after the user grabbed a plank slab thinking it
+  was planks — slabs/stairs reuse the base texture, so a flat full tile was
+  indistinguishable from the full block): `DrawItemStack` (ui/Widgets.cpp) now
+  draws a SHAPED icon for `def.slab`/`def.stairs` — a half-height tile for a
+  slab, a 2-step silhouette for a stair — so they read as what they are in the
+  hotbar, inventory, AND palette. (Dropped-in-world item entities still render
+  as a full mini cube — transient, low-confusion, left as-is.)
+- KNOWN M28 LIMITS / decisions: NO stair auto-corner shapes (straight only —
+  corners leave the vanilla gap); selection outline + crosshair raycast still
+  treat a slab/stair cell as a FULL cube (you can target the empty half) —
+  tight boxes are backlog; model-block faces are flat-lit (own-cell light);
+  placing a slab in the cell you stand in is blocked by the full-cell
+  `Player::Intersects` check (minor); merged double-slabs drop the full base
+  block (a stone double-slab drops stone, which then needs a pickaxe and drops
+  cobble — minor economy quirk of merging into the existing block rather than
+  a dedicated double-slab id); LOD still skips model blocks (worldgen makes
+  none). Vanilla refs: `BlockStairs.java` (geometry/meta/placement),
+  `BlockSlab.java`.
+
+WHAT THE USER SHOULD TEST (NO new world needed — press E, grab from slots
+12-19, or craft): place a slab on top of a block → bottom slab; aim at the
+underside of a block → top slab; aim at the lower vs upper half of a block's
+SIDE → bottom vs top slab. Place a second matching slab onto the open face of
+a slab → it MERGES into a full block (different materials don't merge). Stairs:
+the tall back points where you look; click a bottom face / lower half → upside-
+down stair. WALK onto a slab or up a flight of stairs → you step up smoothly
+(0.6) without jumping; a full block still needs a jump. Stand on a slab/stair
+and confirm you don't sink or float. Check textures read continuously (sandstone
+slab top/side, etc.) and there's no z-fighting where a slab meets the ground or
+a stair backs onto a wall. Craft: 3 stone in a row → 6 stone slabs; the stair
+triangle of planks → 4 plank stairs (both orientations). Quit + reload → placed
+slabs/stairs keep their half/facing (meta persists).
+
+## Backlog (after M28)
+
+With the M24 meta layer + M23 model stream + M28's partial collision all in
+place, the natural follow-ons are STAIR AUTO-CORNERS (inner/outer shapes when
+stairs meet — vanilla `BlockStairs.EnumShape`, the piece M28 deferred) and a
+SETTINGS SCREEN (audio buses + `AudioEngine::SetBusVolume` already exist and
+want a UI; also occlusion / render-distance / sensitivity). Other open
+candidates, to scope with the user:
 full 256-tall world (would want
 empty-air-chunk culling first); a settings screen (the audio
 buses + `AudioEngine::SetBusVolume` already exist and want a UI; also

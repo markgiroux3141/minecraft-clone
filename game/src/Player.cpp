@@ -28,6 +28,7 @@ constexpr float kFlySpeed = 16.0f;
 constexpr float kFlyBoostMultiplier = 4.0f; // LeftControl
 constexpr float kLookSensitivity = 0.1f;    // degrees per pixel
 constexpr float kSkin = 0.001f;             // gap kept between AABB and geometry
+constexpr float kStepHeight = 0.6f;         // M28: auto-climb slabs/stairs (vanilla 0.6)
 
 } // namespace
 
@@ -108,6 +109,10 @@ void Player::Tick(const vc::World& world, double dt, bool input) {
     } else {
         TickWalk(world, static_cast<float>(dt));
     }
+    // Remember this tick's footing so next tick's auto-step can require
+    // CONTINUOUS ground contact (see TickWalk) — distinguishes walking up
+    // stairs from a fall/jump that lands against them.
+    m_wasGrounded = m_grounded;
 }
 
 void Player::TickWalk(const vc::World& world, float dt) {
@@ -169,8 +174,50 @@ void Player::TickWalk(const vc::World& world, float dt) {
 
     m_grounded = false;
     MoveAxis(world, 1, m_velocity.y * dt);
-    MoveAxis(world, 0, m_velocity.x * dt);
-    MoveAxis(world, 2, m_velocity.z * dt);
+    const bool groundedBeforeStep = m_grounded;
+
+    // Horizontal move. If it's blocked while grounded (and not swimming), try
+    // the same move lifted by kStepHeight and settled back down — this is what
+    // lets you walk up slabs/stairs (and any <=0.6 lip) without jumping.
+    const glm::vec3 flatStart = m_position;
+    const glm::vec3 flatVel = m_velocity;
+    const bool hitX = MoveAxis(world, 0, m_velocity.x * dt);
+    const bool hitZ = MoveAxis(world, 2, m_velocity.z * dt);
+
+    // Auto-step the lip (slab/stair, <= kStepHeight) only with CONTINUOUS
+    // footing — grounded both this tick AND last tick. Requiring last tick too
+    // is what stops a jump or fall that merely brushes a staircase from being
+    // yanked up onto it: on the landing frame you're grounded-this-tick but
+    // were airborne last tick, so no step fires. Walking up stairs keeps you
+    // continuously grounded, so it still works.
+    if ((hitX || hitZ) && groundedBeforeStep && m_wasGrounded && !inWater) {
+        const glm::vec3 flatEnd = m_position;
+        const glm::vec3 flatEndVel = m_velocity;
+        m_position = flatStart;
+        m_velocity = flatVel;
+        const float beforeLift = m_position.y;
+        MoveAxis(world, 1, kStepHeight);          // lift over the lip (clamped by ceilings)
+        const float lifted = m_position.y - beforeLift; // how far we actually rose
+        MoveAxis(world, 0, flatVel.x * dt);       // re-attempt the move up there
+        MoveAxis(world, 2, flatVel.z * dt);
+        MoveAxis(world, 1, -lifted);              // settle back down onto the step (or to start)
+
+        const float stepGain = (m_position.x - flatStart.x) * (m_position.x - flatStart.x) +
+                               (m_position.z - flatStart.z) * (m_position.z - flatStart.z);
+        const float flatGain = (flatEnd.x - flatStart.x) * (flatEnd.x - flatStart.x) +
+                               (flatEnd.z - flatStart.z) * (flatEnd.z - flatStart.z);
+        if (stepGain <= flatGain + 1e-6f) {
+            // Stepping didn't advance us (a full wall, not a lip) — keep the
+            // plain move exactly as it landed.
+            m_position = flatEnd;
+            m_velocity = flatEndVel;
+            m_grounded = true;
+        } else {
+            // Took the step; keep horizontal momentum for the next tick.
+            m_velocity.x = flatVel.x;
+            m_velocity.z = flatVel.z;
+        }
+    }
 }
 
 void Player::TickFly(float dt) {
@@ -189,9 +236,9 @@ void Player::TickFly(float dt) {
     m_grounded = false;
 }
 
-void Player::MoveAxis(const vc::World& world, int axis, float delta) {
+bool Player::MoveAxis(const vc::World& world, int axis, float delta) {
     if (delta == 0.0f) {
-        return;
+        return false;
     }
     m_position[axis] += delta;
 
@@ -204,24 +251,53 @@ void Player::MoveAxis(const vc::World& world, int axis, float delta) {
                         static_cast<int>(std::floor(boxMax.y - 1e-5f)),
                         static_cast<int>(std::floor(boxMax.z - 1e-5f))};
 
+    // The two axes perpendicular to the move; a block box only resolves the
+    // move if the player overlaps it on BOTH of them (M28: with partial slab/
+    // stair boxes a cell can be occupied yet not in the player's path).
+    const int b = (axis + 1) % 3;
+    const int c = (axis + 2) % 3;
+
+    // Player extents toward each side of the move axis, and the LEADING /
+    // trailing faces BEFORE this move. A box only clamps the move if it lies
+    // ahead of the leading face (vanilla AxisAlignedBB.calculateOffset
+    // semantics): a box the player already straddles on this axis must not
+    // resolve, or moving AWAY from a partial box you overlap (e.g. the tall
+    // quarter of a stair beside your feet — the player is wider than the
+    // half-cell tread) would shove you backward across it.
+    const float extentPos = (axis == 1) ? kHeight : kHalfWidth;
+    const float extentNeg = (axis == 1) ? 0.0f : kHalfWidth;
+    const float preLead = (m_position[axis] - delta) + (delta > 0.0f ? extentPos : -extentNeg);
+
     bool collided = false;
     float resolved = m_position[axis];
     for (int by = lo.y; by <= hi.y; ++by) {
         for (int bz = lo.z; bz <= hi.z; ++bz) {
             for (int bx = lo.x; bx <= hi.x; ++bx) {
-                if (!world.IsSolid(bx, by, bz)) {
-                    continue;
-                }
-                collided = true;
-                const int cell = (axis == 0) ? bx : (axis == 1) ? by : bz;
-                if (delta > 0.0f) {
-                    // Push back so the AABB's leading face sits on the cell.
-                    const float extent = (axis == 1) ? kHeight : kHalfWidth;
-                    resolved = std::min(resolved, static_cast<float>(cell) - extent - kSkin);
-                } else {
-                    const float extent = (axis == 1) ? 0.0f : kHalfWidth;
-                    resolved =
-                        std::max(resolved, static_cast<float>(cell + 1) + extent + kSkin);
+                vc::World::BlockBox boxes[2];
+                const int n = world.CollisionBoxesAt(bx, by, bz, boxes);
+                const glm::vec3 cell{static_cast<float>(bx), static_cast<float>(by),
+                                     static_cast<float>(bz)};
+                for (int i = 0; i < n; ++i) {
+                    const glm::vec3 bMin = cell + boxes[i].min;
+                    const glm::vec3 bMax = cell + boxes[i].max;
+                    // Perpendicular-axis overlap with the player AABB.
+                    if (boxMin[b] >= bMax[b] || boxMax[b] <= bMin[b] || boxMin[c] >= bMax[c] ||
+                        boxMax[c] <= bMin[c]) {
+                        continue;
+                    }
+                    if (delta > 0.0f) {
+                        if (bMin[axis] < preLead - kSkin) {
+                            continue; // box behind / straddled — not in our path
+                        }
+                        collided = true;
+                        resolved = std::min(resolved, bMin[axis] - extentPos - kSkin);
+                    } else {
+                        if (bMax[axis] > preLead + kSkin) {
+                            continue;
+                        }
+                        collided = true;
+                        resolved = std::max(resolved, bMax[axis] + extentNeg + kSkin);
+                    }
                 }
             }
         }
@@ -234,6 +310,7 @@ void Player::MoveAxis(const vc::World& world, int axis, float delta) {
             m_grounded = true;
         }
     }
+    return collided;
 }
 
 void Player::OnRender(double alpha, bool mouseLook) {

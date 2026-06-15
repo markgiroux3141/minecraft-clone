@@ -58,8 +58,36 @@ BlockId Torch = 0;
 BlockId Lava = 0;
 std::array<BlockId, 7> LavaFlows{};
 BlockId Obsidian = 0;
+BlockId StoneSlab = 0;
+BlockId CobbleSlab = 0;
+BlockId PlankSlab = 0;
+BlockId SandstoneSlab = 0;
+BlockId StoneStairs = 0;
+BlockId CobbleStairs = 0;
+BlockId PlankStairs = 0;
+BlockId SandstoneStairs = 0;
 
 namespace {
+
+// M28: a slab/stair reuses its base material's textures and properties; only
+// the shape (half / stepped) and a few flags differ. The base def is copied
+// (textures, hardness, tool class, pickaxe gating, sound), then overridden.
+// `opaque=false` so it doesn't hide neighbor faces; `solid=true` so the
+// player collides with its partial box (World::CollisionBoxesAt). It drops
+// itself (not the base block's drop — a stone slab drops a stone slab, not
+// cobblestone).
+BlockDef ShapeDef(std::string name, BlockDef base, bool isSlab) {
+    base.name = std::move(name);
+    base.opaque = false;
+    base.solid = true;
+    base.slab = isSlab;
+    base.stairs = !isSlab;
+    base.slabBase = 0;
+    base.model.clear();
+    base.drop = BlockDef::kDropSelf;
+    base.horizontalFacing = false; // base materials aren't, but be explicit
+    return base;
+}
 
 BlockDef Plant(std::string name, uint16_t tile) {
     BlockDef def = BlockDef::Uniform(std::move(name), tile);
@@ -372,6 +400,24 @@ void RegisterDefaults() {
     obsidian.needsPickaxe = true;
     obsidian.harvestLevel = 2;
     Obsidian = registry.Register(std::move(obsidian));
+
+    // M28: slabs + straight stairs (stone / cobblestone / planks / sandstone).
+    // Append-only, like every block. Each pair copies its base material's
+    // textures + props; the shape/half lives in per-cell meta (mesher +
+    // collision). `slabBase` lets the place path merge two matching slabs into
+    // the full block. registerShapes copies the base def by VALUE first, since
+    // registering reallocates the registry vector (a held const& would dangle).
+    const auto registerShapes = [&](BlockId baseId, BlockId& slabId, BlockId& stairsId,
+                                    const std::string& mat) {
+        const BlockDef base = registry.Def(baseId); // copy before any Register
+        slabId = registry.Register(ShapeDef(mat + " slab", base, true));
+        stairsId = registry.Register(ShapeDef(mat + " stairs", base, false));
+        registry.EditDef(slabId).slabBase = baseId;
+    };
+    registerShapes(Stone, StoneSlab, StoneStairs, "stone");
+    registerShapes(Cobblestone, CobbleSlab, CobbleStairs, "cobblestone");
+    registerShapes(Planks, PlankSlab, PlankStairs, "plank");
+    registerShapes(Sandstone, SandstoneSlab, SandstoneStairs, "sandstone");
 
     // M18 drop table (vanilla-ish; cross-references resolve here, after
     // every id exists). Leaves/tall grass/dead bush already drop nothing.

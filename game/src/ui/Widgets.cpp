@@ -5,6 +5,8 @@
 
 #include "vox/renderer/UiRenderer.h"
 
+#include "world/Block.h"
+
 namespace vc {
 
 namespace {
@@ -56,7 +58,22 @@ void DrawItemStack(vox::UiRenderer& ui, glm::vec2 pos, float s, const ItemStack&
     if (stack.Empty()) {
         return;
     }
-    ui.DrawAtlasTile(pos, glm::vec2(16.0f * s), ItemIconTile(stack.id));
+    const uint16_t tile = ItemIconTile(stack.id);
+    // M28: slabs/stairs reuse their base material's texture, so a flat full
+    // tile is indistinguishable from the full block (a plank slab looked
+    // exactly like planks — easy to grab the wrong one). Draw a SHAPED icon
+    // from the same tile: a half-height block for a slab, a 2-step silhouette
+    // for stairs, so they read as what they are at a glance.
+    const BlockDef* blockDef = IsBlockItem(stack.id) ? &BlockRegistry::Get().Def(stack.id)
+                                                     : nullptr;
+    if (blockDef && blockDef->slab) {
+        ui.DrawAtlasTile(pos + glm::vec2(0.0f, 8.0f * s), glm::vec2(16.0f, 8.0f) * s, tile);
+    } else if (blockDef && blockDef->stairs) {
+        ui.DrawAtlasTile(pos + glm::vec2(0.0f, 8.0f * s), glm::vec2(16.0f, 8.0f) * s, tile);
+        ui.DrawAtlasTile(pos + glm::vec2(8.0f * s, 0.0f), glm::vec2(8.0f, 8.0f) * s, tile);
+    } else {
+        ui.DrawAtlasTile(pos, glm::vec2(16.0f * s), tile);
+    }
 
     // Damaged tools show vanilla's durability bar (13x2 at (2,13) inside
     // the icon, green -> red as it wears) instead of a count.

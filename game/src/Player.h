@@ -57,9 +57,11 @@ private:
     void TickFly(float dt);
     // Input::IsKeyDown gated on this tick's input flag.
     bool KeyDown(vox::Key key) const;
-    // Move along one axis and clamp against solid blocks (axis-separated
-    // AABB collision). Sets m_grounded when landing.
-    void MoveAxis(const vc::World& world, int axis, float delta);
+    // Move along one axis and clamp against block collision boxes
+    // (axis-separated AABB collision; M28: per-cell boxes so slabs/stairs
+    // are partial). Sets m_grounded when landing; returns true if it hit
+    // something on this axis (drives auto-step in TickWalk).
+    bool MoveAxis(const vc::World& world, int axis, float delta);
     glm::vec3 HorizontalWishDir() const;
     // Like HorizontalWishDir but W/S follow the full look direction
     // (pitch included) — swimming steers where you aim.
@@ -72,6 +74,7 @@ private:
     float m_yaw = -90.0f;
     float m_pitch = 0.0f;
     bool m_grounded = false;
+    bool m_wasGrounded = false; // last tick's grounded state (auto-step footing gate)
     bool m_inWater = false;     // cached in TickWalk for footstep/splash audio
     bool m_inputEnabled = true; // this tick's input flag (see Tick)
     Mode m_mode = Mode::Walk;

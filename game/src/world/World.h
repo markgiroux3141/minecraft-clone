@@ -228,6 +228,18 @@ public:
 
     bool IsSolid(int wx, int wy, int wz) const;
 
+    // M28: a collision box in cell-local coordinates (0..1 within the cell).
+    struct BlockBox {
+        glm::vec3 min;
+        glm::vec3 max;
+    };
+    // Fills the collision boxes of the block at (wx,wy,wz) and returns the
+    // count: 0 for non-solid (air/liquid/plant/torch), 1 for a full cube or a
+    // slab half, 2 for a straight stair. Cell-local (0..1) — add the integer
+    // cell origin for world space. Drives the player's partial-block collision
+    // and auto-step.
+    int CollisionBoxesAt(int wx, int wy, int wz, BlockBox out[2]) const;
+
     // Copy-on-write block edit. Marks the chunk (and, for border blocks,
     // the affected neighbors) for remeshing and dirties every column whose
     // light the edit can reach. No-op outside the world or in ungenerated
@@ -239,6 +251,7 @@ public:
     struct RaycastHit {
         glm::ivec3 block;
         glm::ivec3 normal; // unit axis vector of the face that was hit
+        glm::vec3 point;   // M28: exact world-space hit point (slab/stair half)
     };
 
     // Amanatides & Woo voxel walk to the first targetable block. Returns

@@ -49,7 +49,9 @@ void FillPadded(const ChunkSnapshot& snapshot, PaddedVolume& out) {
                 out.opaque[p] = def.opaque ? 1 : 0;
                 out.cutout[p] = def.cutout ? 1 : 0;
                 out.cross[p] = def.cross ? 1 : 0;
-                out.model[p] = def.model.empty() ? 0 : 1;
+                // M28: slabs/stairs also emit into the model stream (their
+                // boxes are built per-cell from meta in EmitModelCell).
+                out.model[p] = (!def.model.empty() || def.slab || def.stairs) ? 1 : 0;
                 out.liquid[p] = def.liquid ? 1 : 0;
                 out.level[p] = def.liquidLevel;
 
@@ -347,8 +349,66 @@ void EmitCrossCell(ChunkMesh& mesh, const PaddedVolume& vol, int x, int y, int z
 // the rest of the world. Lighting is the cell's own light and full-bright
 // AO, like the cross plants — these are small emissive/decorative shapes,
 // not surfaces that want neighbor-sampled gradients.
-void EmitModelBox(ChunkMesh& mesh, int cellX, int cellY, int cellZ, const ModelBox& box,
-                  uint32_t sky, uint32_t block, const glm::mat4& xform) {
+// M28: build one model box with auto-generated UVs — each face samples the
+// slice of its tile that the box occupies, in the face's (u,v) basis (v up),
+// exactly like the cube mesher. The texture therefore reads as if cut from a
+// full block, so a bottom slab's sides show the tile's lower half and stair
+// faces stay continuous with surrounding full blocks. All six faces are
+// enabled; hidden interior faces are back-face culled and boundary faces are
+// dropped against opaque neighbors in EmitModelBox.
+ModelBox ShapeBox(const glm::vec3& from, const glm::vec3& to,
+                  const std::array<uint16_t, 6>& tiles) {
+    ModelBox box;
+    box.from = from;
+    box.to = to;
+    for (int f = 0; f < 6; ++f) {
+        const FaceBasis& fb = kFaces[f];
+        ModelBox::Face& face = box.faces[f];
+        face.on = true;
+        face.tile = tiles[static_cast<size_t>(f)];
+        face.uv = {from[fb.uAxis], from[fb.vAxis], to[fb.uAxis], to[fb.vAxis]};
+    }
+    return box;
+}
+
+// Slab: a single half box, bottom (meta 0) or top. Returns the box count.
+int BuildSlabBoxes(const BlockDef& def, uint8_t meta, ModelBox out[2]) {
+    const bool top = facing::SlabIsTop(meta);
+    out[0] = ShapeBox(top ? glm::vec3(0, 8, 0) : glm::vec3(0, 0, 0),
+                      top ? glm::vec3(16, 16, 16) : glm::vec3(16, 8, 16), def.faceTiles);
+    return 1;
+}
+
+// Straight stair: a half slab plus a quarter box (the tall back) on the
+// FACING side, mirroring vanilla BlockStairs.getCollisionBoxList /
+// getCollQuarterBlock. Upside-down (top half) flips both boxes' Y span.
+int BuildStairBoxes(const BlockDef& def, uint8_t meta, ModelBox out[2]) {
+    const bool top = facing::StairsIsTop(meta);
+    out[0] = ShapeBox(top ? glm::vec3(0, 8, 0) : glm::vec3(0, 0, 0),
+                      top ? glm::vec3(16, 16, 16) : glm::vec3(16, 8, 16), def.faceTiles);
+    glm::vec3 qFrom(0, top ? 0 : 8, 0);
+    glm::vec3 qTo(16, top ? 8 : 16, 16);
+    switch (facing::StairsFacing(meta)) {
+    case BlockFace::PosX: qFrom.x = 8; break; // tall side east
+    case BlockFace::NegX: qTo.x = 8; break;   // west
+    case BlockFace::PosZ: qFrom.z = 8; break; // south
+    case BlockFace::NegZ: qTo.z = 8; break;   // north
+    default: break;                           // only horizontals are stored
+    }
+    out[1] = ShapeBox(qFrom, qTo, def.faceTiles);
+    return 2;
+}
+
+// `cullBoundary` is set for the axis-aligned slab/stair boxes (identity
+// xform): a box face whose plane sits exactly on the cell boundary (0 or 16
+// on its normal axis) is dropped when the neighbor that way is opaque — this
+// kills the z-fight between a slab's bottom face and the ground it sits on,
+// or a stair's back face and the wall behind it. It's a no-op for the torch
+// (its planes are inset, never on a boundary) and is skipped for oriented
+// (rotated) boxes where "boundary" no longer means axis-aligned.
+void EmitModelBox(ChunkMesh& mesh, const PaddedVolume& vol, int cellX, int cellY, int cellZ,
+                  const ModelBox& box, uint32_t sky, uint32_t block, const glm::mat4& xform,
+                  bool cullBoundary) {
     constexpr float kInv16 = 1.0f / 16.0f;
     const float cell[3] = {static_cast<float>(cellX), static_cast<float>(cellY),
                            static_cast<float>(cellZ)};
@@ -361,6 +421,17 @@ void EmitModelBox(ChunkMesh& mesh, int cellX, int cellY, int cellZ, const ModelB
             continue;
         }
         const FaceBasis& fb = kFaces[face];
+        if (cullBoundary) {
+            const bool onBoundary =
+                fb.s > 0 ? box.to[fb.n] >= 16.0f : box.from[fb.n] <= 0.0f;
+            if (onBoundary) {
+                int np[3] = {cellX, cellY, cellZ};
+                np[fb.n] += fb.s;
+                if (vol.opaque[PadIndex(np[0], np[1], np[2])]) {
+                    continue;
+                }
+            }
+        }
         const float plane = (fb.s > 0 ? box.to[fb.n] : box.from[fb.n]) * kInv16;
         const float uLo = box.from[fb.uAxis] * kInv16;
         const float uHi = box.to[fb.uAxis] * kInv16;
@@ -425,9 +496,24 @@ void EmitModelCell(ChunkMesh& mesh, const PaddedVolume& vol, int x, int y, int z
     const auto sky = static_cast<uint32_t>(ChunkLight::Sky(vol.light[p]));
     const auto block = std::max(static_cast<uint32_t>(ChunkLight::Block(vol.light[p])),
                                 static_cast<uint32_t>(def.emission));
-    const glm::mat4 xform = ModelOrientation(def, vol.meta[p]);
+    const uint8_t meta = vol.meta[p];
+
+    // M28 slabs/stairs: build their boxes from meta + the base material's
+    // faceTiles, identity transform, axis-aligned — so boundary faces cull
+    // against opaque neighbors (no z-fight against the ground/wall).
+    if (def.slab || def.stairs) {
+        ModelBox boxes[2];
+        const int n = def.slab ? BuildSlabBoxes(def, meta, boxes)
+                               : BuildStairBoxes(def, meta, boxes);
+        for (int i = 0; i < n; ++i) {
+            EmitModelBox(mesh, vol, x, y, z, boxes[i], sky, block, glm::mat4(1.0f), true);
+        }
+        return;
+    }
+
+    const glm::mat4 xform = ModelOrientation(def, meta);
     for (const ModelBox& box : def.model) {
-        EmitModelBox(mesh, x, y, z, box, sky, block, xform);
+        EmitModelBox(mesh, vol, x, y, z, box, sky, block, xform, false);
     }
 }
 

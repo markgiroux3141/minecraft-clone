@@ -156,6 +156,18 @@ void Recipes::RegisterDefaults() {
     g_recipes.push_back(
         Shaped({"I I", " I "}, {{'I', {items::IronIngot}}}, {items::Bucket, 1}));
 
+    // M28: per material, 3-in-a-row -> 6 slabs; the stair triangle -> 4 stairs
+    // (MatchShaped tries the mirror, so both orientations craft).
+    const auto shapeRecipes = [&](ItemId base, ItemId slab, ItemId stairs) {
+        g_recipes.push_back(Shaped({"MMM"}, {{'M', {base}}}, {slab, 6}));
+        g_recipes.push_back(
+            Shaped({"M  ", "MM ", "MMM"}, {{'M', {base}}}, {stairs, 4}));
+    };
+    shapeRecipes(blocks::Stone, blocks::StoneSlab, blocks::StoneStairs);
+    shapeRecipes(blocks::Cobblestone, blocks::CobbleSlab, blocks::CobbleStairs);
+    shapeRecipes(blocks::Planks, blocks::PlankSlab, blocks::PlankStairs);
+    shapeRecipes(blocks::Sandstone, blocks::SandstoneSlab, blocks::SandstoneStairs);
+
     GAME_INFO("Registered {} crafting recipes", g_recipes.size());
 }
 

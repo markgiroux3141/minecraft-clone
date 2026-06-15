@@ -207,6 +207,41 @@ bool World::IsSolid(int wx, int wy, int wz) const {
     return BlockRegistry::Get().Def(GetBlock(wx, wy, wz)).solid;
 }
 
+int World::CollisionBoxesAt(int wx, int wy, int wz, BlockBox out[2]) const {
+    const BlockId id = GetBlock(wx, wy, wz);
+    const BlockDef& def = BlockRegistry::Get().Def(id);
+    if (!def.solid) {
+        return 0;
+    }
+    if (def.slab) {
+        const bool top = facing::SlabIsTop(GetMeta(wx, wy, wz));
+        out[0] = top ? BlockBox{{0.0f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}}
+                     : BlockBox{{0.0f, 0.0f, 0.0f}, {1.0f, 0.5f, 1.0f}};
+        return 1;
+    }
+    if (def.stairs) {
+        const uint8_t meta = GetMeta(wx, wy, wz);
+        const bool top = facing::StairsIsTop(meta);
+        // Half slab + the quarter (tall back) on the facing side — mirrors
+        // BuildStairBoxes / vanilla BlockStairs, in 0..1 units.
+        out[0] = top ? BlockBox{{0.0f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}}
+                     : BlockBox{{0.0f, 0.0f, 0.0f}, {1.0f, 0.5f, 1.0f}};
+        glm::vec3 qMin(0.0f, top ? 0.0f : 0.5f, 0.0f);
+        glm::vec3 qMax(1.0f, top ? 0.5f : 1.0f, 1.0f);
+        switch (facing::StairsFacing(meta)) {
+        case BlockFace::PosX: qMin.x = 0.5f; break;
+        case BlockFace::NegX: qMax.x = 0.5f; break;
+        case BlockFace::PosZ: qMin.z = 0.5f; break;
+        case BlockFace::NegZ: qMax.z = 0.5f; break;
+        default: break;
+        }
+        out[1] = BlockBox{qMin, qMax};
+        return 2;
+    }
+    out[0] = BlockBox{{0.0f, 0.0f, 0.0f}, {1.0f, 1.0f, 1.0f}};
+    return 1;
+}
+
 void World::SetBlock(const glm::ivec3& worldPos, BlockId id, uint8_t meta) {
     if (worldPos.y < 0 || worldPos.y >= kHeightBlocks) {
         return;
@@ -987,7 +1022,10 @@ std::optional<World::RaycastHit> World::RaycastBlocks(const glm::vec3& origin,
         if (def.solid || def.cross || def.torch || (includeLiquids && def.liquid)) {
             glm::ivec3 normal{0};
             normal[axis] = -step[axis];
-            return RaycastHit{cell, normal};
+            // tMax[axis] was just advanced past this cell's entry face, so the
+            // entry t (where the ray crossed into this cell) is one tDelta back.
+            const float tEnter = tMax[axis] - tDelta[axis];
+            return RaycastHit{cell, normal, origin + d * tEnter};
         }
     }
 }

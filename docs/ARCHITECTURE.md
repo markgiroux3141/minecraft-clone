@@ -224,8 +224,18 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   anchored below the lowest footprint surface, fit to one vertical chunk, and
   cave-rejected via the carve mask). A `LakeMask` vetoes trees/plants in the
   pond. New world required.
-- **Backlog**: slabs/stairs (reuse M24 meta + partial collision),
-  full 256-tall world (wants empty-air-chunk culling
+- **M28 — Slabs & stairs** 🚧: stone/cobble/plank/sandstone slabs + straight
+  stairs (no auto-corner shaping yet), reusing each material's textures. The
+  shape is built per-cell in the mesher from M24 meta (slab half; stair facing
+  + upside-down) into M23's float model stream with auto-UVs + boundary-face
+  culling. New `World::CollisionBoxesAt` gives per-cell partial AABBs and
+  `Player::MoveAxis` resolves against them; `TickWalk` gained a 0.6 auto-step
+  so you walk up them without jumping. Placement reads the clicked half/look
+  direction (`RaycastHit` now carries the hit point); two matching slabs merge
+  into the full block. Crafted (3-in-a-row → 6 slabs; stair triangle → 4).
+- **Backlog**: stair auto-corner shapes (inner/outer), per-face light sampling
+  for model blocks (slab faces are flat-lit), tight selection/raycast box for
+  partial blocks, full 256-tall world (wants empty-air-chunk culling
   first), tall-grass wheat seeds (1/8 chance, BlockTallGrass — pairs with
   farming), animated water, stars, world-list scrolling, settings screen,
   vanilla's 14/16 cactus inset, 3D-extruded item sprites in hand (flat
