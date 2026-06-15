@@ -11,6 +11,10 @@ public:
     // Creates an RGBA8 texture from raw pixel data (tightly packed, bottom row first).
     Texture2D(uint32_t width, uint32_t height, const void* rgba8Pixels,
               bool pixelArtFilter = true);
+    // Render-target texture: a single-level RGBA8 surface with uninitialized
+    // contents, NEAREST filtering and CLAMP_TO_EDGE (no mipmaps, so a
+    // Framebuffer can attach it and sample it crisply at 1:1). See Framebuffer.
+    Texture2D(uint32_t width, uint32_t height);
     ~Texture2D();
 
     Texture2D(const Texture2D&) = delete;

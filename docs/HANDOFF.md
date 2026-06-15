@@ -12,9 +12,11 @@ CODE COMPLETE too (oceans user-verified "looks good"; lakes awaiting
 verification) — see the M27 section. M28 (SLABS & STAIRS) is now CODE
 COMPLETE awaiting verification — stone/cobble/plank/sandstone slabs + straight
 stairs, with partial collision + a 0.6 auto-step so you walk up them; see the
-M28 section for the full design and the user test checklist. The next
-milestone is open again; scope it with the user (stair auto-corners and a
-settings screen are leading Backlog candidates).
+M28 section for the full design and the user test checklist. M29 (3D BLOCK
+ICONS) is now CODE COMPLETE and user-verified ("looks good") — inventory/HUD
+block icons render as the vanilla 3D iso model instead of flat tiles; see the
+M29 section. The next milestone is open again; scope it with the user (stair
+auto-corners and a settings screen are leading Backlog candidates).
 Read alongside `ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md`
 (build commands, conventions).
 
@@ -1754,6 +1756,66 @@ slab top/side, etc.) and there's no z-fighting where a slab meets the ground or
 a stair backs onto a wall. Craft: 3 stone in a row → 6 stone slabs; the stair
 triangle of planks → 4 plank stairs (both orientations). Quit + reload → placed
 slabs/stairs keep their half/facing (meta persists).
+
+## M29 — 3D block icons (CODE COMPLETE)
+
+CODE COMPLETE 2026-06-15, user-verified the look ("looks good"; stairs facing
+fixed in the same pass). NO new world needed (cosmetic — inventory/HUD only).
+Before this, item icons were FLAT texture tiles (`DrawAtlasTile`); vanilla
+renders block items as a live 3D iso model. We match that by BAKING an icon
+sheet once and blitting cells through the existing 2D path — no per-frame 3D
+draws interleaved with the UI batch, so the immediate-mode UI is untouched.
+
+- HOW VANILLA DOES IT (looked up in the 1.12 source — see the resource note up
+  top): `RenderItem.renderItemModelIntoGUI` → `setupGuiTransform` (translate to
+  slot, scale 16, flip Y) + the model's `display.gui` transform from
+  `models/block/block.json` (`rotation [30,225,0]`, `scale 0.625`) +
+  `RenderHelper.enableGUIStandardItemLighting` (two fixed directional lights).
+  Block items render as the 3D model; FLAT items (tools, sticks) use a
+  "generated" sprite model — those genuinely are just the texture, so our old
+  flat path was already vanilla-correct for them.
+- ENGINE (new, reusable): `vox::Framebuffer` (renderer/Framebuffer.{h,cpp}) —
+  an FBO with a color `Texture2D` + depth renderbuffer; `Bind()` sets itself +
+  viewport, `Unbind()` returns to the window FB (caller resets viewport). New
+  `Texture2D(w,h)` render-target ctor: single-level RGBA8, NEAREST,
+  CLAMP_TO_EDGE, no mipmaps. Added to engine/CMakeLists.txt.
+- GAME (`game/src/ui/BlockIcons.{h,cpp}` + `assets/shaders/block_icon.{vert,
+  frag}`): bakes a grid sheet (12 cols) of every SOLID block as the iso model.
+  Builds three shared meshes in the cube vertex layout (pos/normal/uv/face):
+  full cube (0..1), slab (0..0.5 y), stair (bottom half-slab + a quarter step on
+  the +Z half — under the 225° yaw that puts the riser at the back and the step
+  toward the viewer). `EmitBox` mirrors the mesher's `kFaces`/`ShapeBox` UV rule
+  (each face samples the tile slice its box occupies, v up), so a slab side
+  shows the tile's lower half and textures match the world. The frag shader
+  applies vanilla's per-face shade by normal (up 1.0, down 0.5, N/S 0.8, E/W
+  0.6) — that's what makes a flat-colored cube read as 3D. MVP =
+  `ortho * T(cellCenter) * S(cellPx) * S(0.625) * Rx(30) * Ry(225) * T(-0.5)`;
+  y-up ortho + bottom-left FBO matches `DrawImage`'s stored-bottom-left sampling
+  so icons come out upright (NO extra flip needed).
+- WIRING: `GuiTextures` gained `const BlockIcons* blockIcons`. `DrawItemStack`
+  (ui/Widgets.cpp) takes an optional `const BlockIcons*`: if the id `Has3dIcon`
+  (block, not air, not a sprite/cross/torch, not a liquid flow level 1..7) it
+  blits the sheet cell at 16*s (1:1, crisp); else the FLAT path (items, plants,
+  and — when no icons are passed — the M28 slab/stair half-tile silhouette,
+  which is now dead code in-game but kept as the no-icons fallback). All
+  `DrawItemStack` call sites in Hud.cpp + InventoryScreen.cpp pass
+  `tex.blockIcons`. GameApp owns `m_blockIcons` (built right after the atlas),
+  sets `m_guiTextures.blockIcons`, and calls `EnsureBuilt(16*GuiScale, w, h)` at
+  the top of `DrawUi` before `m_ui->Begin` — re-bakes ONLY when the GUI scale
+  (window size) changes, so icons stay pixel-crisp at 1:1.
+- KNOWN M29 LIMITS / decisions: dropped-in-world item entities + the
+  first-person hand still use their own 3D cube path (unchanged, they already
+  looked 3D); the icon sheet wastes a few cells (indexed densely, not by id);
+  liquids (water/lava sources) render as plain cubes in the palette; the
+  per-face shade is the EnumFacing constant, not vanilla's exact two-light GUI
+  setup (visually equivalent, simpler). Slab/stair icons now use real partial
+  geometry, retiring M28's faked silhouettes in-game.
+
+WHAT THE USER SHOULD TEST (NO new world): E → palette/hotbar/inventory block
+icons are 3D iso cubes; tools/sticks/buckets/plants stay flat; slabs read as
+half blocks and stairs show the step facing you; sandstone/log/grass show the
+correct top-vs-side textures; counts + tool durability bars still draw on top;
+resize the window (GUI-scale change) → icons stay crisp, not blurry.
 
 ## Backlog (after M28)
 

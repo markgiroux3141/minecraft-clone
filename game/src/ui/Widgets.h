@@ -14,6 +14,8 @@ class UiRenderer;
 
 namespace vc {
 
+class BlockIcons;
+
 // Immediate-mode building blocks shared by the menus (pause, title).
 
 // Optional real-Minecraft GUI sheets (assets/mc/, see import_mc_assets.py).
@@ -24,6 +26,9 @@ struct GuiTextures {
     std::shared_ptr<vox::Texture2D> inventory;     // gui/container/inventory.png (M17)
     std::shared_ptr<vox::Texture2D> craftingTable; // gui/container/crafting_table.png (M19)
     std::shared_ptr<vox::Texture2D> furnace;       // gui/container/furnace.png (M21)
+    // Baked 3D block-icon sheet (M29). Non-null in game; null in menus that
+    // don't draw item stacks, falling back to flat texture tiles.
+    const BlockIcons* blockIcons = nullptr;
 };
 
 inline constexpr glm::vec4 kUiText{1.0f, 1.0f, 1.0f, 0.95f};
@@ -43,9 +48,12 @@ bool UiButton(vox::UiRenderer& ui, float s, glm::vec2 pos, glm::vec2 size, std::
               glm::vec2 mouse, bool clicked,
               const std::shared_ptr<vox::Texture2D>& widgets = nullptr);
 
-// A 16x16-at-scale item icon (the block's side-face tile) with the stack
-// count in the bottom-right corner (drawn only above 1, vanilla style).
-// pos is the icon's top-left; nothing drawn for an empty stack.
-void DrawItemStack(vox::UiRenderer& ui, glm::vec2 pos, float s, const ItemStack& stack);
+// A 16x16-at-scale item icon with the stack count in the bottom-right corner
+// (drawn only above 1, vanilla style). pos is the icon's top-left; nothing
+// drawn for an empty stack. With `icons`, solid blocks render as the baked 3D
+// iso model (vanilla look); items/plants and the no-icons case fall back to a
+// flat texture tile.
+void DrawItemStack(vox::UiRenderer& ui, glm::vec2 pos, float s, const ItemStack& stack,
+                   const BlockIcons* icons = nullptr);
 
 } // namespace vc

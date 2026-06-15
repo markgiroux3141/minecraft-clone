@@ -5,6 +5,7 @@
 
 #include "vox/renderer/UiRenderer.h"
 
+#include "ui/BlockIcons.h"
 #include "world/Block.h"
 
 namespace vc {
@@ -54,25 +55,32 @@ bool UiButton(vox::UiRenderer& ui, float s, glm::vec2 pos, glm::vec2 size, std::
     return hover && clicked;
 }
 
-void DrawItemStack(vox::UiRenderer& ui, glm::vec2 pos, float s, const ItemStack& stack) {
+void DrawItemStack(vox::UiRenderer& ui, glm::vec2 pos, float s, const ItemStack& stack,
+                   const BlockIcons* icons) {
     if (stack.Empty()) {
         return;
     }
-    const uint16_t tile = ItemIconTile(stack.id);
-    // M28: slabs/stairs reuse their base material's texture, so a flat full
-    // tile is indistinguishable from the full block (a plank slab looked
-    // exactly like planks — easy to grab the wrong one). Draw a SHAPED icon
-    // from the same tile: a half-height block for a slab, a 2-step silhouette
-    // for stairs, so they read as what they are at a glance.
-    const BlockDef* blockDef = IsBlockItem(stack.id) ? &BlockRegistry::Get().Def(stack.id)
-                                                     : nullptr;
-    if (blockDef && blockDef->slab) {
-        ui.DrawAtlasTile(pos + glm::vec2(0.0f, 8.0f * s), glm::vec2(16.0f, 8.0f) * s, tile);
-    } else if (blockDef && blockDef->stairs) {
-        ui.DrawAtlasTile(pos + glm::vec2(0.0f, 8.0f * s), glm::vec2(16.0f, 8.0f) * s, tile);
-        ui.DrawAtlasTile(pos + glm::vec2(8.0f * s, 0.0f), glm::vec2(8.0f, 8.0f) * s, tile);
+    glm::vec2 srcPos, srcSize;
+    if (icons && icons->IconRect(stack.id, srcPos, srcSize)) {
+        // M29: solid blocks draw as the baked 3D iso model (vanilla look). The
+        // sheet cell is exactly 16*s px, so this blits 1:1 and stays crisp.
+        ui.DrawImage(icons->Sheet(), pos, glm::vec2(16.0f * s), srcPos, srcSize);
     } else {
-        ui.DrawAtlasTile(pos, glm::vec2(16.0f * s), tile);
+        // Flat sprite: items (tools, sticks), plants/torches, and the
+        // no-icons menu case. Slabs/stairs without a 3D icon get a SHAPED
+        // silhouette from their base tile so they don't read as the full
+        // block (M28).
+        const uint16_t tile = ItemIconTile(stack.id);
+        const BlockDef* blockDef =
+            IsBlockItem(stack.id) ? &BlockRegistry::Get().Def(stack.id) : nullptr;
+        if (blockDef && blockDef->slab) {
+            ui.DrawAtlasTile(pos + glm::vec2(0.0f, 8.0f * s), glm::vec2(16.0f, 8.0f) * s, tile);
+        } else if (blockDef && blockDef->stairs) {
+            ui.DrawAtlasTile(pos + glm::vec2(0.0f, 8.0f * s), glm::vec2(16.0f, 8.0f) * s, tile);
+            ui.DrawAtlasTile(pos + glm::vec2(8.0f * s, 0.0f), glm::vec2(8.0f, 8.0f) * s, tile);
+        } else {
+            ui.DrawAtlasTile(pos, glm::vec2(16.0f * s), tile);
+        }
     }
 
     // Damaged tools show vanilla's durability bar (13x2 at (2,13) inside

@@ -161,7 +161,7 @@ void InventoryScreen::Draw(vox::UiRenderer& ui, glm::vec2 screen, glm::vec2 mous
                               static_cast<float>(i / kPaletteColumns) * kSlotPitch) *
                     s;
             ui.DrawRect(pos, glm::vec2(16.0f * s), kSlotFill);
-            DrawItemStack(ui, pos, s, {palette[i], 1});
+            DrawItemStack(ui, pos, s, {palette[i], 1}, tex.blockIcons);
             if (Hover(mouse, pos, glm::vec2(16.0f * s))) {
                 ui.DrawRect(pos, glm::vec2(16.0f * s), kHoverHighlight);
                 tooltip = ItemName(palette[i]);
@@ -207,7 +207,7 @@ void InventoryScreen::Draw(vox::UiRenderer& ui, glm::vec2 screen, glm::vec2 mous
 
     // A regular interactive slot (inventory and craft cells alike).
     const auto doSlot = [&](ItemStack& stack, glm::vec2 pos) {
-        DrawItemStack(ui, pos, s, stack);
+        DrawItemStack(ui, pos, s, stack, tex.blockIcons);
         if (Hover(mouse, pos, glm::vec2(16.0f * s))) {
             ui.DrawRect(pos, glm::vec2(16.0f * s), kHoverHighlight);
             if (!stack.Empty()) {
@@ -232,7 +232,7 @@ void InventoryScreen::Draw(vox::UiRenderer& ui, glm::vec2 screen, glm::vec2 mous
     // cursor (vanilla: only when it fits) and consumes one per grid cell.
     const ItemStack result = Recipes::Match(craft, craftSize);
     const glm::vec2 resultDraw = panelOrigin + resultPos * s;
-    DrawItemStack(ui, resultDraw, s, result);
+    DrawItemStack(ui, resultDraw, s, result, tex.blockIcons);
     if (Hover(mouse, resultDraw, glm::vec2(16.0f * s))) {
         ui.DrawRect(resultDraw, glm::vec2(16.0f * s), kHoverHighlight);
         if (!result.Empty()) {
@@ -267,7 +267,7 @@ void InventoryScreen::Draw(vox::UiRenderer& ui, glm::vec2 screen, glm::vec2 mous
     }
 
     if (!carried.Empty()) {
-        DrawItemStack(ui, mouse - glm::vec2(8.0f * s), s, carried);
+        DrawItemStack(ui, mouse - glm::vec2(8.0f * s), s, carried, tex.blockIcons);
     } else if (!tooltip.empty()) {
         const float textScale = UiTextScale(ui, s);
         const glm::vec2 size = ui.MeasureText(tooltip, textScale);
@@ -340,7 +340,7 @@ void InventoryScreen::DrawFurnace(vox::UiRenderer& ui, glm::vec2 screen, glm::ve
     // Inventory and the input/fuel slots take normal clicks; the output
     // slot is take-only (vanilla SlotFurnaceOutput).
     const auto doSlot = [&](ItemStack& stack, glm::vec2 pos) {
-        DrawItemStack(ui, pos, s, stack);
+        DrawItemStack(ui, pos, s, stack, tex.blockIcons);
         if (Hover(mouse, pos, glm::vec2(16.0f * s))) {
             ui.DrawRect(pos, glm::vec2(16.0f * s), kHoverHighlight);
             if (!stack.Empty()) {
@@ -360,7 +360,7 @@ void InventoryScreen::DrawFurnace(vox::UiRenderer& ui, glm::vec2 screen, glm::ve
     {
         ItemStack& out = furnace.output;
         const glm::vec2 pos = panelOrigin + kFurnaceOutputPos * s;
-        DrawItemStack(ui, pos, s, out);
+        DrawItemStack(ui, pos, s, out, tex.blockIcons);
         if (Hover(mouse, pos, glm::vec2(16.0f * s))) {
             ui.DrawRect(pos, glm::vec2(16.0f * s), kHoverHighlight);
             if (!out.Empty()) {
@@ -390,7 +390,7 @@ void InventoryScreen::DrawFurnace(vox::UiRenderer& ui, glm::vec2 screen, glm::ve
     }
 
     if (!carried.Empty()) {
-        DrawItemStack(ui, mouse - glm::vec2(8.0f * s), s, carried);
+        DrawItemStack(ui, mouse - glm::vec2(8.0f * s), s, carried, tex.blockIcons);
     } else if (!tooltip.empty()) {
         const float textScale = UiTextScale(ui, s);
         const glm::vec2 size = ui.MeasureText(tooltip, textScale);

@@ -20,6 +20,7 @@
 #include "Particles.h"
 #include "Player.h"
 #include "ViewModel.h"
+#include "ui/BlockIcons.h"
 #include "audio/Sounds.h"
 #include "ui/Widgets.h"
 #include "world/World.h"
@@ -138,6 +139,8 @@ private:
 
     // 2D overlay (crosshair, hotbar; menus from M10 stage 2).
     std::unique_ptr<vox::UiRenderer> m_ui;
+    // M29: baked 3D block-icon sheet for inventory/hotbar slots.
+    std::unique_ptr<vc::BlockIcons> m_blockIcons;
 
     // Player items (M17): hotbar = inventory slots 0..8, keys 1..9 select;
     // m_carried rides the mouse while a container screen is open. The

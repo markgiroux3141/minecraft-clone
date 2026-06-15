@@ -135,6 +135,10 @@ void GameApp::OnInit() {
     m_blockTextures =
         vox::Texture2DArray::FromFileStrip(PreferMcAsset("textures/atlas.png"), 16);
 
+    // M29: 3D iso block icons for inventory/hotbar slots, baked from the atlas.
+    m_blockIcons = std::make_unique<vc::BlockIcons>(m_blockTextures);
+    m_guiTextures.blockIcons = m_blockIcons.get();
+
     m_ui = std::make_unique<vox::UiRenderer>();
     // Real MC font: 16x16 grid of 8x8 cells from char 0, proportional widths
     // scanned from the glyphs. Placeholder (scripts/gen_font.py): monospace
@@ -888,6 +892,11 @@ void GameApp::DrawUi() {
     m_rightClickWasDown = rightDown;
 
     const glm::vec2 mouse = vox::Input::MousePosition();
+
+    // Bake (or re-bake on a GUI-scale change) the 3D block-icon sheet before
+    // the 2D batch; restores the window framebuffer + viewport itself.
+    m_blockIcons->EnsureBuilt(static_cast<int>(16.0f * vc::GuiScale(screen)),
+                              GetWindow().Width(), GetWindow().Height());
 
     m_ui->Begin(GetWindow().Width(), GetWindow().Height(), m_blockTextures.get());
     if (EyeInLava()) {

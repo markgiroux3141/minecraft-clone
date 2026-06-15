@@ -233,6 +233,12 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   so you walk up them without jumping. Placement reads the clicked half/look
   direction (`RaycastHit` now carries the hit point); two matching slabs merge
   into the full block. Crafted (3-in-a-row → 6 slabs; stair triangle → 4).
+- **M29 — 3D block icons** ✅: inventory/HUD block icons render as the vanilla
+  3D iso model (`[30,225,0]` / scale 0.625 / per-face shade) instead of flat
+  tiles, baked once into an offscreen sheet via the new `vox::Framebuffer` and
+  blitted through the existing 2D `DrawImage` path. Items/plants stay flat
+  (vanilla "generated" sprites). New `game/src/ui/BlockIcons` + `block_icon`
+  shader; re-bakes only on a GUI-scale change.
 - **Backlog**: stair auto-corner shapes (inner/outer), per-face light sampling
   for model blocks (slab faces are flat-lit), tight selection/raycast box for
   partial blocks, full 256-tall world (wants empty-air-chunk culling

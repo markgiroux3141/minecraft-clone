@@ -49,12 +49,13 @@ void DrawMcHotbar(vox::UiRenderer& ui, glm::vec2 screen, float s,
     for (size_t i = 0; i < slots; ++i) {
         DrawItemStack(ui,
                       origin + glm::vec2((3.0f + static_cast<float>(i) * 20.0f) * s, 3.0f * s), s,
-                      hotbar[i]);
+                      hotbar[i], tex.blockIcons);
     }
 }
 
 void DrawPlaceholderHotbar(vox::UiRenderer& ui, glm::vec2 screen, float s,
-                           std::span<const ItemStack> hotbar, size_t selectedSlot) {
+                           std::span<const ItemStack> hotbar, size_t selectedSlot,
+                           const GuiTextures& tex) {
     const float slot = 22.0f * s; // 16x16 icon + 3px border each side, pre-scale
     const float gap = 2.0f * s;
     const auto count = static_cast<float>(hotbar.size());
@@ -69,7 +70,7 @@ void DrawPlaceholderHotbar(vox::UiRenderer& ui, glm::vec2 screen, float s,
         }
         ui.DrawRect(pos, glm::vec2(slot), selected ? kSlotBg : kSlotFrame);
         ui.DrawRect(pos + glm::vec2(s), glm::vec2(slot - 2.0f * s), kSlotBg);
-        DrawItemStack(ui, pos + glm::vec2(3.0f * s), s, hotbar[i]);
+        DrawItemStack(ui, pos + glm::vec2(3.0f * s), s, hotbar[i], tex.blockIcons);
     }
 }
 
@@ -104,7 +105,7 @@ void Hud::Draw(vox::UiRenderer& ui, glm::vec2 screen, std::span<const ItemStack>
             DrawSelectedName(ui, screen, s, hotbar, selectedSlot, screen.y - 22.0f * s);
         }
     } else {
-        DrawPlaceholderHotbar(ui, screen, s, hotbar, selectedSlot);
+        DrawPlaceholderHotbar(ui, screen, s, hotbar, selectedSlot, tex);
         if (named) {
             DrawSelectedName(ui, screen, s, hotbar, selectedSlot, screen.y - 28.0f * s);
         }

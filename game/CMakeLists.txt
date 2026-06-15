@@ -16,6 +16,8 @@ add_executable(game
     src/Player.h
     src/ViewModel.cpp
     src/ViewModel.h
+    src/ui/BlockIcons.cpp
+    src/ui/BlockIcons.h
     src/ui/Hud.cpp
     src/ui/Hud.h
     src/ui/InventoryScreen.cpp

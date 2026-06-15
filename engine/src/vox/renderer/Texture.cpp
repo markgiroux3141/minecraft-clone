@@ -35,6 +35,18 @@ Texture2D::Texture2D(uint32_t width, uint32_t height, const void* rgba8Pixels,
     glTextureParameteri(m_handle, GL_TEXTURE_WRAP_T, GL_REPEAT);
 }
 
+Texture2D::Texture2D(uint32_t width, uint32_t height) : m_width(width), m_height(height) {
+    glCreateTextures(GL_TEXTURE_2D, 1, &m_handle);
+    glTextureStorage2D(m_handle, 1, GL_RGBA8, static_cast<GLsizei>(width),
+                       static_cast<GLsizei>(height));
+    // Crisp 1:1 sampling for baked icon sheets; clamp so edge cells never
+    // bleed into one another.
+    glTextureParameteri(m_handle, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTextureParameteri(m_handle, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTextureParameteri(m_handle, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTextureParameteri(m_handle, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+}
+
 Texture2D::~Texture2D() {
     glDeleteTextures(1, &m_handle);
 }
