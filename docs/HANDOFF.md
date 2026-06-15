@@ -15,15 +15,25 @@ stairs, with partial collision + a 0.6 auto-step so you walk up them; see the
 M28 section for the full design and the user test checklist. M29 (3D BLOCK
 ICONS) is now CODE COMPLETE and user-verified ("looks good") — inventory/HUD
 block icons render as the vanilla 3D iso model instead of flat tiles; see the
-M29 section. The next milestone is open again; scope it with the user (stair
-auto-corners and a settings screen are leading Backlog candidates).
+M29 section. The next arc was SCOPED with the user (2026-06-15): survival &
+mobs across M30–M33 (health → entity-model renderer → mobs → armor + player
+doll in the UI), landing IN ORDER one at a time — see the "Planned arc —
+survival & mobs" section for the full breakdown and the why-this-order. M30
+(HEALTH, DAMAGE & HUNGER) is now DONE and USER-VERIFIED, including the
+hurt-feedback (damage sound + camera tilt) and the real first-person fire
+overlay follow-ups — see the M30 section for what was built. M31–M33 go in fresh contexts (M31, the entity
+box-model renderer, is the shared bottleneck and next up).
 Read alongside `ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md`
 (build commands, conventions).
 
 IMPORTANT after pulling on this machine: re-run `python
 scripts/import_mc_assets.py` — M26 added two atlas layers (lava 64,
 obsidian 65), so the gitignored `assets/mc/atlas.png` overlay is stale until
-re-imported (the committed placeholder atlas is already regenerated).
+re-imported (the committed placeholder atlas is already regenerated). M30's
+hurt-feedback follow-up also added a new sound family (`damage/`) and the fire
+overlay texture (`blocks/fire_layer_1.png` → `mc/textures/fire_layer_1.png`), so
+the same re-import pulls `damage/hit{1,2,3}.ogg` (player hurt noise) and the
+on-fire flames.
 
 IMPORTANT RESOURCE: the user has Minecraft's Java source (MCP 9.40 =
 1.12) at `D:\Minecraft source code` — look up exact game dynamics there
@@ -1816,6 +1826,170 @@ icons are 3D iso cubes; tools/sticks/buckets/plants stay flat; slabs read as
 half blocks and stairs show the step facing you; sandstone/log/grass show the
 correct top-vs-side textures; counts + tool durability bars still draw on top;
 resize the window (GUI-scale change) → icons stay crisp, not blurry.
+
+## M30 — health, damage & hunger (DONE)
+
+DONE 2026-06-15, USER-VERIFIED (health/death/lava all confirmed in-world; the
+hurt-feedback + real fire-overlay follow-ups verified "looks good"). First of
+the survival & mobs arc (see the Planned arc section). Self-contained: HUD-only rendering, no
+new entity/model renderer, no mobs. All values ported from the 1.12 source
+(FoodStats.java, EntityLivingBase.attackEntityFrom/fall, GuiIngame.java) — look
+them up there before changing tuning. NO new world needed (gameplay only).
+
+- VITALS ON PLAYER (game/src/Player.{h,cpp}): health 0..20 (2 = one heart),
+  foodLevel 0..20, a hidden saturation buffer (drains before food), exhaustion
+  0..40, air -20..300 (300 = 15 s breath), a hurt-resist window, a fire timer,
+  and accumulated fall distance. Ticked once per tick in `Tick()` — but ONLY in
+  Walk mode. FLY MODE IS CREATIVE: no damage, no hunger, air pinned full, fall
+  distance zeroed (so toggling fly never hurts you). `Dead()` latches at health
+  0; GameApp reads it.
+- DAMAGE (`ApplyDamage`, vanilla attackEntityFrom): respects the hurt-resist
+  window (maxHurtResistantTime 20; a bigger hit during the window tops up to the
+  new amount, an equal/lesser one is ignored), so e.g. lava lands ~twice/sec not
+  every tick. Sources, all in `TickVitals`/`TickWalk`:
+  - FALL: vanilla `updateFallState` — accumulate descent while airborne, on
+    landing deal `ceil(distance - 3)`. Water cancels it. The FIRST landing after
+    any `Teleport` is exempt (`m_spawnFallGrace`) so the spawn drop (spawn is
+    above the surface) and respawn never kill you.
+  - LAVA: 4/tick + sets a 15 s fire timer; FIRE: 1 dmg/sec while the timer runs
+    (keeps burning after you climb out — vanilla). WATER extinguishes the fire
+    timer instantly (vanilla `extinguish()` — dive in to escape a post-lava
+    burn). The real vanilla FIRE OVERLAY shows the burn: `blocks/fire_layer_1`
+    (16x512 = 32 frames of 16x16, imported standalone to
+    `mc/textures/fire_layer_1.png` via the COPIES list; loaded as
+    `m_fireOverlay`) tiled across the bottom of the view in DrawUi, animated off
+    `m_totalTicks` with desynced columns, alpha 0.9 (matching
+    ItemRenderer.renderFireInFirstPerson). Gated on `Player::OnFire()` and not
+    eye-in-lava (the lava tint wins when submerged). No-asset clones fall back
+    to a flickering orange tint. DROWNING: head in WATER drains air 1/tick, then
+    2 dmg/sec once it bottoms out. VOID: 4/tick below y -64.
+  - CACTUS: 1/tick while touching. NOTE: our cactus is a full-cube collision
+    (the vanilla 14/16 inset is still backlog), so the player can't truly
+    overlap the cell — the touch test grows the AABB 0.1 horizontally so
+    pressing against a cactus hurts, with the vertical range inset so standing
+    on top is safe. (Proper fix = the inset collision box, backlog.)
+- HUNGER (`TickFoodStats`, exact FoodStats.onUpdate port, naturalRegeneration
+  on, normal difficulty): exhaustion ≥ 4 spends 1 saturation (then food); fast
+  regen while saturated + full, slow regen at food ≥ 18, starvation at food 0
+  (normal: floors at 1 health, never kills). Exhaustion drivers: movement
+  (sprint 0.1/block, walk 0.01/block — in `TickVitals`), jump (0.05, sprint
+  0.2 — in `TickWalk`), block break (0.005 — in `GameApp::HandleInput`).
+- HUD (game/src/ui/Hud.{h,cpp}): `HudVitals` struct → `DrawVitals` draws hearts
+  (from the hotbar's left edge), food (anchored right), and air bubbles (while
+  submerged) on the existing icons.png sprite path, laid out exactly like
+  GuiIngame (9x9 icons; heart bg/full/half at u 16/52/61 v 0, food at v 27,
+  bubbles at u 16/25 v 18). `show` is false in fly/creative so the bars hide
+  (vanilla). Needs the icons.png overlay (placeholder builds skip the bars).
+- DEATH / RESPAWN (GameApp): new `State::Dead`. `EnterDeathScreen` (called from
+  OnTick when `Dead()` first trips) frees the cursor, returns any open
+  container's carried/craft contents to the bag, freezes the player + world
+  (Dead is neither Playing nor a container, so OnTick's sim block is skipped —
+  the death scene holds still). DrawUi paints a red "You Died!" overlay with
+  Respawn / Title Screen buttons. `RespawnPlayer` resets all vitals to full and
+  teleports to the world spawn column, standing on the highest solid non-liquid
+  block (falls from spawn height with fall-grace if that column isn't streamed
+  in yet). Esc/E are inert in Dead (their existing guards no-op).
+- PERSISTENCE (WorldSave): a new optional manifest line `vitals <health>
+  <foodLevel> <saturation> <exhaustion> <air>`. Absent in pre-M30 saves → full
+  health on load (the `player`/`time`/`inventory` lines are untouched, so old
+  saves stay bit-compatible). Loaded in `EnterWorld` (→ `Player::SetVitals`,
+  which clamps), written in `PersistPlayerState`. savetest covers absence +
+  exact round-trip.
+- HURT FEEDBACK (follow-up, same milestone): the vanilla damage NOISE + camera
+  TILT (ported from EntityRenderer.hurtCameraEffect / EntityLivingBase). The
+  engine `PerspectiveCamera` gained a `SetRoll`/`Roll` (degrees about the view
+  axis; View() rolls the up vector around forward) — independent of
+  SetRotation so a transient tilt layers on top. `Player` tracks `m_hurtTime`
+  (set to 10 on a fresh hit in `ApplyDamage`, decremented each Tick) and exposes
+  `CameraRoll(alpha)` = `sin(f^4·π)·14°` with `f = (hurtTime - alpha)/10` (the
+  exact vanilla curve; attackedAtYaw is 0 for environmental damage so it's an
+  undirected roll — directional knockback waits for M32 mobs). GameApp applies
+  it each frame in OnRender right after `m_player.OnRender`, and adds the death
+  keel-over `40 - 8000/(deathTicks+200)` driven by `m_deathAnim` (seconds in the
+  Dead state). The hurt SOUND: `Player::ConsumeHurt()` returns true once per
+  fresh hit (only on a full hit, not a within-resist-window top-up — vanilla);
+  GameApp plays `GameSounds::PlayHurt` (2D, pitch 1.0 ± 0.1) from
+  `damage/hit{1,2,3}.ogg` (the import script's sound families grew `damage/`;
+  re-run it to pull them — 130 sound files now). A clean clone with no overlay
+  stays silent as before.
+
+WHAT THE USER SHOULD TEST (NO new world): hearts + hunger bar appear above the
+hotbar in walk mode and HIDE in fly mode (press F); fall ~4+ blocks in walk mode
+to lose hearts (a big fall kills → "You Died!" screen → Respawn drops you back
+at spawn at full health, Title Screen quits to the menu); standing in lava
+drains health fast and you keep burning briefly after stepping out; dive
+underwater and watch the air bubbles pop, then take drowning damage once they're
+gone; walk into a cactus to take a tick of damage; sprint/jump/dig for a while
+to watch hunger tick down, then watch health slowly regen while fed; the empty-
+handed/low-hunger states regen correctly; quit + re-enter → health/food
+restored; an OLD world loads at full health and plays normally. HURT FEEDBACK
+(re-run `import_mc_assets.py` first for the sound): each hit plays a grunt and
+snaps the view into a quick tilt that eases back; on death the view slowly keels
+over behind the "You Died!" screen.
+
+## Planned arc — survival & mobs (M30–M33)
+
+Scoped with the user 2026-06-15. Goal: enemies, a health system, armor, and a
+player character shown in the inventory UI. These build on each other, so they
+land IN ORDER, one milestone at a time, each in its own context where possible.
+The KEY insight that drives the ordering: the humanoid BOX-MODEL RENDERER is a
+shared dependency of both "enemies" and "show the player in the UI" — health and
+armor LOGIC are cheap, but the jointed-model RENDERING is the real new engine
+capability. So health (HUD-only, no new renderer) goes first, the model renderer
+goes second, and mobs + armor + the player doll fall out of it.
+
+What we already have working in our favor (don't rebuild these):
+- An ENTITY pattern: `World::FallingBlock` + `World::ItemEntity` (World.h ~141)
+  are tick-simulated, prev/current interpolated, AABB-collided structs. A mob is
+  the same shape + health + AI + a model. Generalize, don't invent.
+- ARMOR UI SLOTS already exist as inert art in the inventory panel (M17 note:
+  "Armor/crafting regions are inert art until M19" — crafting got wired, armor
+  didn't). The slots draw; they just do nothing yet.
+- 3D-MODEL-INTO-UI is solved: M29's `vox::Framebuffer` + `BlockIcons` bake a 3D
+  model to an offscreen sheet and blit it through the 2D UI. The player doll is
+  the same technique with a humanoid model instead of a cube.
+- Mature item/tool/durability systems (M19), damage SOURCES already present but
+  inert (lava/cactus/fall "no damage — no health system" notes throughout).
+
+- **M30 — Survival IV: health, damage & hunger** ✅ (DONE & USER-VERIFIED — see
+  the detailed "M30 — health, damage & hunger" section above). Player
+  `health` (20 = 10 hearts) + `hunger`/saturation (20 = 10 drumsticks) on
+  `Player`, ticked at 20 TPS. Damage sources wired into the existing tick — the
+  hooks are already stubbed everywhere ("no damage" notes): fall damage (vanilla
+  `max(0, fallDistance-3)` half-hearts), lava/fire (per-tick + burn timer),
+  cactus touch, drowning (air supply once submerged past the head), void (y<0).
+  Natural regen gated on hunger ≥ 18 (vanilla 1.12 rules); starvation damage at
+  hunger 0; hunger drains via exhaustion (move/jump/dig). Death → a respawn
+  screen → respawn at spawn with full health, drops handled later. HUD: heart row
+  + hunger row + (when submerged) air bubbles, drawn through the existing
+  icon-drawing path (icons.png has the vanilla heart/food/bubble sprites). No new
+  renderer, no mobs — fully self-contained. Persist health/hunger in level.dat.
+  This is the milestone we START now; the rest go in fresh contexts.
+
+- **M31 — Entity model renderer (engine)** 📋. THE shared bottleneck. A jointed
+  multi-cuboid "box model" renderer (vanilla `ModelBase`/`ModelRenderer`): named
+  parts with per-part pivot + rotation, a single skin texture with per-box UV
+  layout, hierarchical transforms, render-interpolated. Lives in the engine
+  (reusable), generalizes the FallingBlock/ItemEntity cube path. Ships with one
+  test model (the Steve humanoid: head/body/2 arms/2 legs) and an idle/walk
+  animation, drawn on a debug entity — NO gameplay yet. Both mobs and the player
+  doll consume this.
+
+- **M32 — Mobs (AI, spawning, combat)** 📋. A `LivingEntity`/`Mob` entity type
+  extending the M30/M31 pieces: health + an AABB the player physics also resolves
+  against, a skinned M31 model, prev/current interpolation. One passive (pig) +
+  one hostile (zombie) to exercise both paths. AI: wander/idle for passive,
+  target-and-path-to-player + melee for hostile (simple ground pathing first).
+  Spawning rules (light level + spawn caps + despawn), mob attacks deal M30
+  damage, player melee (LMB on a mob) deals damage with knockback, mobs drop
+  items (reuses M18 item entities). Persisted to a mobs sidecar like furnaces.
+
+- **M33 — Armor & the player doll in the inventory UI** 📋. Equippable armor
+  items (helmet/chest/legs/boots × a material tier) with durability (M19) and
+  damage reduction applied in M30's damage path; activate the inert armor slots
+  (equip on click / shift-click). Render the PLAYER CHARACTER in the inventory
+  screen — the M31 Steve model baked to the M29 framebuffer→UI path — showing the
+  worn armor layer. Once M31 exists this is mostly wiring + the armor-layer skin.
 
 ## Backlog (after M28)
 

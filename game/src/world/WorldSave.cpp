@@ -147,6 +147,11 @@ void WorldSave::ReadManifest(int defaultSeed) {
                 if (in >> ticks) {
                     m_worldTime = ticks;
                 }
+            } else if (tag == "vitals") {
+                Vitals v;
+                if (in >> v.health >> v.foodLevel >> v.saturation >> v.exhaustion >> v.air) {
+                    m_vitals = v;
+                }
             } else if (tag == "inventory" || tag == "inventory2") {
                 const bool withDamage = tag == "inventory2";
                 size_t n = 0;
@@ -189,6 +194,11 @@ void WorldSave::WriteManifest() const {
         }
         out << '\n';
     }
+    if (m_vitals) {
+        out << std::setprecision(9) << "vitals " << m_vitals->health << ' ' << m_vitals->foodLevel
+            << ' ' << m_vitals->saturation << ' ' << m_vitals->exhaustion << ' ' << m_vitals->air
+            << '\n';
+    }
 }
 
 void WorldSave::SetPlayerState(const PlayerState& state) {
@@ -203,6 +213,11 @@ void WorldSave::SetWorldTime(int64_t ticks) {
 
 void WorldSave::SetInventory(std::vector<InventorySlot> slots) {
     m_inventory = std::move(slots);
+    WriteManifest();
+}
+
+void WorldSave::SetVitals(const Vitals& vitals) {
+    m_vitals = vitals;
     WriteManifest();
 }
 

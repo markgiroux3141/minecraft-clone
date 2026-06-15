@@ -47,6 +47,11 @@ COPIES = [
     ("textures/environment/moon_phases.png", "textures/environment/moon_phases.png"),
     # Steve skin (M20): the first-person bare arm samples it.
     ("textures/entity/steve.png", "textures/entity/steve.png"),
+    # Fire overlay (M30): the first-person "on fire" flames — vanilla's
+    # ItemRenderer.renderFireInFirstPerson uses fire_layer_1. 16x512 vertical
+    # animation strip (32 frames of 16x16); the HUD tiles a frame across the
+    # bottom of the view.
+    ("textures/blocks/fire_layer_1.png", "textures/fire_layer_1.png"),
 ]
 
 
@@ -245,7 +250,8 @@ def want_sound(rel: str) -> str | None:
     # rel = the index name minus "minecraft/sounds/". Returns the destination
     # path under assets/mc/sounds/, or None to skip. Music is flattened from
     # music/game/<name>.ogg to music/<name>.ogg (the game loads it flat).
-    for family in ("dig/", "step/", "ambient/cave/", "liquid/", "fire/", "item/bucket/"):
+    for family in ("dig/", "step/", "ambient/cave/", "liquid/", "fire/", "item/bucket/",
+                   "damage/"):
         if rel.startswith(family):
             return rel
     if rel in ("random/pop.ogg", "random/glass1.ogg", "random/glass2.ogg",

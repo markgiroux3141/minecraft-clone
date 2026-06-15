@@ -29,6 +29,9 @@ constexpr float kFlyBoostMultiplier = 4.0f; // LeftControl
 constexpr float kLookSensitivity = 0.1f;    // degrees per pixel
 constexpr float kSkin = 0.001f;             // gap kept between AABB and geometry
 constexpr float kStepHeight = 0.6f;         // M28: auto-climb slabs/stairs (vanilla 0.6)
+constexpr int kMaxHurtResist = 20;          // vanilla maxHurtResistantTime (1 s)
+constexpr int kMaxHurtTime = 10;            // vanilla maxHurtTime (hurt-tilt window)
+constexpr float kPi = 3.14159265358979f;
 
 } // namespace
 
@@ -36,6 +39,10 @@ void Player::Teleport(const glm::vec3& feetPos) {
     m_position = feetPos;
     m_prevPosition = feetPos;
     m_velocity = glm::vec3{0.0f};
+    // The drop from a teleport (spawn is above the surface) must not deal fall
+    // damage — exempt the first landing afterwards (cleared in TickWalk).
+    m_fallDistance = 0.0f;
+    m_spawnFallGrace = true;
 }
 
 void Player::SetLook(float yawDegrees, float pitchDegrees) {
@@ -103,11 +110,20 @@ bool Player::KeyDown(vox::Key key) const {
 void Player::Tick(const vc::World& world, double dt, bool input) {
     m_prevPosition = m_position;
     m_inputEnabled = input;
+    if (m_hurtTime > 0) {
+        --m_hurtTime; // hurt-tilt window decays one tick at a time (both modes)
+    }
     if (m_mode == Mode::Fly) {
         m_inWater = false; // noclip: no footsteps/splash
+        m_fallDistance = 0.0f;
+        m_air = kMaxAir; // creative-style: no drowning, no hunger, no damage
+        if (m_hurtResist > 0) {
+            --m_hurtResist;
+        }
         TickFly(static_cast<float>(dt));
     } else {
         TickWalk(world, static_cast<float>(dt));
+        TickVitals(world);
     }
     // Remember this tick's footing so next tick's auto-step can require
     // CONTINUOUS ground contact (see TickWalk) — distinguishes walking up
@@ -127,6 +143,8 @@ void Player::TickWalk(const vc::World& world, float dt) {
     if (!world.GetChunk(feetChunk)) {
         return;
     }
+
+    const float startY = m_position.y; // for fall-distance accumulation
 
     const auto liquidAt = [&](float wx, float wy, float wz) -> const vc::BlockDef& {
         return vc::BlockRegistry::Get().Def(world.GetBlock(static_cast<int>(std::floor(wx)),
@@ -169,6 +187,7 @@ void Player::TickWalk(const vc::World& world, float dt) {
         m_velocity.y = std::max(m_velocity.y - kGravity * dt, -kTerminalSpeed);
         if (m_grounded && KeyDown(vox::Key::Space)) {
             m_velocity.y = kJumpSpeed;
+            AddExhaustion(KeyDown(vox::Key::LeftControl) ? 0.2f : 0.05f); // vanilla jump cost
         }
     }
 
@@ -217,6 +236,21 @@ void Player::TickWalk(const vc::World& world, float dt) {
             m_velocity.x = flatVel.x;
             m_velocity.z = flatVel.z;
         }
+    }
+
+    // Fall damage (vanilla updateFallState): accumulate descent while airborne;
+    // on landing, ceil(distance - 3) health points. Water cancels the fall, and
+    // the first landing after a teleport (spawn drop) is exempt.
+    if (inWater) {
+        m_fallDistance = 0.0f;
+    } else if (m_grounded) {
+        if (!m_spawnFallGrace && m_fallDistance > 3.0f) {
+            ApplyDamage(std::ceil(m_fallDistance - 3.0f));
+        }
+        m_fallDistance = 0.0f;
+        m_spawnFallGrace = false;
+    } else if (m_position.y < startY) {
+        m_fallDistance += startY - m_position.y;
     }
 }
 
@@ -339,4 +373,222 @@ bool Player::Intersects(const glm::ivec3& block) const {
     const glm::vec3 cellMax = cellMin + 1.0f;
     return boxMin.x < cellMax.x && boxMax.x > cellMin.x && boxMin.y < cellMax.y &&
            boxMax.y > cellMin.y && boxMin.z < cellMax.z && boxMax.z > cellMin.z;
+}
+
+// --- M30 vitals --------------------------------------------------------------
+
+void Player::AddExhaustion(float amount) {
+    m_exhaustion = std::min(m_exhaustion + amount, 40.0f);
+}
+
+void Player::Heal(float amount) {
+    if (!m_dead && m_health > 0.0f) {
+        m_health = std::min(m_health + amount, kMaxHealth);
+    }
+}
+
+void Player::ApplyDamage(float amount) {
+    if (m_dead || amount <= 0.0f) {
+        return;
+    }
+    // Vanilla EntityLivingBase.attackEntityFrom hurt-resist window: within the
+    // first half of the window a fresh hit only lands the amount ABOVE the last
+    // one; otherwise it lands in full and arms the window.
+    if (m_hurtResist > kMaxHurtResist / 2) {
+        if (amount <= m_lastDamage) {
+            return;
+        }
+        m_health -= amount - m_lastDamage;
+        m_lastDamage = amount;
+    } else {
+        m_lastDamage = amount;
+        m_hurtResist = kMaxHurtResist;
+        m_health -= amount;
+        // Fresh hit: arm the hurt-tilt window and the one-shot hurt sound
+        // (vanilla only does this on a full hit, not a within-window top-up).
+        m_hurtTime = kMaxHurtTime;
+        m_hurtThisTick = true;
+    }
+    if (m_health <= 0.0f) {
+        m_health = 0.0f;
+        m_dead = true;
+    }
+}
+
+void Player::SetVitals(float health, int food, float saturation, float exhaustion, int air) {
+    m_health = std::clamp(health, 0.0f, kMaxHealth);
+    m_foodLevel = std::clamp(food, 0, 20);
+    m_saturation = std::clamp(saturation, 0.0f, 20.0f);
+    m_exhaustion = std::clamp(exhaustion, 0.0f, 40.0f);
+    m_air = std::clamp(air, -20, kMaxAir);
+    m_dead = m_health <= 0.0f;
+}
+
+void Player::Respawn(const glm::vec3& feetPos) {
+    m_health = kMaxHealth;
+    m_foodLevel = 20;
+    m_saturation = 5.0f;
+    m_exhaustion = 0.0f;
+    m_foodTimer = 0;
+    m_air = kMaxAir;
+    m_fireTicks = 0;
+    m_hurtResist = 0;
+    m_lastDamage = 0.0f;
+    m_hurtTime = 0;
+    m_hurtThisTick = false;
+    m_dead = false;
+    m_mode = Mode::Walk;
+    Teleport(feetPos); // resets velocity + arms spawn fall-grace
+}
+
+float Player::CameraRoll(double alpha) const {
+    // Vanilla EntityRenderer.hurtCameraEffect: f = (hurtTime - partialTicks) /
+    // maxHurtTime, tilt = sin(f^4 * pi) * 14 degrees — a sharp spike that eases
+    // back to level over the window. attackedAtYaw is 0 for environmental
+    // damage, so this is a pure (undirected) roll.
+    float f = static_cast<float>(m_hurtTime) - static_cast<float>(alpha);
+    if (f <= 0.0f) {
+        return 0.0f;
+    }
+    f /= static_cast<float>(kMaxHurtTime);
+    f = std::sin(f * f * f * f * kPi);
+    return f * 14.0f;
+}
+
+bool Player::ConsumeHurt() {
+    const bool hurt = m_hurtThisTick;
+    m_hurtThisTick = false;
+    return hurt;
+}
+
+bool Player::TouchingCactus(const vc::World& world) const {
+    // Our cactus is a full-cube collision (the vanilla 14/16 inset is backlog),
+    // so the player never actually overlaps the cell — grow the test box
+    // horizontally by 0.1 so pressing up against a cactus still hurts, while
+    // keeping the vertical range inset so standing on top is safe.
+    constexpr float kGrow = 0.1f;
+    const glm::vec3 lo{m_position.x - kHalfWidth - kGrow, m_position.y + kGrow,
+                       m_position.z - kHalfWidth - kGrow};
+    const glm::vec3 hi{m_position.x + kHalfWidth + kGrow, m_position.y + kHeight - kGrow,
+                       m_position.z + kHalfWidth + kGrow};
+    for (int by = static_cast<int>(std::floor(lo.y)); by <= static_cast<int>(std::floor(hi.y));
+         ++by) {
+        for (int bz = static_cast<int>(std::floor(lo.z)); bz <= static_cast<int>(std::floor(hi.z));
+             ++bz) {
+            for (int bx = static_cast<int>(std::floor(lo.x));
+                 bx <= static_cast<int>(std::floor(hi.x)); ++bx) {
+                if (world.GetBlock(bx, by, bz) == vc::blocks::Cactus) {
+                    return true;
+                }
+            }
+        }
+    }
+    return false;
+}
+
+void Player::TickVitals(const vc::World& world) {
+    if (m_hurtResist > 0) {
+        --m_hurtResist;
+    }
+    if (m_dead) {
+        return;
+    }
+
+    const auto def = [&](float x, float y, float z) -> const vc::BlockDef& {
+        return vc::BlockRegistry::Get().Def(world.GetBlock(static_cast<int>(std::floor(x)),
+                                                           static_cast<int>(std::floor(y)),
+                                                           static_cast<int>(std::floor(z))));
+    };
+    const vc::BlockDef& body = def(m_position.x, m_position.y + 0.4f, m_position.z);
+    const vc::BlockDef& head = def(m_position.x, m_position.y + kEyeHeight, m_position.z);
+    const bool inLava = body.liquidSource == vc::blocks::Lava;
+    const bool inWater = body.liquidSource == vc::blocks::Water;
+    const bool headInWater = head.liquidSource == vc::blocks::Water;
+
+    // Lava: 4 dmg/tick, and it keeps you burning for 15 s after you climb out.
+    if (inLava) {
+        ApplyDamage(4.0f);
+        m_fireTicks = 15 * 20;
+    }
+    // Water douses fire instantly (vanilla extinguish) — dive in to escape it.
+    if (inWater) {
+        m_fireTicks = 0;
+    }
+    // Burning: 1 dmg every second the fire timer runs.
+    if (m_fireTicks > 0) {
+        --m_fireTicks;
+        if (m_fireTicks % 20 == 0) {
+            ApplyDamage(1.0f);
+        }
+    }
+    // Cactus: 1 dmg/tick while the (grown) AABB touches one.
+    if (TouchingCactus(world)) {
+        ApplyDamage(1.0f);
+    }
+    // Drowning: 15 s of breath, then 2 dmg/sec (vanilla 300 -> -20 air cycle).
+    if (headInWater) {
+        --m_air;
+        if (m_air <= -20) {
+            m_air = 0;
+            ApplyDamage(2.0f);
+        }
+    } else {
+        m_air = kMaxAir;
+    }
+    // The void.
+    if (m_position.y < -64.0f) {
+        ApplyDamage(4.0f);
+    }
+
+    // Movement exhaustion (vanilla addMovementStat): sprinting drains far
+    // faster than walking; both feed the FoodStats drain below.
+    const float dx = m_position.x - m_prevPosition.x;
+    const float dz = m_position.z - m_prevPosition.z;
+    const float dist = std::sqrt(dx * dx + dz * dz);
+    if (dist > 0.001f) {
+        const bool sprint = m_grounded && KeyDown(vox::Key::LeftControl);
+        AddExhaustion((sprint ? 0.1f : 0.01f) * dist);
+    }
+
+    TickFoodStats();
+}
+
+void Player::TickFoodStats() {
+    // Port of FoodStats.onUpdate (naturalRegeneration on, normal difficulty).
+    if (m_exhaustion > 4.0f) {
+        m_exhaustion -= 4.0f;
+        if (m_saturation > 0.0f) {
+            m_saturation = std::max(m_saturation - 1.0f, 0.0f);
+        } else {
+            m_foodLevel = std::max(m_foodLevel - 1, 0);
+        }
+    }
+
+    const bool shouldHeal = m_health > 0.0f && m_health < kMaxHealth;
+    if (m_saturation > 0.0f && shouldHeal && m_foodLevel >= 20) {
+        // Fast regen while saturated and full: heals quickly, costs exhaustion.
+        if (++m_foodTimer >= 10) {
+            const float f = std::min(m_saturation, 6.0f);
+            Heal(f / 6.0f);
+            AddExhaustion(f);
+            m_foodTimer = 0;
+        }
+    } else if (m_foodLevel >= 18 && shouldHeal) {
+        // Slow regen on a full-ish belly.
+        if (++m_foodTimer >= 80) {
+            Heal(1.0f);
+            AddExhaustion(6.0f);
+            m_foodTimer = 0;
+        }
+    } else if (m_foodLevel <= 0) {
+        // Starvation (normal difficulty: floors at 1 health, never kills).
+        if (++m_foodTimer >= 80) {
+            if (m_health > 1.0f) {
+                ApplyDamage(1.0f);
+            }
+            m_foodTimer = 0;
+        }
+    } else {
+        m_foodTimer = 0;
+    }
 }

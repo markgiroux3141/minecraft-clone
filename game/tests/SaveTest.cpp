@@ -101,9 +101,11 @@ int main() {
         Check(!save.GetPlayerState().has_value(), "pre-player-state manifest reads as absent");
         Check(!save.GetWorldTime().has_value(), "pre-time manifest reads as absent");
         Check(!save.GetInventory().has_value(), "pre-inventory manifest reads as absent");
+        Check(!save.GetVitals().has_value(), "pre-vitals manifest reads as absent");
         save.SetWorldTime(13337);
         save.SetPlayerState({{1234.5f, 70.25f, -8.125f}, 123.5f, -45.0f, true});
         save.SetInventory({{0, 1, 64, 0}, {8, 1025, 1, 37}, {35, 20, 17, 0}});
+        save.SetVitals({7.5f, 13, 2.25f, 1.5f, 140});
     }
     {
         vc::WorldSave save(dir, 7);
@@ -119,6 +121,10 @@ int main() {
                   (*inv)[1].id == 1025 && (*inv)[1].count == 1 && (*inv)[1].damage == 37 &&
                   (*inv)[2].slot == 35 && (*inv)[2].id == 20 && (*inv)[2].count == 17,
               "inventory (incl. item ids + tool damage) round-trips exactly");
+        const auto& vitals = save.GetVitals();
+        Check(vitals.has_value() && vitals->health == 7.5f && vitals->foodLevel == 13 &&
+                  vitals->saturation == 2.25f && vitals->exhaustion == 1.5f && vitals->air == 140,
+              "vitals (health/food/saturation/exhaustion/air) round-trip exactly");
         Check(save.Seed() == 42, "seed survives the manifest rewrite");
         Check(save.SavedChunkCount() == 4, "chunks survive the manifest rewrite");
         save.SetInventory({});

@@ -41,6 +41,7 @@ public:
     void PlayStep(SoundType type, const glm::vec3& feet);
     void PlayLand(SoundType type, const glm::vec3& feet);
     void PlaySplash(const glm::vec3& pos);
+    void PlayHurt(); // M30: the player took damage (2D, randomly pitched)
 
     // --- Looping furnace voice (GameApp reconciles these against lit furnaces) -
     vox::VoiceHandle StartFurnaceLoop(const glm::vec3& blockCenter);
@@ -78,6 +79,7 @@ private:
     ClipSet m_bucketEmpty{};     // item/bucket/empty* (water)
     ClipSet m_bucketEmptyLava{}; // item/bucket/empty_lava*
     ClipSet m_caveAmbient{};// ambient/cave/cave*
+    ClipSet m_hurt{};       // damage/hit* (player hurt)
     vox::ClipHandle m_pop{};
     vox::ClipHandle m_fireLoop{};
     // Music is decoded on demand (one track at a time), so we keep paths, not

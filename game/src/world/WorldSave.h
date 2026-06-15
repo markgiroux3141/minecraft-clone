@@ -22,7 +22,8 @@ namespace vc {
 //   <dir>/level.dat           text manifest: save format version + seed,
 //                             plus optional tagged lines in any order:
 //                             "player x y z yaw pitch fly" (M10), "time t"
-//                             (M11), "inventory n {slot id count}*n" (M17)
+//                             (M11), "inventory n {slot id count}*n" (M17),
+//                             "vitals health food sat exh air" (M30)
 //   <dir>/furnaces.dat        text sidecar, one furnace block entity per
 //                             line (M21) — see FurnaceRecord
 //   <dir>/r.<rx>.<rz>.vxr     region file covering 32x32 chunk columns:
@@ -87,6 +88,20 @@ public:
     // Rewrites the manifest immediately, like SetPlayerState (quit-path).
     void SetInventory(std::vector<InventorySlot> slots);
 
+    // M30 player vitals, also in the manifest as
+    // "vitals <health> <foodLevel> <saturation> <exhaustion> <air>". Absent in
+    // saves that predate it — the player spawns at full health/food.
+    struct Vitals {
+        float health = 20.0f;
+        int foodLevel = 20;
+        float saturation = 5.0f;
+        float exhaustion = 0.0f;
+        int air = 300;
+    };
+    const std::optional<Vitals>& GetVitals() const { return m_vitals; }
+    // Rewrites the manifest immediately, like SetPlayerState (quit-path).
+    void SetVitals(const Vitals& vitals);
+
     // Furnace block entities (M21), persisted in a furnaces.dat sidecar
     // (text, one furnace per line) — they change every tick while burning,
     // so unlike the manifest setters this only marks the store dirty and
@@ -148,6 +163,7 @@ private:
     std::filesystem::path m_dir;
     int m_seed = 0;
     std::optional<PlayerState> m_player;
+    std::optional<Vitals> m_vitals;
     std::optional<int64_t> m_worldTime;
     std::optional<std::vector<InventorySlot>> m_inventory;
     std::vector<FurnaceRecord> m_furnaces;

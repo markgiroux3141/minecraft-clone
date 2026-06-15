@@ -45,16 +45,54 @@ public:
     float Yaw() const { return m_yaw; }
     float Pitch() const { return m_pitch; }
 
+    // M30 vitals (vanilla 1.12 values). Health 0..20 (2 = one heart), food
+    // 0..20 (2 = one drumstick), air -20..300 (300 = full breath). Ticked at
+    // 20 TPS in Tick() while in Walk mode; Fly is creative — no damage/hunger.
+    float Health() const { return m_health; }
+    int FoodLevel() const { return m_foodLevel; }
+    float Saturation() const { return m_saturation; }
+    float Exhaustion() const { return m_exhaustion; }
+    int Air() const { return m_air; }
+    bool Dead() const { return m_dead; }
+    bool OnFire() const { return m_fireTicks > 0; } // drives the fire overlay
+    // Restore from a save (values are clamped to valid ranges).
+    void SetVitals(float health, int food, float saturation, float exhaustion, int air);
+    // Reset to full health/food/air and teleport to a spawn point.
+    void Respawn(const glm::vec3& feetPos);
+    // Extra hunger drain from actions GameApp drives (block breaking).
+    void AddExhaustion(float amount);
+
+    // M30 hurt-camera tilt (vanilla EntityRenderer.hurtCameraEffect): the roll
+    // in degrees to layer onto the camera this frame, interpolated by the
+    // render alpha. Decays to 0 over the hurt window after each hit.
+    float CameraRoll(double alpha) const;
+    // True exactly once after a hit lands (drives the hurt sound); clears on read.
+    bool ConsumeHurt();
+
     // Does the player's AABB overlap this block? (placement check)
     bool Intersects(const glm::ivec3& block) const;
 
     static constexpr float kHalfWidth = 0.3f;
     static constexpr float kHeight = 1.8f;
     static constexpr float kEyeHeight = 1.62f;
+    static constexpr float kMaxHealth = 20.0f;
+    static constexpr int kMaxAir = 300; // ticks of breath underwater (15 s)
 
 private:
     void TickWalk(const vc::World& world, float dt);
     void TickFly(float dt);
+    // M30: environmental damage (lava/fire/cactus/drown/void) + the FoodStats
+    // port (exhaustion -> saturation -> food, natural regen, starvation),
+    // run once per tick in Walk mode after movement.
+    void TickVitals(const vc::World& world);
+    void TickFoodStats();
+    // Vanilla EntityLivingBase.attackEntityFrom: applies `amount` health
+    // points of damage subject to the hurt-resist window (a bigger hit during
+    // the window tops up to the new amount). Sets m_dead at <= 0.
+    void ApplyDamage(float amount);
+    void Heal(float amount);
+    // Player AABB (slightly grown horizontally) overlaps a cactus cell.
+    bool TouchingCactus(const vc::World& world) const;
     // Input::IsKeyDown gated on this tick's input flag.
     bool KeyDown(vox::Key key) const;
     // Move along one axis and clamp against block collision boxes
@@ -78,6 +116,22 @@ private:
     bool m_inWater = false;     // cached in TickWalk for footstep/splash audio
     bool m_inputEnabled = true; // this tick's input flag (see Tick)
     Mode m_mode = Mode::Walk;
+
+    // M30 vitals.
+    float m_health = kMaxHealth;
+    int m_foodLevel = 20;
+    float m_saturation = 5.0f;   // hidden buffer; drains before food does
+    float m_exhaustion = 0.0f;   // 0..40; every 4 spends 1 saturation/food
+    int m_foodTimer = 0;         // FoodStats regen/starve cadence counter
+    int m_air = kMaxAir;         // breath; counts down submerged, 2 dmg at -20
+    int m_hurtResist = 0;        // invulnerability ticks after a hit (max 20)
+    float m_lastDamage = 0.0f;   // last hit within the resist window (top-up rule)
+    int m_fireTicks = 0;         // burning timer; lava refreshes it to 15 s
+    float m_fallDistance = 0.0f; // blocks descended since leaving the ground
+    bool m_spawnFallGrace = false; // skip fall damage on the first landing after a teleport
+    bool m_dead = false;
+    int m_hurtTime = 0;          // counts down from kMaxHurtTime; drives the camera tilt
+    bool m_hurtThisTick = false; // a hit landed this tick (one-shot for the hurt sound)
 
     glm::vec2 m_lastMouse{0.0f};
     bool m_hasLastMouse = false;

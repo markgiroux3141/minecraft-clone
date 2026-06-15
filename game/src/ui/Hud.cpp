@@ -74,6 +74,58 @@ void DrawPlaceholderHotbar(vox::UiRenderer& ui, glm::vec2 screen, float s,
     }
 }
 
+// Hearts + food (+ air while submerged) on the icons.png sprite sheet, laid
+// out exactly like vanilla GuiIngame: hearts from the hotbar's left edge, food
+// anchored to its right edge, both on a row above the bar; all icons are 9x9.
+void DrawVitals(vox::UiRenderer& ui, glm::vec2 screen, float s, const HudVitals& v,
+                const GuiTextures& tex) {
+    if (!tex.icons || !v.show) {
+        return; // needs the sprite sheet; hidden in creative
+    }
+    // Same anchors the MC hotbar uses (width/2 -/+ 91 scaled).
+    const float left = std::floor((screen.x - 182.0f * s) * 0.5f);
+    const float right = left + 182.0f * s;
+    const float baseY = screen.y - 39.0f * s; // one row above the 22px hotbar
+    const auto icon = [&](float x, float y, float u, float vv) {
+        ui.DrawImage(tex.icons, {x, y}, {9.0f * s, 9.0f * s}, {u, vv}, {9.0f, 9.0f});
+    };
+
+    // Hearts: 10 left-to-right, each worth 2 health. Container then fill/half.
+    const int hp = static_cast<int>(std::ceil(v.health));
+    for (int i = 0; i < 10; ++i) {
+        const float x = left + static_cast<float>(i) * 8.0f * s;
+        icon(x, baseY, 16.0f, 0.0f);
+        if (i * 2 + 1 < hp) {
+            icon(x, baseY, 52.0f, 0.0f);
+        } else if (i * 2 + 1 == hp) {
+            icon(x, baseY, 61.0f, 0.0f);
+        }
+    }
+
+    // Food: 10 right-to-left, each worth 2 drumsticks. Container then fill/half.
+    for (int i = 0; i < 10; ++i) {
+        const float x = right - static_cast<float>(i) * 8.0f * s - 9.0f * s;
+        icon(x, baseY, 16.0f, 27.0f);
+        if (i * 2 + 1 < v.food) {
+            icon(x, baseY, 52.0f, 27.0f);
+        } else if (i * 2 + 1 == v.food) {
+            icon(x, baseY, 61.0f, 27.0f);
+        }
+    }
+
+    // Air bubbles: only while submerged, on the row above the food (vanilla's
+    // 300 -> 0 ten-bubble scale; the last one "pops" before vanishing).
+    if (v.air < 300) {
+        const float y = baseY - 10.0f * s;
+        const int full = static_cast<int>(std::ceil((v.air - 2) * 10.0 / 300.0));
+        const int total = static_cast<int>(std::ceil(v.air * 10.0 / 300.0));
+        for (int i = 0; i < total; ++i) {
+            const float x = right - static_cast<float>(i) * 8.0f * s - 9.0f * s;
+            icon(x, y, i < full ? 16.0f : 25.0f, 18.0f);
+        }
+    }
+}
+
 void DrawSelectedName(vox::UiRenderer& ui, glm::vec2 screen, float s,
                       std::span<const ItemStack> hotbar, size_t selectedSlot, float barTop) {
     const float textScale = UiTextScale(ui, s);
@@ -92,12 +144,13 @@ float GuiScale(glm::vec2 screen) {
 }
 
 void Hud::Draw(vox::UiRenderer& ui, glm::vec2 screen, std::span<const ItemStack> hotbar,
-               size_t selectedSlot, const GuiTextures& tex) {
+               size_t selectedSlot, const GuiTextures& tex, const HudVitals& vitals) {
     const float s = GuiScale(screen);
     DrawCrosshair(ui, screen, s, tex);
     if (hotbar.empty()) {
         return;
     }
+    DrawVitals(ui, screen, s, vitals, tex);
     const bool named = !hotbar[selectedSlot].Empty(); // empty hand: no label
     if (tex.widgets) {
         DrawMcHotbar(ui, screen, s, hotbar, selectedSlot, tex);

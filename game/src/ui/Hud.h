@@ -17,12 +17,21 @@ namespace vc {
 // layout on screen (3 at 1600x900, 4 at 4k). Shared by all overlay layouts.
 float GuiScale(glm::vec2 screen);
 
-// In-game overlay: crosshair + hotbar. Stateless — layout is recomputed from
-// the screen size every frame, scaled in integer steps (Minecraft GUI scale).
+// M30 player vitals shown above the hotbar (hearts + food, plus air bubbles
+// while submerged). `show` is false in creative/fly mode (vanilla hides them).
+struct HudVitals {
+    float health = 20.0f; // 0..20, 2 = one heart
+    int food = 20;        // 0..20, 2 = one drumstick
+    int air = 300;        // 0..300; bubbles only drawn when below 300
+    bool show = false;
+};
+
+// In-game overlay: crosshair + hotbar + vitals. Stateless — layout is recomputed
+// from the screen size every frame, scaled in integer steps (Minecraft GUI scale).
 class Hud {
 public:
     static void Draw(vox::UiRenderer& ui, glm::vec2 screen, std::span<const ItemStack> hotbar,
-                     size_t selectedSlot, const GuiTextures& tex);
+                     size_t selectedSlot, const GuiTextures& tex, const HudVitals& vitals);
 };
 
 } // namespace vc

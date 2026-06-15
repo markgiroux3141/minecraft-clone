@@ -67,6 +67,7 @@ void GameSounds::Load(vox::AudioEngine& audio) {
     m_bucketEmpty = LoadSet("item/bucket", "empty", 3);
     m_bucketEmptyLava = LoadSet("item/bucket", "empty_lava", 3);
     m_caveAmbient = LoadSet("ambient/cave", "cave", 18); // 1.12 has 18
+    m_hurt = LoadSet("damage", "hit", 3);                // entity.player.hurt
     m_pop = audio.LoadClip(vox::assets::Resolve("mc/sounds/random/pop.ogg"));
     m_fireLoop = audio.LoadClip(vox::assets::Resolve("mc/sounds/fire/fire.ogg"));
 
@@ -157,6 +158,12 @@ void GameSounds::PlayLand(SoundType type, const glm::vec3& feet) {
 void GameSounds::PlaySplash(const glm::vec3& pos) {
     if (!m_audio) return;
     m_audio->Play3D(Pick(m_splash), pos, vox::AudioBus::Sfx, 0.4f, Jitter(1.0f, 0.1f));
+}
+
+void GameSounds::PlayHurt() {
+    if (!m_audio) return;
+    // Vanilla: volume 1.0, pitch 1.0 +/- ~0.1. 2D — it's the player's own sound.
+    m_audio->Play2D(Pick(m_hurt), vox::AudioBus::Sfx, 0.7f, Jitter(1.0f, 0.1f));
 }
 
 vox::VoiceHandle GameSounds::StartFurnaceLoop(const glm::vec3& blockCenter) {

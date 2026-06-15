@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <format>
 #include <random>
+#include <string_view>
 
 #include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
@@ -169,6 +170,9 @@ void GameApp::OnInit() {
             vox::assets::Resolve("mc/textures/gui/container/furnace.png"))) {
         m_guiTextures.furnace =
             vox::Texture2D::FromFile("mc/textures/gui/container/furnace.png");
+    }
+    if (std::filesystem::exists(vox::assets::Resolve("mc/textures/fire_layer_1.png"))) {
+        m_fireOverlay = vox::Texture2D::FromFile("mc/textures/fire_layer_1.png");
     }
 
     m_skyShader = vox::Shader::FromFiles("shaders/sky.vert", "shaders/sky.frag");
@@ -352,10 +356,15 @@ void GameApp::EnterWorld(const std::string& name, int defaultSeed) {
         }
     }
 
-    m_state = State::Playing;
+    // M30 vitals: restore from the save, or full health for a new/old world.
+    if (const auto& v = m_world->SaveStore().GetVitals()) {
+        m_player.SetVitals(v->health, v->foodLevel, v->saturation, v->exhaustion, v->air);
+    }
+
+    m_state = m_player.Dead() ? State::Dead : State::Playing;
     m_target.reset();
     m_footInit = false; // re-seed footstep tracking at the new spawn
-    GetWindow().SetCursorCaptured(true);
+    GetWindow().SetCursorCaptured(m_state != State::Dead);
     // Same guard as unpausing: buttons held through the menu click must be
     // re-pressed before they edit the world.
     m_breakWasDown = true;
@@ -394,6 +403,9 @@ void GameApp::PersistPlayerState() {
     m_world->SaveStore().SetWorldTime(static_cast<int64_t>(m_worldTime));
     m_world->SaveStore().SetPlayerState({m_player.Position(), m_player.Yaw(), m_player.Pitch(),
                                          m_player.GetMode() == Player::Mode::Fly});
+    m_world->SaveStore().SetVitals({m_player.Health(), m_player.FoodLevel(),
+                                    m_player.Saturation(), m_player.Exhaustion(),
+                                    m_player.Air()});
     // Merge any carried stack and craft-grid contents back first — the
     // only quit path that can have them in flight is the window X while a
     // container screen is open.
@@ -418,6 +430,9 @@ void GameApp::OnTick(double dt) {
     // run and the player keeps falling/floating, just without movement keys.
     if (m_world && (m_state == State::Playing || ContainerOpen())) {
         m_player.Tick(*m_world, dt, m_state == State::Playing);
+        if (m_player.ConsumeHurt()) {
+            m_sounds.PlayHurt(); // M30: damage noise on each fresh hit
+        }
         m_world->Tick(); // scheduled block updates (falling sand, water flow)
         m_particles->Tick(*m_world);
         m_viewModel->Tick(m_inventory.Slot(m_hotbarSlot));
@@ -481,6 +496,11 @@ void GameApp::OnTick(double dt) {
         if (m_state == State::Playing && vox::Input::IsKeyDown(vox::Key::T)) {
             m_worldTime += kTimeFastForward; // debug: watch the cycle quickly
         }
+
+        // M30: health hit zero this tick — drop into the death screen.
+        if (m_player.Dead() && m_state != State::Dead) {
+            EnterDeathScreen();
+        }
     }
     ++m_tickCount;
     ++m_totalTicks;
@@ -530,6 +550,53 @@ void GameApp::CloseContainer() {
     GetWindow().SetCursorCaptured(true);
     // Same guard as unpausing: buttons held through the closing click must
     // be re-pressed before they edit the world.
+    m_breakWasDown = true;
+    m_placeWasDown = true;
+    m_breakCooldown = kEditRepeatDelay;
+    m_placeCooldown = kEditRepeatDelay;
+}
+
+void GameApp::EnterDeathScreen() {
+    // If a container was open when death landed (e.g. starving with the
+    // inventory up), return its contents to the bag first, like CloseContainer.
+    if (ContainerOpen()) {
+        m_inventory.Add(m_carried);
+        m_carried = {};
+        for (vc::ItemStack& cell : m_craftGrid) {
+            m_inventory.Add(cell);
+            cell = {};
+        }
+    }
+    m_state = State::Dead;
+    GetWindow().SetCursorCaptured(false);
+    m_target.reset();
+    m_digCell.reset();
+    m_digProgress = 0.0f;
+}
+
+void GameApp::RespawnPlayer() {
+    // Respawn at the world spawn column, standing on the highest solid
+    // (non-liquid) block. If that column isn't streamed in yet, fall from the
+    // spawn height — the spawn fall-grace keeps the drop from hurting.
+    glm::vec3 spawn = kSpawnPos;
+    if (m_world) {
+        const int x = static_cast<int>(std::floor(kSpawnPos.x));
+        const int z = static_cast<int>(std::floor(kSpawnPos.z));
+        for (int y = vc::World::kHeightChunks * 16 - 2; y >= 1; --y) {
+            const vc::BlockDef& d = vc::BlockRegistry::Get().Def(m_world->GetBlock(x, y, z));
+            if (d.solid && !d.liquid) {
+                spawn = {kSpawnPos.x, static_cast<float>(y + 1), kSpawnPos.z};
+                break;
+            }
+        }
+    }
+    m_player.Respawn(spawn);
+    m_player.SetLook(kSpawnYaw, kSpawnPitch);
+    m_state = State::Playing;
+    GetWindow().SetCursorCaptured(true);
+    m_target.reset();
+    m_footInit = false; // re-seed footstep tracking at the spawn
+    // Guard the click that hit Respawn from falling through into an edit.
     m_breakWasDown = true;
     m_placeWasDown = true;
     m_breakCooldown = kEditRepeatDelay;
@@ -671,6 +738,7 @@ void GameApp::HandleInput(double frameDt, int scroll) {
                 }
                 if (m_digProgress >= 1.0f) {
                     m_world->SetBlock(m_target->block, vc::blocks::Air);
+                    m_player.AddExhaustion(0.005f); // vanilla mining hunger cost
                     m_particles->SpawnBlockDestroy(*m_world, m_target->block, targetId);
                     m_sounds.PlayBreak(def.soundType, glm::vec3(m_target->block) + 0.5f);
                     if (canHarvest) {
@@ -905,6 +973,30 @@ void GameApp::DrawUi() {
     } else if (EyeInWater()) {
         // Underwater tint on top of the shader fog.
         m_ui->DrawRect({0.0f, 0.0f}, screen, {0.09f, 0.27f, 0.55f, 0.35f});
+    } else if (m_player.OnFire()) {
+        if (m_fireOverlay) {
+            // Real vanilla fire: the blocks/fire_layer_1 animation tiled across
+            // the bottom of the view, flames licking upward (ItemRenderer.
+            // renderFireInFirstPerson draws it at alpha 0.9). 32 frames of
+            // 16x16 stacked in a 16x512 strip; columns desynced so they don't
+            // pulse in unison.
+            constexpr int kFrames = 32;
+            const float flameH = screen.y * 0.45f;
+            const int cols = static_cast<int>(std::ceil(screen.x / flameH)) + 1;
+            for (int i = 0; i < cols; ++i) {
+                const int frame =
+                    static_cast<int>((m_totalTicks + static_cast<uint64_t>(i * 7)) % kFrames);
+                m_ui->DrawImage(m_fireOverlay,
+                                {static_cast<float>(i) * flameH, screen.y - flameH},
+                                {flameH, flameH}, {0.0f, static_cast<float>(frame * 16)},
+                                {16.0f, 16.0f}, {1.0f, 1.0f, 1.0f, 0.9f});
+            }
+        } else {
+            // No overlay asset: fall back to a flickering orange tint.
+            const float flicker = 0.18f + 0.07f * std::sin(static_cast<float>(m_worldTime) * 1.7f);
+            m_ui->DrawRect({0.0f, screen.y * 0.5f}, {screen.x, screen.y * 0.5f},
+                           {0.85f, 0.35f, 0.05f, flicker});
+        }
     }
     if (m_state == State::Title) {
         const auto action =
@@ -923,7 +1015,9 @@ void GameApp::DrawUi() {
             break;
         }
     } else {
-        vc::Hud::Draw(*m_ui, screen, m_inventory.Hotbar(), m_hotbarSlot, m_guiTextures);
+        const vc::HudVitals vitals{m_player.Health(), m_player.FoodLevel(), m_player.Air(),
+                                   m_player.GetMode() == Player::Mode::Walk};
+        vc::Hud::Draw(*m_ui, screen, m_inventory.Hotbar(), m_hotbarSlot, m_guiTextures, vitals);
         if (ContainerOpen()) {
             // Vanilla's darkened-world backdrop behind the container GUI.
             m_ui->DrawRect({0.0f, 0.0f}, screen, {0.06f, 0.06f, 0.06f, 0.75f});
@@ -949,6 +1043,29 @@ void GameApp::DrawUi() {
                 SetPaused(false);
             } else if (action == vc::PauseMenu::Action::SaveQuit) {
                 GAME_INFO("Save & Quit to title");
+                ExitToTitle();
+            }
+        } else if (m_state == State::Dead) {
+            // Vanilla's red "You Died!" overlay with respawn / quit buttons.
+            m_ui->DrawRect({0.0f, 0.0f}, screen, {0.5f, 0.0f, 0.0f, 0.4f});
+            const float s = vc::GuiScale(screen);
+            const float titleScale = vc::UiTextScale(*m_ui, s) + 1.0f;
+            constexpr std::string_view kTitle = "You Died!";
+            const glm::vec2 titleSize = m_ui->MeasureText(kTitle, titleScale);
+            vc::ShadowedText(
+                *m_ui,
+                glm::floor(glm::vec2((screen.x - titleSize.x) * 0.5f, screen.y * 0.3f)),
+                kTitle, titleScale);
+            const glm::vec2 buttonSize{200.0f * s, 20.0f * s};
+            const float bx = std::floor((screen.x - buttonSize.x) * 0.5f);
+            const float by = std::floor(screen.y * 0.45f);
+            const float gap = 6.0f * s;
+            if (vc::UiButton(*m_ui, s, {bx, by}, buttonSize, "Respawn", mouse, clicked,
+                             m_guiTextures.widgets)) {
+                RespawnPlayer();
+            }
+            if (vc::UiButton(*m_ui, s, {bx, by + buttonSize.y + gap}, buttonSize, "Title Screen",
+                             mouse, clicked, m_guiTextures.widgets)) {
                 ExitToTitle();
             }
         }
@@ -985,6 +1102,17 @@ void GameApp::OnRender(double alpha, double frameDt) {
     if (m_world) {
         const bool playing = m_state == State::Playing;
         m_player.OnRender(alpha, playing);
+
+        // M30 hurt/death camera tilt (vanilla hurtCameraEffect): a transient
+        // roll from the last hit, plus the slow keel-over while dead.
+        m_deathAnim = (m_state == State::Dead) ? m_deathAnim + frameDt : 0.0;
+        float roll = m_player.CameraRoll(alpha);
+        if (m_state == State::Dead) {
+            const float deathTicks = static_cast<float>(m_deathAnim * 20.0);
+            roll += 40.0f - 8000.0f / (deathTicks + 200.0f);
+        }
+        m_camera.SetRoll(roll);
+
         if (playing) {
             HandleInput(frameDt, scroll);
         }

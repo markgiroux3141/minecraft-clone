@@ -20,6 +20,12 @@ public:
     float Pitch() const { return m_pitch; }
     void SetRotation(float yawDegrees, float pitchDegrees);
 
+    // Roll about the view (forward) axis, in degrees. Independent of
+    // SetRotation so callers can layer a transient roll on top (the hurt /
+    // death camera tilt). 0 = level.
+    float Roll() const { return m_roll; }
+    void SetRoll(float rollDegrees) { m_roll = rollDegrees; }
+
     // Point the camera at a world position from its current position.
     void LookAt(const glm::vec3& target);
 
@@ -36,6 +42,7 @@ private:
     glm::vec3 m_position{0.0f};
     float m_yaw = -90.0f;
     float m_pitch = 0.0f;
+    float m_roll = 0.0f;
 
     float m_fovY = 70.0f;
     float m_aspect = 16.0f / 9.0f;

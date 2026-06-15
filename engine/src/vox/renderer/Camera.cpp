@@ -45,7 +45,14 @@ glm::vec3 PerspectiveCamera::Right() const {
 }
 
 glm::mat4 PerspectiveCamera::View() const {
-    return glm::lookAt(m_position, m_position + Forward(), glm::vec3{0.0f, 1.0f, 0.0f});
+    const glm::vec3 forward = Forward();
+    glm::vec3 up{0.0f, 1.0f, 0.0f};
+    if (m_roll != 0.0f) {
+        // Roll the up vector around the forward axis (camera tilt).
+        up = glm::vec3(glm::rotate(glm::mat4{1.0f}, glm::radians(m_roll), forward) *
+                       glm::vec4{up, 0.0f});
+    }
+    return glm::lookAt(m_position, m_position + forward, up);
 }
 
 void PerspectiveCamera::RecalculateProjection() {

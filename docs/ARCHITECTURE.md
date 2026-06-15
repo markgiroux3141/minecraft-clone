@@ -239,6 +239,27 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   blitted through the existing 2D `DrawImage` path. Items/plants stay flat
   (vanilla "generated" sprites). New `game/src/ui/BlockIcons` + `block_icon`
   shader; re-bakes only on a GUI-scale change.
+- **M30 — Survival IV: health, damage & hunger** ✅: player health (10 hearts)
+  + hunger/saturation on `Player`, ticked at 20 TPS. Damage sources wired into
+  the existing tick (fall/lava/fire/cactus/drowning/void — the "no damage —
+  no health system" hooks already stubbed throughout), vanilla regen gated on
+  hunger, starvation, death → respawn. HUD heart/food/bubble rows via the
+  existing icon path. No new renderer, no mobs; health/hunger persisted.
+- **M31 — Entity model renderer** 📋: a jointed multi-cuboid "box model"
+  renderer (vanilla `ModelBase`/`ModelRenderer`) in the engine — named parts
+  with per-part pivot/rotation, one skin texture, hierarchical transforms,
+  render-interpolated; generalizes the FallingBlock/ItemEntity cube path.
+  Ships with the Steve humanoid + an idle/walk animation on a debug entity.
+  THE shared dependency of mobs and the in-UI player doll.
+- **M32 — Mobs (AI, spawning, combat)** 📋: a `LivingEntity`/`Mob` type over
+  M30/M31 — health + a player-collidable AABB + an M31 skinned model. One
+  passive (pig) + one hostile (zombie); wander/idle vs target-path-to-player +
+  melee; light/cap spawn rules + despawn; mob attacks deal M30 damage, player
+  melee + knockback, mob drops reuse M18 item entities; persisted sidecar.
+- **M33 — Armor & in-UI player doll** 📋: equippable armor (4 slots × tier)
+  with M19 durability + damage reduction in M30's path; activate the inert
+  inventory armor slots; render the player character (M31 model baked through
+  the M29 framebuffer→UI path) in the inventory, worn armor shown.
 - **Backlog**: stair auto-corner shapes (inner/outer), per-face light sampling
   for model blocks (slab faces are flat-lit), tight selection/raycast box for
   partial blocks, full 256-tall world (wants empty-air-chunk culling

@@ -42,9 +42,13 @@ private:
     // inventory with the 2x2 grid, a crafting table's 3x3, or an open
     // furnace (free cursor, world keeps ticking, player physics run
     // input-less).
-    enum class State : uint8_t { Title, Playing, Paused, Inventory, Crafting, Furnace };
+    enum class State : uint8_t { Title, Playing, Paused, Inventory, Crafting, Furnace, Dead };
 
     void SetPaused(bool paused);
+    // M30: the player ran out of health — free the cursor, show the death
+    // screen (world frozen). Respawn resets vitals and drops back to Playing.
+    void EnterDeathScreen();
+    void RespawnPlayer();
     bool ContainerOpen() const {
         return m_state == State::Inventory || m_state == State::Crafting ||
                m_state == State::Furnace;
@@ -101,6 +105,9 @@ private:
     std::shared_ptr<vox::Shader> m_celestialShader;
     std::shared_ptr<vox::Texture2D> m_sunTexture;
     std::shared_ptr<vox::Texture2D> m_moonTexture;
+    // M30: first-person fire overlay (16x512 animation strip; null = no overlay,
+    // DrawUi falls back to a flickering orange tint).
+    std::shared_ptr<vox::Texture2D> m_fireOverlay;
     double m_worldTime = 0.0; // ticks; one day/night cycle per kDayTicks
 
     // Entity cubes (falling blocks, block drops, crack overlay) and the
@@ -158,6 +165,7 @@ private:
     bool m_occlusionCulling = true;
 
     State m_state = State::Title;
+    double m_deathAnim = 0.0; // seconds in the death screen (drives the keel-over tilt)
     std::filesystem::path m_savesRoot;
     std::vector<std::string> m_worlds; // directory names under m_savesRoot
 
