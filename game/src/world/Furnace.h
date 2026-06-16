@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Inventory.h" // ItemStack
+#include "item/Inventory.h" // ItemStack
 
 namespace vc {
 

@@ -17,11 +17,12 @@
 #include "vox/renderer/Frustum.h"
 #include "vox/renderer/MeshPool.h"
 
+#include "entity/Entity.h" // Body base for ItemEntity
+#include "entity/Mob.h"
 #include "world/Chunk.h"
 #include "world/ChunkMesher.h"
 #include "world/Furnace.h"
 #include "world/Light.h"
-#include "world/Mob.h"
 #include "world/LightEngine.h"
 #include "world/TerrainGen.h"
 #include "world/WorldSave.h"
@@ -158,12 +159,12 @@ public:
     // 0.5 blocks, despawns at age 6000 (5 min). Tick-simulated and
     // interpolated like FallingBlock. NOT persisted — drops vanish on
     // save/quit (they'd despawn within minutes anyway).
-    struct ItemEntity {
+    // Inherits Body (pos/prevPos/vel, bottom-center of the cube, render-
+    // interpolated) — shared with Mob.
+    struct ItemEntity : Body {
         uint16_t id; // unified item id (block or registry item, see Item.h)
         int count;
-        int damage = 0;         // tool wear rides along (M19)
-        glm::vec3 pos, prevPos; // bottom-center of the cube
-        glm::vec3 vel;          // blocks/s
+        int damage = 0;       // tool wear rides along (M19)
         int age = 0;
         int pickupDelay = 10; // ticks (vanilla default; throws use 40)
         float phase = 0.0f;   // render bob/spin offset (vanilla hoverStart)

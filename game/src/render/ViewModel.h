@@ -9,7 +9,7 @@
 #include "vox/renderer/Texture.h"
 #include "vox/renderer/VertexArray.h"
 
-#include "Inventory.h"
+#include "item/Inventory.h"
 
 namespace vc {
 

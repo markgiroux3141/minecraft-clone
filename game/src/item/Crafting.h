@@ -3,7 +3,7 @@
 #include <span>
 #include <vector>
 
-#include "Inventory.h"
+#include "item/Inventory.h"
 
 namespace vc {
 

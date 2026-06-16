@@ -4,7 +4,8 @@
 
 #include <glm/glm.hpp>
 
-#include "Item.h" // ItemId for mob drops
+#include "entity/Entity.h" // Body + LivingAnim shared bases
+#include "item/Item.h"     // ItemId for mob drops
 
 namespace vc {
 
@@ -53,26 +54,16 @@ inline const MobDef& MobDefOf(MobType type) {
 ItemId MobDropItem(MobType type);
 
 // One living entity in the world. Bottom-center position (feet), like the
-// player. Body yaw is in RADIANS (world), facing the direction of travel /
-// the target; the model matrix folds in the upright flip.
-struct Mob {
+// player. Body yaw (from LivingAnim) is in RADIANS (world), facing the
+// direction of travel / the target; the model matrix folds in the upright flip.
+// Inherits the render-interpolated position (Body: pos/prevPos/vel) and the
+// vanilla walk-cycle accumulators (LivingAnim: yaw/limbSwing*/age) — shared
+// with GameApp's DebugMob so they no longer duplicate these fields.
+struct Mob : Body, LivingAnim {
     MobType type = MobType::Pig;
-    glm::vec3 pos{0.0f};
-    glm::vec3 prevPos{0.0f};
-    glm::vec3 vel{0.0f};
-    float yaw = 0.0f;
-    float prevYaw = 0.0f;
     float health = 10.0f;
     bool onGround = false;
     float fallDistance = 0.0f;
-
-    // Vanilla EntityLivingBase walk-cycle accumulators (+ prev for render
-    // interpolation) and age (drives idle sway), exactly like the M31 DebugMob.
-    float limbSwing = 0.0f;
-    float prevLimbSwing = 0.0f;
-    float limbSwingAmount = 0.0f;
-    float prevLimbSwingAmount = 0.0f;
-    float age = 0.0f;
 
     // Combat / feedback.
     int hurtTime = 0;       // >0 tints the model red and counts down

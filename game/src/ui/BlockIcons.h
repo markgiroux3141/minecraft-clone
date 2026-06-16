@@ -5,7 +5,7 @@
 
 #include <glm/glm.hpp>
 
-#include "Item.h"
+#include "item/Item.h"
 
 namespace vox {
 class Framebuffer;

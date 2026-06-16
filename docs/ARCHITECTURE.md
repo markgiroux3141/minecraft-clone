@@ -30,6 +30,49 @@ Rules:
   (`OnRender`) and receives an interpolation alpha. Anything that moves should
   store previous+current state and interpolate at render time.
 
+## game/ module layout
+
+Game code (`namespace vc`) is grouped by responsibility — do not drop new files
+at the root of `game/src/` (only the app shell `GameApp`/`Main` belong there).
+See the "Where new code goes" table in `CLAUDE.md` for the rule.
+
+```
+game/src/
+  GameApp, Main, InputState   app shell + its input-edge state
+  entity/    Entity (Body + LivingAnim bases), Player, Mob, HumanoidModel, PigModel
+  item/      Item, Inventory, Crafting
+  render/    ViewModel, Particles      (game-side render helpers)
+  ui/        screens, HUD, widgets, block icons
+  audio/     game-event → sound mapping
+  world/     chunks, meshing, lighting, worldgen, blocks, block entities, save
+```
+
+Shared entity state (render-interpolated position, walk-cycle accumulators)
+lives once on the `vc::Body` / `vc::LivingAnim` bases in `entity/Entity.h`;
+`Mob`, `World::ItemEntity` and the debug mob compose them instead of
+re-declaring the fields. (`World::FallingBlock` opts out — it is column-locked
+1-D motion, not a free vec3 body.)
+
+## God-object carve-down (in progress)
+
+`GameApp` (~1.6k lines) and `World` (~1.8k lines) are the two files that accrete
+one-off features because they orchestrate everything. They're being split into
+subsystems incrementally — each extraction should land green and shrink the
+parent. `scripts\check_sizes.ps1` tracks them as exempt-but-watched. Done /
+planned, roughly in priority order:
+
+- ✅ Input edge/repeat state → `vc::InputState` (`InputState.h`).
+- ⬜ Audio runtime reconciliation (furnace crackle loops, footstep distance,
+  dig-sound pacing) → fold into `vc::GameSounds` (`audio/`), passing world refs.
+- ⬜ Entity simulation (item entities, falling blocks, mob list ownership +
+  tick) → a `vc::EntityManager` owned by `World`, so `World.cpp` keeps only
+  voxel/chunk concerns.
+- ⬜ Input *handling* (`HandleInput`, the break/place/use verbs) → an
+  `InputController` that operates on Player/World, leaving `GameApp` as pure
+  wiring.
+- ⬜ Frame telemetry (counters + title-bar string) → a small `FrameStats`/HUD
+  helper once the title string stops mixing in world/clock state.
+
 ## Main loop
 
 `vox::Application::Run()` implements the classic fixed-timestep accumulator:

@@ -6,7 +6,7 @@
 
 #include "vox/renderer/UiRenderer.h"
 
-#include "Crafting.h"
+#include "item/Crafting.h"
 #include "ui/Hud.h" // GuiScale
 
 namespace vc {

@@ -17,8 +17,8 @@
 #include "vox/renderer/Renderer.h"
 #include "vox/renderer/Texture.h"
 
-#include "Crafting.h"
-#include "Item.h"
+#include "item/Crafting.h"
+#include "item/Item.h"
 #include "ui/Hud.h"
 #include "ui/InventoryScreen.h"
 #include "ui/PauseMenu.h"
@@ -378,10 +378,10 @@ void GameApp::EnterWorld(const std::string& name, int defaultSeed) {
     GetWindow().SetCursorCaptured(m_state != State::Dead);
     // Same guard as unpausing: buttons held through the menu click must be
     // re-pressed before they edit the world.
-    m_breakWasDown = true;
-    m_placeWasDown = true;
-    m_breakCooldown = kEditRepeatDelay;
-    m_placeCooldown = kEditRepeatDelay;
+    m_input.breakWasDown = true;
+    m_input.placeWasDown = true;
+    m_input.breakCooldown = kEditRepeatDelay;
+    m_input.placeCooldown = kEditRepeatDelay;
 }
 
 void GameApp::CreateNewWorld() {
@@ -681,10 +681,10 @@ void GameApp::CloseContainer() {
     GetWindow().SetCursorCaptured(true);
     // Same guard as unpausing: buttons held through the closing click must
     // be re-pressed before they edit the world.
-    m_breakWasDown = true;
-    m_placeWasDown = true;
-    m_breakCooldown = kEditRepeatDelay;
-    m_placeCooldown = kEditRepeatDelay;
+    m_input.breakWasDown = true;
+    m_input.placeWasDown = true;
+    m_input.breakCooldown = kEditRepeatDelay;
+    m_input.placeCooldown = kEditRepeatDelay;
 }
 
 void GameApp::EnterDeathScreen() {
@@ -728,10 +728,10 @@ void GameApp::RespawnPlayer() {
     m_target.reset();
     m_footInit = false; // re-seed footstep tracking at the spawn
     // Guard the click that hit Respawn from falling through into an edit.
-    m_breakWasDown = true;
-    m_placeWasDown = true;
-    m_breakCooldown = kEditRepeatDelay;
-    m_placeCooldown = kEditRepeatDelay;
+    m_input.breakWasDown = true;
+    m_input.placeWasDown = true;
+    m_input.breakCooldown = kEditRepeatDelay;
+    m_input.placeCooldown = kEditRepeatDelay;
 }
 
 void GameApp::SetPaused(bool paused) {
@@ -747,48 +747,48 @@ void GameApp::SetPaused(bool paused) {
     } else {
         // Buttons held through the resume (e.g. the click that hit Resume)
         // must be re-pressed before they break or place anything.
-        m_breakWasDown = true;
-        m_placeWasDown = true;
-        m_breakCooldown = kEditRepeatDelay;
-        m_placeCooldown = kEditRepeatDelay;
+        m_input.breakWasDown = true;
+        m_input.placeWasDown = true;
+        m_input.breakCooldown = kEditRepeatDelay;
+        m_input.placeCooldown = kEditRepeatDelay;
     }
 }
 
 void GameApp::HandleInput(double frameDt, int scroll) {
     // F toggles walk/fly.
     const bool modeKey = vox::Input::IsKeyDown(vox::Key::F);
-    if (modeKey && !m_modeKeyWasDown) {
+    if (modeKey && !m_input.modeKeyWasDown) {
         m_player.ToggleMode();
     }
-    m_modeKeyWasDown = modeKey;
+    m_input.modeKeyWasDown = modeKey;
 
     // O toggles occlusion culling (debug/comparison; frustum-only when off).
     const bool occlusionKey = vox::Input::IsKeyDown(vox::Key::O);
-    if (occlusionKey && !m_occlusionKeyWasDown) {
+    if (occlusionKey && !m_input.occlusionKeyWasDown) {
         m_occlusionCulling = !m_occlusionCulling;
         GAME_INFO("Occlusion culling {}", m_occlusionCulling ? "on" : "off");
     }
-    m_occlusionKeyWasDown = occlusionKey;
+    m_input.occlusionKeyWasDown = occlusionKey;
 
     // G spawns / despawns the debug Steve (M31 box-model test entity).
     const bool mobKey = vox::Input::IsKeyDown(vox::Key::G);
-    if (mobKey && !m_debugMobKeyWasDown) {
+    if (mobKey && !m_input.debugMobKeyWasDown) {
         ToggleDebugMob();
     }
-    m_debugMobKeyWasDown = mobKey;
+    m_input.debugMobKeyWasDown = mobKey;
 
     // M32 debug spawns: B = pig, C = zombie, dropped ~3 blocks ahead so they're
     // easy to test without waiting for natural spawns.
     const bool pigKey = vox::Input::IsKeyDown(vox::Key::B);
-    if (pigKey && !m_spawnPigKeyWasDown) {
+    if (pigKey && !m_input.spawnPigKeyWasDown) {
         SpawnMobAhead(vc::MobType::Pig);
     }
-    m_spawnPigKeyWasDown = pigKey;
+    m_input.spawnPigKeyWasDown = pigKey;
     const bool zombieKey = vox::Input::IsKeyDown(vox::Key::C);
-    if (zombieKey && !m_spawnZombieKeyWasDown) {
+    if (zombieKey && !m_input.spawnZombieKeyWasDown) {
         SpawnMobAhead(vc::MobType::Zombie);
     }
-    m_spawnZombieKeyWasDown = zombieKey;
+    m_input.spawnZombieKeyWasDown = zombieKey;
 
     // 1..9 select the hotbar slot; the wheel cycles it (vanilla: scroll
     // up moves left, wrapping).
@@ -805,15 +805,15 @@ void GameApp::HandleInput(double frameDt, int scroll) {
 
     // Aim from the eye; break/place act on press, then repeat while held.
     m_target = m_world->RaycastBlocks(m_camera.Position(), m_camera.Forward(), kReachDistance);
-    m_breakCooldown = std::max(0.0, m_breakCooldown - frameDt);
-    m_placeCooldown = std::max(0.0, m_placeCooldown - frameDt);
+    m_input.breakCooldown = std::max(0.0, m_input.breakCooldown - frameDt);
+    m_input.placeCooldown = std::max(0.0, m_input.placeCooldown - frameDt);
 
     const bool breakDown = vox::Input::IsMouseButtonDown(vox::MouseButton::Left);
 
     // M32 melee: on the LMB press edge, if a mob is in reach and nearer than
     // any targeted block, attack it (with knockback) instead of digging.
     bool attackedMob = false;
-    if (breakDown && !m_breakWasDown) {
+    if (breakDown && !m_input.breakWasDown) {
         float mobDist = 0.0f;
         const auto mobHit =
             m_world->RaycastMob(m_camera.Position(), m_camera.Forward(), kReachDistance, mobDist);
@@ -841,7 +841,7 @@ void GameApp::HandleInput(double frameDt, int scroll) {
     } else if (m_player.GetMode() == Player::Mode::Fly) {
         // Creative-style (decided with the user): fly mode pops blocks
         // instantly and drops nothing — the palette is the source there.
-        if (breakDown && m_target && (!m_breakWasDown || m_breakCooldown == 0.0)) {
+        if (breakDown && m_target && (!m_input.breakWasDown || m_input.breakCooldown == 0.0)) {
             const vc::BlockId targetId =
                 m_world->GetBlock(m_target->block.x, m_target->block.y, m_target->block.z);
             const vc::BlockDef& def = vc::BlockRegistry::Get().Def(targetId);
@@ -851,7 +851,7 @@ void GameApp::HandleInput(double frameDt, int scroll) {
                 m_sounds.PlayBreak(def.soundType, glm::vec3(m_target->block) + 0.5f);
                 m_viewModel->TriggerSwing();
             }
-            m_breakCooldown = kEditRepeatDelay;
+            m_input.breakCooldown = kEditRepeatDelay;
         }
         m_digCell.reset();
         m_digProgress = 0.0f;
@@ -875,7 +875,7 @@ void GameApp::HandleInput(double frameDt, int scroll) {
                 m_digProgress = 0.0f;
                 m_digSoundAccum = 1.0; // play a dig sound on the first hit
             }
-            if (m_breakCooldown == 0.0) {
+            if (m_input.breakCooldown == 0.0) {
                 // Vanilla digging feedback: continuous arm swing + one
                 // hit chip from the dug face per tick.
                 m_viewModel->TriggerSwing();
@@ -933,7 +933,7 @@ void GameApp::HandleInput(double frameDt, int scroll) {
                     }
                     m_digCell.reset();
                     m_digProgress = 0.0f;
-                    m_breakCooldown = kEditRepeatDelay; // vanilla blockHitDelay (5 ticks)
+                    m_input.breakCooldown = kEditRepeatDelay; // vanilla blockHitDelay (5 ticks)
                 }
             }
         }
@@ -941,37 +941,37 @@ void GameApp::HandleInput(double frameDt, int scroll) {
         m_digCell.reset();
         m_digProgress = 0.0f;
     }
-    m_breakWasDown = breakDown;
+    m_input.breakWasDown = breakDown;
 
     // Q tosses one item from the hand (press, then repeat while held).
-    m_dropCooldown = std::max(0.0, m_dropCooldown - frameDt);
+    m_input.dropCooldown = std::max(0.0, m_input.dropCooldown - frameDt);
     const bool dropKey = vox::Input::IsKeyDown(vox::Key::Q);
-    if (dropKey && (!m_dropKeyWasDown || m_dropCooldown == 0.0)) {
+    if (dropKey && (!m_input.dropKeyWasDown || m_input.dropCooldown == 0.0)) {
         vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
         if (!hand.Empty()) {
             ThrowItem({hand.id, 1, hand.damage});
             if (--hand.count <= 0) {
                 hand = {};
             }
-            m_dropCooldown = kEditRepeatDelay;
+            m_input.dropCooldown = kEditRepeatDelay;
         }
     }
-    m_dropKeyWasDown = dropKey;
+    m_input.dropKeyWasDown = dropKey;
 
     const bool placeDown = vox::Input::IsMouseButtonDown(vox::MouseButton::Right);
-    if (placeDown && (!m_placeWasDown || m_placeCooldown == 0.0)) {
+    if (placeDown && (!m_input.placeWasDown || m_input.placeCooldown == 0.0)) {
         const vc::BlockId targetId =
             m_target ? m_world->GetBlock(m_target->block.x, m_target->block.y, m_target->block.z)
                      : vc::blocks::Air;
         if (m_target && targetId == vc::blocks::CraftingTable) {
             // Use beats place (vanilla, sans sneak): open the 3x3 grid.
             OpenContainer(State::Crafting);
-            m_placeCooldown = kEditRepeatDelay;
+            m_input.placeCooldown = kEditRepeatDelay;
         } else if (m_target &&
                    (targetId == vc::blocks::Furnace || targetId == vc::blocks::LitFurnace)) {
             m_openFurnace = m_target->block;
             OpenContainer(State::Furnace);
-            m_placeCooldown = kEditRepeatDelay;
+            m_input.placeCooldown = kEditRepeatDelay;
         } else if (TryUseBucket()) {
             // Bucket fill/dump (or a no-op bucket click) — handled, no place.
             // It does its own liquid raycast, so it works with no crosshair
@@ -1044,12 +1044,12 @@ void GameApp::HandleInput(double frameDt, int scroll) {
                     if (--hand.count <= 0) {
                         hand = {};
                     }
-                    m_placeCooldown = kEditRepeatDelay;
+                    m_input.placeCooldown = kEditRepeatDelay;
                 }
             }
         }
     }
-    m_placeWasDown = placeDown;
+    m_input.placeWasDown = placeDown;
 }
 
 bool GameApp::TryUseBucket() {
@@ -1077,7 +1077,7 @@ bool GameApp::TryUseBucket() {
                            !leftover.Empty()) {
                     ThrowItem(leftover);
                 }
-                m_placeCooldown = kEditRepeatDelay;
+                m_input.placeCooldown = kEditRepeatDelay;
             }
         }
         return true; // holding a bucket: this click is a bucket action, not a place
@@ -1094,7 +1094,7 @@ bool GameApp::TryUseBucket() {
             m_sounds.PlayBucketEmpty(liquid == vc::blocks::Lava, glm::vec3(cell) + 0.5f);
             m_viewModel->TriggerSwing();
             hand = {vc::items::Bucket, 1};
-            m_placeCooldown = kEditRepeatDelay;
+            m_input.placeCooldown = kEditRepeatDelay;
         }
     }
     return true;
@@ -1133,11 +1133,11 @@ void GameApp::DrawUi() {
     const glm::vec2 screen{static_cast<float>(GetWindow().Width()),
                            static_cast<float>(GetWindow().Height())};
     const bool clickDown = vox::Input::IsMouseButtonDown(vox::MouseButton::Left);
-    const bool clicked = clickDown && !m_clickWasDown;
-    m_clickWasDown = clickDown;
+    const bool clicked = clickDown && !m_input.clickWasDown;
+    m_input.clickWasDown = clickDown;
     const bool rightDown = vox::Input::IsMouseButtonDown(vox::MouseButton::Right);
-    const bool rightClicked = rightDown && !m_rightClickWasDown;
-    m_rightClickWasDown = rightDown;
+    const bool rightClicked = rightDown && !m_input.rightClickWasDown;
+    m_input.rightClickWasDown = rightDown;
 
     const glm::vec2 mouse = vox::Input::MousePosition();
 
@@ -1255,25 +1255,25 @@ void GameApp::DrawUi() {
 
 void GameApp::OnRender(double alpha, double frameDt) {
     const bool escapeDown = vox::Input::IsKeyDown(vox::Key::Escape);
-    if (escapeDown && !m_escapeWasDown) {
+    if (escapeDown && !m_input.escapeWasDown) {
         if (ContainerOpen()) {
             CloseContainer();
         } else {
             SetPaused(m_state == State::Playing); // no-op on the title screen
         }
     }
-    m_escapeWasDown = escapeDown;
+    m_input.escapeWasDown = escapeDown;
 
     // E opens the inventory / closes any container screen.
     const bool inventoryKey = vox::Input::IsKeyDown(vox::Key::E);
-    if (inventoryKey && !m_inventoryKeyWasDown) {
+    if (inventoryKey && !m_input.inventoryKeyWasDown) {
         if (ContainerOpen()) {
             CloseContainer();
         } else {
             OpenContainer(State::Inventory);
         }
     }
-    m_inventoryKeyWasDown = inventoryKey;
+    m_input.inventoryKeyWasDown = inventoryKey;
 
     // Consume wheel input every frame so clicks made over menus don't
     // burst-apply to the hotbar on resume.

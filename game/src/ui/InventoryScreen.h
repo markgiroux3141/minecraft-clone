@@ -4,7 +4,7 @@
 
 #include <glm/glm.hpp>
 
-#include "Inventory.h"
+#include "item/Inventory.h"
 #include "ui/Widgets.h"
 #include "world/Furnace.h"
 

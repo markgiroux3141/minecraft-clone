@@ -16,12 +16,14 @@
 #include "vox/renderer/UiRenderer.h"
 #include "vox/renderer/VertexArray.h"
 
-#include "HumanoidModel.h"
-#include "PigModel.h"
-#include "Inventory.h"
-#include "Particles.h"
-#include "Player.h"
-#include "ViewModel.h"
+#include "InputState.h"
+#include "entity/Entity.h"
+#include "entity/HumanoidModel.h"
+#include "entity/PigModel.h"
+#include "item/Inventory.h"
+#include "render/Particles.h"
+#include "entity/Player.h"
+#include "render/ViewModel.h"
 #include "ui/BlockIcons.h"
 #include "audio/Sounds.h"
 #include "ui/Widgets.h"
@@ -124,24 +126,14 @@ private:
     // gameplay, no collision, not persisted.
     std::shared_ptr<vox::Shader> m_entityModelShader;
     std::unique_ptr<vc::HumanoidModel> m_humanoid;
-    struct DebugMob {
+    // pos/prevPos/vel come from vc::Body, yaw/limbSwing*/age from vc::LivingAnim
+    // (same bases as vc::Mob — no more copy-pasted walk-cycle fields).
+    struct DebugMob : vc::Body, vc::LivingAnim {
         bool active = false;
         glm::vec3 center{0.0f}; // circle center (set when spawned)
         float angle = 0.0f;     // position around the circle, radians
-        glm::vec3 prevPos{0.0f};
-        glm::vec3 pos{0.0f};
-        float prevYaw = 0.0f;
-        float yaw = 0.0f; // body facing, radians (world)
-        // Vanilla EntityLivingBase walk-cycle accumulators (+ prev for render
-        // interpolation) and age (drives the idle sway).
-        float limbSwing = 0.0f;
-        float prevLimbSwing = 0.0f;
-        float limbSwingAmount = 0.0f;
-        float prevLimbSwingAmount = 0.0f;
-        float age = 0.0f;
     };
     DebugMob m_debugMob;
-    bool m_debugMobKeyWasDown = false;
     void ToggleDebugMob();
     void TickDebugMob(double dt);
 
@@ -151,8 +143,6 @@ private:
     // of the player so they're easy to test without waiting for natural spawns.
     std::unique_ptr<vc::HumanoidModel> m_zombieModel;
     std::unique_ptr<vc::PigModel> m_pigModel;
-    bool m_spawnPigKeyWasDown = false;
-    bool m_spawnZombieKeyWasDown = false;
     void SpawnMobAhead(vc::MobType type);
     // True when the sun is down (drives hostile spawn light gating).
     bool IsNight() const;
@@ -210,19 +200,8 @@ private:
     std::filesystem::path m_savesRoot;
     std::vector<std::string> m_worlds; // directory names under m_savesRoot
 
-    // Edge/repeat tracking for per-frame input.
-    bool m_modeKeyWasDown = false;
-    bool m_occlusionKeyWasDown = false;
-    bool m_escapeWasDown = false;
-    bool m_inventoryKeyWasDown = false;
-    bool m_clickWasDown = false; // menu clicks (break/place track separately)
-    bool m_rightClickWasDown = false;
-    bool m_breakWasDown = false;
-    bool m_placeWasDown = false;
-    bool m_dropKeyWasDown = false;
-    double m_breakCooldown = 0.0; // fly repeat AND the walk-dig hit delay
-    double m_placeCooldown = 0.0;
-    double m_dropCooldown = 0.0;
+    // Per-frame edge/repeat tracking for input (see InputState.h).
+    vc::InputState m_input;
 
     // Hold-to-break (M18, walk mode): the block being dug and its damage
     // 0..1 (vanilla curBlockDamageMP). Resets when the target changes or

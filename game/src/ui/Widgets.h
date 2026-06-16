@@ -5,7 +5,7 @@
 
 #include <glm/glm.hpp>
 
-#include "Inventory.h"
+#include "item/Inventory.h"
 
 namespace vox {
 class Texture2D;

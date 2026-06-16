@@ -1,4 +1,4 @@
-#include "HumanoidModel.h"
+#include "entity/HumanoidModel.h"
 
 #include <cmath>
 #include <filesystem>

@@ -1,4 +1,4 @@
-#include "world/Mob.h"
+#include "entity/Mob.h"
 
 #include <algorithm>
 #include <cmath>

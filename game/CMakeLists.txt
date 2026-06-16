@@ -1,25 +1,35 @@
 add_executable(game
-    src/audio/Sounds.cpp
-    src/audio/Sounds.h
-    src/Crafting.cpp
-    src/Crafting.h
+    # App shell (root)
     src/GameApp.cpp
     src/GameApp.h
-    src/HumanoidModel.cpp
-    src/HumanoidModel.h
-    src/Inventory.cpp
-    src/Inventory.h
-    src/Item.cpp
-    src/Item.h
+    src/InputState.h
     src/Main.cpp
-    src/PigModel.cpp
-    src/PigModel.h
-    src/Particles.cpp
-    src/Particles.h
-    src/Player.cpp
-    src/Player.h
-    src/ViewModel.cpp
-    src/ViewModel.h
+    # Audio
+    src/audio/Sounds.cpp
+    src/audio/Sounds.h
+    # Entities (simulated bodies + their box-models)
+    src/entity/Entity.h
+    src/entity/HumanoidModel.cpp
+    src/entity/HumanoidModel.h
+    src/entity/Mob.cpp
+    src/entity/Mob.h
+    src/entity/PigModel.cpp
+    src/entity/PigModel.h
+    src/entity/Player.cpp
+    src/entity/Player.h
+    # Items / inventory / crafting
+    src/item/Crafting.cpp
+    src/item/Crafting.h
+    src/item/Inventory.cpp
+    src/item/Inventory.h
+    src/item/Item.cpp
+    src/item/Item.h
+    # Game-side render helpers
+    src/render/Particles.cpp
+    src/render/Particles.h
+    src/render/ViewModel.cpp
+    src/render/ViewModel.h
+    # UI / screens / HUD
     src/ui/BlockIcons.cpp
     src/ui/BlockIcons.h
     src/ui/Hud.cpp
@@ -32,6 +42,7 @@ add_executable(game
     src/ui/TitleScreen.h
     src/ui/Widgets.cpp
     src/ui/Widgets.h
+    # Voxel world (chunks, meshing, lighting, worldgen, blocks, persistence)
     src/world/Block.cpp
     src/world/Block.h
     src/world/CaveGen.cpp
@@ -47,8 +58,6 @@ add_executable(game
     src/world/Light.h
     src/world/LightEngine.cpp
     src/world/LightEngine.h
-    src/world/Mob.cpp
-    src/world/Mob.h
     src/world/OreGen.cpp
     src/world/OreGen.h
     src/world/TerrainGen.cpp
