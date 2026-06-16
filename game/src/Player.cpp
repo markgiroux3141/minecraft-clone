@@ -13,16 +13,19 @@ constexpr float kGravity = 32.0f;       // blocks/s^2
 constexpr float kTerminalSpeed = 60.0f; // max fall speed
 constexpr float kJumpSpeed = 9.0f;      // ~1.25 block jump apex
 constexpr float kWalkSpeed = 4.3f;
-// Simple swimming: in water gravity and sink rate drop, Space swims up,
-// and at the surface Space kicks hard enough to climb a 1-block shore.
-// The sink terminal is a gentle drift — fast enough to settle, slow
-// enough that it can't be mistaken for falling.
-constexpr float kWaterGravity = 10.0f;
-constexpr float kWaterSinkSpeed = 1.5f;
-constexpr float kSwimSpeed = 4.0f;
-constexpr float kBreachSpeed = 8.5f;
-constexpr float kWaterDrag = 0.55f; // horizontal speed factor in water
-constexpr float kLavaDrag = 0.30f;  // M26: lava is molasses — slower still
+// Water/lava movement — ported from vanilla EntityLivingBase.travel (1.12).
+// Vertical motion ACCUMULATES under a heavy per-tick drag and weak gravity, so
+// a swim-up thrust self-limits to a gentle climb and you bob at the surface
+// instead of launching out; horizontal steering stays responsive. Vanilla's
+// per-tick numbers convert to our b/s, b/s^2 units at 20 TPS — e.g. its
+// "motionY -= 0.02" each tick is a 0.4 b/s decrement = 8 b/s^2.
+constexpr float kWaterDrag = 0.55f;    // horizontal swim speed factor (water)
+constexpr float kLavaDrag = 0.30f;     // M26: lava is molasses — slower still
+constexpr float kWaterVertDrag = 0.8f; // vanilla motionY *= 0.8 each tick
+constexpr float kLavaVertDrag = 0.5f;  // vanilla lava motionY *= 0.5 (sinks faster)
+constexpr float kWaterGravity = 8.0f;  // vanilla motionY -= 0.02/tick
+constexpr float kSwimAccel = 16.0f;    // vanilla handleJumpWater motionY += 0.04/tick
+constexpr float kShoreHopSpeed = 6.0f; // vanilla shore pop (motionY = 0.3) to climb out
 constexpr float kSprintMultiplier = 1.6f; // LeftControl
 constexpr float kFlySpeed = 16.0f;
 constexpr float kFlyBoostMultiplier = 4.0f; // LeftControl
@@ -154,7 +157,6 @@ void Player::TickWalk(const vc::World& world, float dt) {
     const vc::BlockDef& bodyDef = liquidAt(m_position.x, m_position.y + 0.4f, m_position.z);
     const bool inWater = bodyDef.liquid;
     const bool inLava = bodyDef.liquidSource == vc::blocks::Lava; // M26: molasses swim
-    const bool headInWater = liquidAt(m_position.x, m_position.y + kEyeHeight, m_position.z).liquid;
     m_inWater = inWater; // M22: footstep/splash audio reads this
 
     float speed = kWalkSpeed;
@@ -162,23 +164,24 @@ void Player::TickWalk(const vc::World& world, float dt) {
         speed *= kSprintMultiplier;
     }
 
+    glm::vec3 swimWish{0.0f}; // set in water; reused by the shore-hop below
     if (inWater) {
-        // Swimming steers where you aim (W toward the look direction);
-        // Space always swims straight up, with a breach kick at the
-        // surface so you can climb ashore. Lava drags harder and the
-        // vertical kicks are weaker — you wade through it slowly.
+        // Vanilla water movement: horizontal steers where you aim; vertical is
+        // force-based. A small per-tick thrust (Space, or aiming a move key
+        // up/down) fights weak gravity under a heavy 0.8/tick drag, so it
+        // self-limits to a gentle ~2 b/s climb and bobs at the surface instead
+        // of launching out. Lava drags harder still — you barely rise in it.
         speed *= inLava ? kLavaDrag : kWaterDrag;
-        const float vScale = inLava ? kLavaDrag / kWaterDrag : 1.0f;
-        const glm::vec3 wish = SwimWishDir();
-        m_velocity.x = wish.x * speed;
-        m_velocity.z = wish.z * speed;
+        swimWish = SwimWishDir();
+        m_velocity.x = swimWish.x * speed;
+        m_velocity.z = swimWish.z * speed;
+
+        m_velocity.y *= inLava ? kLavaVertDrag : kWaterVertDrag; // drag momentum
+        m_velocity.y -= kWaterGravity * dt;                      // weak buoyant gravity
         if (KeyDown(vox::Key::Space)) {
-            m_velocity.y = (headInWater ? kSwimSpeed : kBreachSpeed) * vScale;
-        } else if (wish.y != 0.0f) {
-            m_velocity.y = wish.y * speed;
-        } else {
-            m_velocity.y =
-                std::max(m_velocity.y - kWaterGravity * dt, -kWaterSinkSpeed * vScale);
+            m_velocity.y += kSwimAccel * dt;                     // swim straight up
+        } else if (swimWish.y != 0.0f) {
+            m_velocity.y += swimWish.y * kSwimAccel * dt;        // aim up/down to rise/dive
         }
     } else {
         const glm::vec3 wish = HorizontalWishDir();
@@ -236,6 +239,13 @@ void Player::TickWalk(const vc::World& world, float dt) {
             m_velocity.x = flatVel.x;
             m_velocity.z = flatVel.z;
         }
+    }
+
+    // Vanilla shore-hop (EntityLivingBase.travel): swimming INTO a wall pops you
+    // up just enough to climb a 1-block lip onto land. This is the only way out
+    // of water under your own power — open water just bobs you at the surface.
+    if (inWater && (hitX || hitZ) && (swimWish.x != 0.0f || swimWish.z != 0.0f)) {
+        m_velocity.y = kShoreHopSpeed;
     }
 
     // Fall damage (vanilla updateFallState): accumulate descent while airborne;
