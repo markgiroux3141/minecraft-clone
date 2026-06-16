@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <filesystem>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include <glm/glm.hpp>
@@ -12,6 +13,8 @@
 #include "world/Block.h" // SoundType
 
 namespace vc {
+
+class World;
 
 // Owns every loaded sound clip and maps game events to vox::AudioEngine calls.
 // One instance lives on GameApp. All clips load from the gitignored
@@ -43,13 +46,34 @@ public:
     void PlaySplash(const glm::vec3& pos);
     void PlayHurt(); // M30: the player took damage (2D, randomly pitched)
 
+    // Footstep cadence + landing thud + water-entry splash, reconciled each
+    // tick from the player's feet/ground/water state. `world` resolves the
+    // supporting block's material; `moving` gates footsteps (true only while
+    // the player has movement input — landing/splash fire regardless). Owns
+    // the stride accumulator and edge-tracking state. Call ResetLocomotion on
+    // spawn/world-enter so the first tick re-seeds rather than emitting a step.
+    void ResetLocomotion();
+    void UpdateLocomotion(const World& world, const glm::vec3& feet, bool grounded, bool inWater,
+                          bool moving);
+
+    // --- Mining dig cadence (paces the per-material "dig" tick sound) -------
+    // Call ResetDigSound when the dig target changes / digging begins so the
+    // next TickDigSound fires immediately; TickDigSound advances the ~4-tick
+    // cadence and plays PlayDig when it elapses.
+    void ResetDigSound();
+    void TickDigSound(SoundType type, const glm::vec3& blockCenter, double frameDt);
+
     // --- M32 mobs (positional; hostile picks the zombie set, else pig) ------
     void PlayMobHurt(bool hostile, const glm::vec3& pos);
     void PlayMobDeath(bool hostile, const glm::vec3& pos);
 
-    // --- Looping furnace voice (GameApp reconciles these against lit furnaces) -
-    vox::VoiceHandle StartFurnaceLoop(const glm::vec3& blockCenter);
-    void StopFurnaceLoop(vox::VoiceHandle& voice);
+    // --- Looping furnace crackle (one voice per lit furnace) ----------------
+    // Reconciles the live voices against the world's currently-lit furnaces:
+    // starts new ones, stops those that went out or unloaded. Owns the voice
+    // map. StopAllFurnaceLoops tears them all down before the world (and its
+    // furnaces) vanish — call from world-exit.
+    void ReconcileFurnaceLoops(const World& world);
+    void StopAllFurnaceLoops();
 
     // --- Ambient / music schedulers (call once per frame while in a world) -
     void UpdateAmbient(bool inDarkness, double frameDt, const glm::vec3& listenerPos);
@@ -71,6 +95,9 @@ private:
     const ClipSet& StepSet(SoundType type) const;
     vox::ClipHandle Pick(const ClipSet& set);
     float Jitter(float base, float spread); // base * (1 +/- spread)
+
+    vox::VoiceHandle StartFurnaceLoop(const glm::vec3& blockCenter);
+    void StopFurnaceLoop(vox::VoiceHandle& voice);
 
     vox::AudioEngine* m_audio = nullptr;
 
@@ -96,6 +123,26 @@ private:
     // Music is decoded on demand (one track at a time), so we keep paths, not
     // preloaded clips — see vox::AudioEngine::PlayMusic.
     std::vector<std::filesystem::path> m_musicPaths;
+
+    // Furnace crackle: one looping voice per currently-lit furnace, keyed by
+    // block position and reconciled each frame by ReconcileFurnaceLoops.
+    struct IVec3Hash {
+        size_t operator()(const glm::ivec3& v) const {
+            return (static_cast<size_t>(static_cast<uint32_t>(v.x)) * 73856093u) ^
+                   (static_cast<size_t>(static_cast<uint32_t>(v.y)) * 19349663u) ^
+                   (static_cast<size_t>(static_cast<uint32_t>(v.z)) * 83492791u);
+        }
+    };
+    std::unordered_map<glm::ivec3, vox::VoiceHandle, IVec3Hash> m_furnaceLoops;
+
+    // Footstep cadence + ground/water edge tracking (see UpdateLocomotion).
+    double m_stepDistance = 0.0; // horizontal travel since the last footstep
+    glm::vec3 m_lastFootPos{0.0f};
+    bool m_footInit = false; // re-seeded by ResetLocomotion
+    bool m_wasGrounded = true;
+    bool m_wasInWater = false;
+
+    double m_digSoundAccum = 0.0; // mining-tick dig sound pacing
 
     // Schedulers.
     double m_ambientTimer = 30.0; // seconds of darkness until the next cave sound

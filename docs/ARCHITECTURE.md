@@ -62,8 +62,10 @@ parent. `scripts\check_sizes.ps1` tracks them as exempt-but-watched. Done /
 planned, roughly in priority order:
 
 - ✅ Input edge/repeat state → `vc::InputState` (`InputState.h`).
-- ⬜ Audio runtime reconciliation (furnace crackle loops, footstep distance,
-  dig-sound pacing) → fold into `vc::GameSounds` (`audio/`), passing world refs.
+- ✅ Audio runtime reconciliation (furnace crackle loops, footstep distance,
+  dig-sound pacing) → folded into `vc::GameSounds` (`audio/`): `ReconcileFurnaceLoops`/
+  `StopAllFurnaceLoops`, `Reset/UpdateLocomotion`, `Reset/TickDigSound` own the voice
+  map + footstep/dig state; GameApp just drives them with world refs.
 - ⬜ Entity simulation (item entities, falling blocks, mob list ownership +
   tick) → a `vc::EntityManager` owned by `World`, so `World.cpp` keeps only
   voxel/chunk concerns.

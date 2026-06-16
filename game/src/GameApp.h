@@ -5,7 +5,6 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 #include "vox/audio/AudioEngine.h"
@@ -152,22 +151,8 @@ private:
     std::unique_ptr<vc::ViewModel> m_viewModel;
     double m_chipAccum = 0.0; // dig hit-chip spawn pacing (one per tick)
 
-    // M22 audio runtime state.
-    struct IVec3Hash {
-        size_t operator()(const glm::ivec3& v) const {
-            return (static_cast<size_t>(static_cast<uint32_t>(v.x)) * 73856093u) ^
-                   (static_cast<size_t>(static_cast<uint32_t>(v.y)) * 19349663u) ^
-                   (static_cast<size_t>(static_cast<uint32_t>(v.z)) * 83492791u);
-        }
-    };
-    // One crackle voice per currently-lit furnace, reconciled each frame.
-    std::unordered_map<glm::ivec3, vox::VoiceHandle, IVec3Hash> m_furnaceLoops;
-    double m_digSoundAccum = 0.0; // mining-tick dig sound pacing
-    double m_stepDistance = 0.0;  // horizontal travel since the last footstep
-    glm::vec3 m_lastFootPos{0.0f};
-    bool m_footInit = false;
-    bool m_wasGrounded = true;
-    bool m_wasInWater = false;
+    // M22 audio runtime state (furnace crackle voices, footstep cadence, dig
+    // pacing) lives on vc::GameSounds — see m_sounds. GameApp only drives it.
 
     // Frustum-surviving chunks for the frame's multi-draws (reused scratch):
     // opaque front-to-back, then water back-to-front in the blended pass.

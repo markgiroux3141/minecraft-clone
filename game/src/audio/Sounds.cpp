@@ -1,7 +1,12 @@
 #include "audio/Sounds.h"
 
+#include <algorithm>
+#include <cmath>
+#include <vector>
+
 #include "vox/core/Assets.h"
 #include "vox/core/Log.h"
+#include "world/World.h"
 
 namespace vc {
 
@@ -205,6 +210,91 @@ vox::VoiceHandle GameSounds::StartFurnaceLoop(const glm::vec3& blockCenter) {
 void GameSounds::StopFurnaceLoop(vox::VoiceHandle& voice) {
     if (m_audio) m_audio->StopVoice(voice);
     voice = {};
+}
+
+void GameSounds::ReconcileFurnaceLoops(const World& world) {
+    if (!m_audio) return;
+    // Keep one crackle loop per lit furnace: start new ones (or restart a voice
+    // that finished), then stop those that went out or unloaded
+    // (ForEachLitFurnace skips unloaded furnaces).
+    std::vector<glm::ivec3> litThisFrame;
+    world.ForEachLitFurnace([&](const glm::ivec3& pos) {
+        litThisFrame.push_back(pos);
+        auto it = m_furnaceLoops.find(pos);
+        if (it == m_furnaceLoops.end() || !m_audio->IsVoiceActive(it->second)) {
+            m_furnaceLoops[pos] = StartFurnaceLoop(glm::vec3(pos) + 0.5f);
+        }
+    });
+    for (auto it = m_furnaceLoops.begin(); it != m_furnaceLoops.end();) {
+        if (std::find(litThisFrame.begin(), litThisFrame.end(), it->first) == litThisFrame.end()) {
+            StopFurnaceLoop(it->second);
+            it = m_furnaceLoops.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void GameSounds::StopAllFurnaceLoops() {
+    for (auto& [pos, voice] : m_furnaceLoops) {
+        StopFurnaceLoop(voice);
+    }
+    m_furnaceLoops.clear();
+}
+
+void GameSounds::ResetLocomotion() {
+    m_footInit = false; // next UpdateLocomotion re-seeds at the new feet position
+}
+
+void GameSounds::UpdateLocomotion(const World& world, const glm::vec3& feet, bool grounded,
+                                  bool inWater, bool moving) {
+    constexpr float kStepStride = 1.7f; // blocks travelled between footsteps
+    // The supporting block (just below the feet) picks the footstep set; None
+    // (air/water) makes PlayStep/PlayLand a no-op.
+    const auto soundUnder = [&](const glm::vec3& f) {
+        const vc::BlockId b = world.GetBlock(static_cast<int>(std::floor(f.x)),
+                                             static_cast<int>(std::floor(f.y - 0.2f)),
+                                             static_cast<int>(std::floor(f.z)));
+        return vc::BlockRegistry::Get().Def(b).soundType;
+    };
+    if (!m_footInit) {
+        m_lastFootPos = feet;
+        m_wasGrounded = grounded;
+        m_wasInWater = inWater;
+        m_footInit = true;
+    }
+    if (inWater && !m_wasInWater) {
+        PlaySplash(feet + glm::vec3{0.0f, 0.2f, 0.0f});
+    }
+    if (grounded && !m_wasGrounded && !inWater) {
+        PlayLand(soundUnder(feet), feet);
+        m_stepDistance = 0.0;
+    }
+    if (grounded && !inWater && moving) {
+        const float dx = feet.x - m_lastFootPos.x;
+        const float dz = feet.z - m_lastFootPos.z;
+        m_stepDistance += std::sqrt(dx * dx + dz * dz);
+        if (m_stepDistance >= kStepStride) {
+            m_stepDistance = 0.0;
+            PlayStep(soundUnder(feet), feet);
+        }
+    }
+    m_lastFootPos = feet;
+    m_wasGrounded = grounded;
+    m_wasInWater = inWater;
+}
+
+void GameSounds::ResetDigSound() {
+    m_digSoundAccum = 1.0; // forces TickDigSound to play on the first hit
+}
+
+void GameSounds::TickDigSound(SoundType type, const glm::vec3& blockCenter, double frameDt) {
+    // Vanilla ~4-tick mining cadence.
+    m_digSoundAccum += frameDt;
+    if (m_digSoundAccum >= 0.2) {
+        m_digSoundAccum = 0.0;
+        PlayDig(type, blockCenter);
+    }
 }
 
 void GameSounds::UpdateAmbient(bool inDarkness, double frameDt, const glm::vec3& listenerPos) {
