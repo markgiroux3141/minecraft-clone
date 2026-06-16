@@ -68,6 +68,21 @@ void GameSounds::Load(vox::AudioEngine& audio) {
     m_bucketEmptyLava = LoadSet("item/bucket", "empty_lava", 3);
     m_caveAmbient = LoadSet("ambient/cave", "cave", 18); // 1.12 has 18
     m_hurt = LoadSet("damage", "hit", 3);                // entity.player.hurt
+
+    // M32 mob voices. The numbered "say"/"hurt" variants go through LoadSet;
+    // the single unnumbered "death.ogg" is loaded by name (LoadSet probes
+    // <name>N.ogg). Anything missing is silently skipped.
+    m_pigSay = LoadSet("mob/pig", "say", 3);
+    m_zombieSay = LoadSet("mob/zombie", "say", 3);
+    m_zombieHurt = LoadSet("mob/zombie", "hurt", 3);
+    for (auto* dst : {&m_pigDeath, &m_zombieDeath}) {
+        const char* folder = (dst == &m_pigDeath) ? "pig" : "zombie";
+        const std::string rel = std::string("mc/sounds/mob/") + folder + "/death.ogg";
+        if (vox::ClipHandle h = audio.LoadClip(vox::assets::Resolve(rel)); h) {
+            dst->clips[dst->count++] = h;
+        }
+    }
+
     m_pop = audio.LoadClip(vox::assets::Resolve("mc/sounds/random/pop.ogg"));
     m_fireLoop = audio.LoadClip(vox::assets::Resolve("mc/sounds/fire/fire.ogg"));
 
@@ -164,6 +179,21 @@ void GameSounds::PlayHurt() {
     if (!m_audio) return;
     // Vanilla: volume 1.0, pitch 1.0 +/- ~0.1. 2D — it's the player's own sound.
     m_audio->Play2D(Pick(m_hurt), vox::AudioBus::Sfx, 0.7f, Jitter(1.0f, 0.1f));
+}
+
+void GameSounds::PlayMobHurt(bool hostile, const glm::vec3& pos) {
+    if (!m_audio) return;
+    // Pig reuses its "say" set for hurt (vanilla has no pig hurt clip).
+    const ClipSet& set = hostile ? (m_zombieHurt.count ? m_zombieHurt : m_zombieSay) : m_pigSay;
+    m_audio->Play3D(Pick(set), pos, vox::AudioBus::Sfx, 0.7f, Jitter(1.0f, 0.1f));
+}
+
+void GameSounds::PlayMobDeath(bool hostile, const glm::vec3& pos) {
+    if (!m_audio) return;
+    const ClipSet& death = hostile ? m_zombieDeath : m_pigDeath;
+    const ClipSet& say = hostile ? m_zombieSay : m_pigSay;
+    m_audio->Play3D(Pick(death.count ? death : say), pos, vox::AudioBus::Sfx, 0.8f,
+                    Jitter(1.0f, 0.1f));
 }
 
 vox::VoiceHandle GameSounds::StartFurnaceLoop(const glm::vec3& blockCenter) {

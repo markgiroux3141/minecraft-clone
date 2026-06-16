@@ -178,6 +178,35 @@ int main() {
               "empty furnace set deletes the sidecar");
     }
     {
+        // Mobs (M32): the mobs.dat sidecar round-trips type/pos/yaw/health;
+        // an empty set removes the file.
+        vc::WorldSave save(dir, 7);
+        Check(save.GetMobs().empty(), "pre-mob save reads as no mobs");
+        vc::WorldSave::MobRecord a{1, {10.5f, 68.0f, -4.25f}, 1.57f, 18.0f}; // zombie
+        vc::WorldSave::MobRecord b{0, {-30.0f, 70.0f, 12.0f}, -0.5f, 10.0f}; // pig
+        save.SetMobs({a, b});
+        save.Flush(true);
+    }
+    {
+        vc::WorldSave save(dir, 7);
+        const auto& mobs = save.GetMobs();
+        Check(mobs.size() == 2, "mobs reload from the sidecar");
+        Check(mobs.size() == 2 && mobs[0].type == 1 && mobs[0].pos.x == 10.5f &&
+                  mobs[0].pos.y == 68.0f && mobs[0].pos.z == -4.25f && mobs[0].yaw == 1.57f &&
+                  mobs[0].health == 18.0f,
+              "zombie record round-trips exactly");
+        Check(mobs.size() == 2 && mobs[1].type == 0 && mobs[1].pos.x == -30.0f &&
+                  mobs[1].health == 10.0f,
+              "pig record round-trips");
+        save.SetMobs({});
+        save.Flush(true);
+    }
+    {
+        vc::WorldSave save(dir, 7);
+        Check(save.GetMobs().empty(), "clearing mobs removes them");
+        Check(!std::filesystem::exists(dir / "mobs.dat"), "empty mob set deletes the sidecar");
+    }
+    {
         // M17/M18 saves wrote triples under the old "inventory" tag —
         // they must still parse (damage 0).
         std::ofstream out{dir / "level.dat"};

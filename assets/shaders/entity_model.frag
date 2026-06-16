@@ -8,6 +8,7 @@ uniform vec3 u_sunDir;   // toward the dominant body: sun by day, moon by night
 uniform float u_sunLight;
 uniform vec3 u_skyTint;
 uniform vec2 u_light;    // sky/block light sampled at the entity's cell, 0..1
+uniform float u_hurt;    // 0..1 red damage flash (vanilla hurt overlay)
 
 out vec4 o_color;
 
@@ -23,5 +24,8 @@ void main() {
     vec3 skyTerm = u_skyTint * (u_light.x * u_sunLight * (0.40 + 0.60 * diffuse));
     vec3 light = max(skyTerm, vec3(1.0, 0.85, 0.62) * u_light.y);
     light = max(light, vec3(0.03));
-    o_color = vec4(tex.rgb * light, 1.0);
+    vec3 rgb = tex.rgb * light;
+    // Vanilla damage flash: blend toward red while hurt.
+    rgb = mix(rgb, vec3(1.0, 0.0, 0.0), u_hurt * 0.5);
+    o_color = vec4(rgb, 1.0);
 }

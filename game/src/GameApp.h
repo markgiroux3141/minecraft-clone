@@ -17,6 +17,7 @@
 #include "vox/renderer/VertexArray.h"
 
 #include "HumanoidModel.h"
+#include "PigModel.h"
 #include "Inventory.h"
 #include "Particles.h"
 #include "Player.h"
@@ -143,6 +144,18 @@ private:
     bool m_debugMobKeyWasDown = false;
     void ToggleDebugMob();
     void TickDebugMob(double dt);
+
+    // M32 mobs: the zombie reuses the biped HumanoidModel with the zombie skin
+    // + arms-forward pose; the pig is a quadruped PigModel. GameApp owns them;
+    // the World owns the mob entities. Debug keys B/C spawn a pig/zombie ahead
+    // of the player so they're easy to test without waiting for natural spawns.
+    std::unique_ptr<vc::HumanoidModel> m_zombieModel;
+    std::unique_ptr<vc::PigModel> m_pigModel;
+    bool m_spawnPigKeyWasDown = false;
+    bool m_spawnZombieKeyWasDown = false;
+    void SpawnMobAhead(vc::MobType type);
+    // True when the sun is down (drives hostile spawn light gating).
+    bool IsNight() const;
 
     // M20 game feel: block-break particles + the first-person hand.
     std::unique_ptr<vc::ParticleSystem> m_particles;

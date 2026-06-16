@@ -109,6 +109,7 @@ WorldSave::WorldSave(std::filesystem::path dir, int defaultSeed)
     }
     ReadManifest(defaultSeed);
     ReadFurnaces();
+    ReadMobs();
 
     for (const auto& entry : std::filesystem::directory_iterator(m_dir, ec)) {
         if (entry.is_regular_file() && entry.path().extension() == ".vxr") {
@@ -273,6 +274,54 @@ void WorldSave::SetFurnaces(std::vector<FurnaceRecord> furnaces) {
     m_furnacesDirty = true;
 }
 
+void WorldSave::ReadMobs() {
+    std::ifstream in{m_dir / "mobs.dat"};
+    if (!in) {
+        return;
+    }
+    std::string tag;
+    while (in >> tag && tag == "mob") {
+        MobRecord r;
+        if (!(in >> r.type >> r.pos.x >> r.pos.y >> r.pos.z >> r.yaw >> r.health)) {
+            GAME_ERROR("Save: malformed mobs.dat line; later mobs dropped");
+            return;
+        }
+        m_mobs.push_back(r);
+    }
+}
+
+void WorldSave::WriteMobs() const {
+    const auto path = m_dir / "mobs.dat";
+    if (m_mobs.empty()) {
+        std::error_code ec;
+        std::filesystem::remove(path, ec);
+        return;
+    }
+    const auto tmp = m_dir / "mobs.dat.tmp";
+    {
+        std::ofstream out{tmp, std::ios::trunc};
+        out << std::setprecision(9);
+        for (const MobRecord& r : m_mobs) {
+            out << "mob " << r.type << ' ' << r.pos.x << ' ' << r.pos.y << ' ' << r.pos.z << ' '
+                << r.yaw << ' ' << r.health << '\n';
+        }
+        if (!out) {
+            GAME_ERROR("Save: failed writing {}", tmp.string());
+            return;
+        }
+    }
+    std::error_code ec;
+    std::filesystem::rename(tmp, path, ec);
+    if (ec) {
+        GAME_ERROR("Save: failed replacing {} ({})", path.string(), ec.message());
+    }
+}
+
+void WorldSave::SetMobs(std::vector<MobRecord> mobs) {
+    m_mobs = std::move(mobs);
+    m_mobsDirty = true;
+}
+
 void WorldSave::ReadRegionFile(const std::filesystem::path& path) {
     std::ifstream in{path, std::ios::binary};
     std::vector<uint8_t> file{std::istreambuf_iterator<char>(in),
@@ -391,7 +440,7 @@ void WorldSave::Put(const glm::ivec3& chunkCoord, const Chunk& chunk) {
 }
 
 void WorldSave::Flush(bool force) {
-    if (m_dirtyRegions.empty() && !m_furnacesDirty) {
+    if (m_dirtyRegions.empty() && !m_furnacesDirty && !m_mobsDirty) {
         return;
     }
     const auto now = std::chrono::steady_clock::now();
@@ -409,6 +458,10 @@ void WorldSave::Flush(bool force) {
     if (m_furnacesDirty) {
         WriteFurnaces();
         m_furnacesDirty = false;
+    }
+    if (m_mobsDirty) {
+        WriteMobs();
+        m_mobsDirty = false;
     }
 }
 

@@ -15,7 +15,7 @@ constexpr float kPi = glm::pi<float>();
 constexpr float kDegToRad = kPi / 180.0f;
 } // namespace
 
-HumanoidModel::HumanoidModel() {
+HumanoidModel::HumanoidModel(std::string skinRel, bool zombiePose) : m_zombiePose(zombiePose) {
     using Box = vox::BoxModel::Box;
     // Vanilla ModelBiped boxes (pixels, Y-down model space, 64x64 skin). The
     // origin is part-local (relative to the pivot/rotationPoint). Pivots and
@@ -35,8 +35,8 @@ HumanoidModel::HumanoidModel() {
     m_leftLeg = m_model.AddPart("leftLeg", {1.9f, 12.0f, 0.0f},
                                 {Box{{-2, 0, -2}, {4, 12, 4}, {0, 16}, 0.0f, true}});
 
-    if (std::filesystem::exists(vox::assets::Resolve("mc/textures/entity/steve.png"))) {
-        m_model.SetSkin(vox::Texture2D::FromFile("mc/textures/entity/steve.png"), 64.0f, 64.0f);
+    if (std::filesystem::exists(vox::assets::Resolve(skinRel))) {
+        m_model.SetSkin(vox::Texture2D::FromFile(skinRel), 64.0f, 64.0f);
     }
     m_model.Build();
 }
@@ -53,8 +53,17 @@ void HumanoidModel::SetRotationAngles(float limbSwing, float limbSwingAmount, fl
     const float leftArmX = std::cos(swing) * 2.0f * limbSwingAmount * 0.5f;
     const float idleZ = std::cos(age * 0.09f) * 0.05f + 0.05f;
     const float idleX = std::sin(age * 0.067f) * 0.05f;
-    m_model.SetRotation(m_rightArm, {rightArmX + idleX, 0.0f, idleZ});
-    m_model.SetRotation(m_leftArm, {leftArmX - idleX, 0.0f, -idleZ});
+    if (m_zombiePose) {
+        // Vanilla ModelZombie: arms held straight out (rotateAngleX ~ -pi/2),
+        // toed slightly inward, bobbing as it walks — the classic shamble.
+        const float arm = -kPi / 2.0f + std::sin(age * 0.067f) * 0.05f;
+        const float armSwing = std::cos(swing) * 0.4f * limbSwingAmount;
+        m_model.SetRotation(m_rightArm, {arm - armSwing, 0.0f, -0.05f});
+        m_model.SetRotation(m_leftArm, {arm + armSwing, 0.0f, 0.05f});
+    } else {
+        m_model.SetRotation(m_rightArm, {rightArmX + idleX, 0.0f, idleZ});
+        m_model.SetRotation(m_leftArm, {leftArmX - idleX, 0.0f, -idleZ});
+    }
 
     m_model.SetRotation(m_rightLeg, {std::cos(swing) * 1.4f * limbSwingAmount, 0.0f, 0.0f});
     m_model.SetRotation(m_leftLeg, {std::cos(swing + kPi) * 1.4f * limbSwingAmount, 0.0f, 0.0f});

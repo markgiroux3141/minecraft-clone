@@ -74,6 +74,9 @@ extern ItemId IronShovel;
 extern ItemId Bucket;
 extern ItemId WaterBucket;
 extern ItemId LavaBucket;
+// M32 mob drops (sprite-only for now; eating/food value is backlog).
+extern ItemId RawPorkchop; // pig
+extern ItemId RottenFlesh;  // zombie
 
 // The liquid SOURCE block a filled bucket places (Air for the empty bucket
 // or any non-bucket item) — lets the bucket use code stay data-driven.

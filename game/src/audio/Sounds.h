@@ -43,6 +43,10 @@ public:
     void PlaySplash(const glm::vec3& pos);
     void PlayHurt(); // M30: the player took damage (2D, randomly pitched)
 
+    // --- M32 mobs (positional; hostile picks the zombie set, else pig) ------
+    void PlayMobHurt(bool hostile, const glm::vec3& pos);
+    void PlayMobDeath(bool hostile, const glm::vec3& pos);
+
     // --- Looping furnace voice (GameApp reconciles these against lit furnaces) -
     vox::VoiceHandle StartFurnaceLoop(const glm::vec3& blockCenter);
     void StopFurnaceLoop(vox::VoiceHandle& voice);
@@ -80,6 +84,13 @@ private:
     ClipSet m_bucketEmptyLava{}; // item/bucket/empty_lava*
     ClipSet m_caveAmbient{};// ambient/cave/cave*
     ClipSet m_hurt{};       // damage/hit* (player hurt)
+    // M32 mob voices (mob/pig, mob/zombie). Pig has no distinct hurt clip in
+    // 1.12 (it reuses "say"), so PlayMobHurt falls back to the say set.
+    ClipSet m_pigSay{};
+    ClipSet m_pigDeath{};
+    ClipSet m_zombieSay{};
+    ClipSet m_zombieHurt{};
+    ClipSet m_zombieDeath{};
     vox::ClipHandle m_pop{};
     vox::ClipHandle m_fireLoop{};
     // Music is decoded on demand (one track at a time), so we keep paths, not

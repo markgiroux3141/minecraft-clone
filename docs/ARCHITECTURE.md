@@ -252,11 +252,13 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   humanoid (`vc::HumanoidModel`, a verbatim `ModelBiped.setRotationAngles` port)
   + walk/idle animation on a debug entity (press G). THE shared dependency of
   mobs and the in-UI player doll.
-- **M32 — Mobs (AI, spawning, combat)** 📋: a `LivingEntity`/`Mob` type over
-  M30/M31 — health + a player-collidable AABB + an M31 skinned model. One
-  passive (pig) + one hostile (zombie); wander/idle vs target-path-to-player +
-  melee; light/cap spawn rules + despawn; mob attacks deal M30 damage, player
-  melee + knockback, mob drops reuse M18 item entities; persisted sidecar.
+- **M32 — Mobs (AI, spawning, combat)** ✅: a `Mob` entity (game/src/world/Mob.h)
+  over M30/M31 — health + an AABB collided against blocks + an M31 skinned model.
+  One passive (pig, quadruped `PigModel`) + one hostile (zombie, the biped reused
+  with the zombie skin/pose); wander/idle vs target-path-to-player + melee;
+  light/cap spawn rules + despawn; mob attacks deal M30 damage with directional
+  knockback, player LMB melee + knockback + red hurt-flash, mob drops (porkchop/
+  rotten flesh) reuse M18 item entities; persisted in a mobs.dat sidecar.
 - **M33 — Armor & in-UI player doll** 📋: equippable armor (4 slots × tier)
   with M19 durability + damage reduction in M30's path; activate the inert
   inventory armor slots; render the player character (M31 model baked through

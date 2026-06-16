@@ -47,6 +47,9 @@ COPIES = [
     ("textures/environment/moon_phases.png", "textures/environment/moon_phases.png"),
     # Steve skin (M20): the first-person bare arm samples it.
     ("textures/entity/steve.png", "textures/entity/steve.png"),
+    # M32 mob skins: pig (64x32) and zombie (64x64, reuses the biped model).
+    ("textures/entity/pig/pig.png", "textures/entity/pig/pig.png"),
+    ("textures/entity/zombie/zombie.png", "textures/entity/zombie/zombie.png"),
     # Fire overlay (M30): the first-person "on fire" flames — vanilla's
     # ItemRenderer.renderFireInFirstPerson uses fire_layer_1. 16x512 vertical
     # animation strip (32 frames of 16x16); the HUD tiles a frame across the
@@ -219,6 +222,9 @@ def build_atlas(mc: Path, out_path: Path) -> None:
         load_tile(items / "bucket_empty.png"),
         load_tile(items / "bucket_water.png"),
         load_tile(items / "bucket_lava.png"),
+        # M32 mob drops (69 porkchop / 70 rotten flesh) — real item sprites.
+        load_tile(items / "porkchop_raw.png"),
+        load_tile(items / "rotten_flesh.png"),
     ]
 
     strip = Image.new("RGBA", (TILE * len(tiles), TILE))
@@ -251,7 +257,7 @@ def want_sound(rel: str) -> str | None:
     # path under assets/mc/sounds/, or None to skip. Music is flattened from
     # music/game/<name>.ogg to music/<name>.ogg (the game loads it flat).
     for family in ("dig/", "step/", "ambient/cave/", "liquid/", "fire/", "item/bucket/",
-                   "damage/"):
+                   "damage/", "mob/pig/", "mob/zombie/"):
         if rel.startswith(family):
             return rel
     if rel in ("random/pop.ogg", "random/glass1.ogg", "random/glass2.ogg",

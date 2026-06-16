@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <string>
 
 #include <glm/glm.hpp>
 
@@ -10,15 +11,16 @@ namespace vc {
 
 // A Steve-style biped built on vox::BoxModel: head (+ hat overlay), body, two
 // arms, two legs, authored from vanilla ModelBiped's pixel boxes and skinned
-// from the imported player skin (mc/textures/entity/steve.png; 64x64). This is
-// the M31 test model — both M32 mobs and the M33 inventory player-doll reuse it
-// (a zombie/pig will swap the box layout + skin; the doll swaps the world
-// matrix). The animation is a verbatim port of ModelBiped.setRotationAngles
-// (limb swing while walking + the idle arm sway), so it reads exactly like
-// vanilla.
+// from a 64x64 entity skin. The M31 debug Steve uses the default (the player
+// skin); M32's zombie reuses it with the zombie skin and the arms-forward pose
+// (vanilla ModelZombie). The animation is a port of ModelBiped.setRotationAngles
+// (limb swing while walking + the idle arm sway), so it reads like vanilla.
 class HumanoidModel {
 public:
-    HumanoidModel();
+    // skinRel is an asset-relative path (e.g. "mc/textures/entity/zombie/zombie.png").
+    // zombiePose holds the arms out straight ahead (vanilla shambling zombie).
+    explicit HumanoidModel(std::string skinRel = "mc/textures/entity/steve.png",
+                           bool zombiePose = false);
 
     // True once the skin loaded (needs the gitignored mc asset overlay; a
     // clean clone without it skips drawing, like the first-person arm).
@@ -38,6 +40,7 @@ public:
     }
 
 private:
+    bool m_zombiePose = false;
     vox::BoxModel m_model;
     int m_head = -1;
     int m_body = -1;

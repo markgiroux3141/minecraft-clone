@@ -35,6 +35,9 @@ constexpr float kStepHeight = 0.6f;         // M28: auto-climb slabs/stairs (van
 constexpr int kMaxHurtResist = 20;          // vanilla maxHurtResistantTime (1 s)
 constexpr int kMaxHurtTime = 10;            // vanilla maxHurtTime (hurt-tilt window)
 constexpr float kPi = 3.14159265358979f;
+constexpr float kKnockback = 7.0f;     // M32: horizontal shove speed from a mob hit (b/s)
+constexpr float kKnockbackUp = 7.0f;   // and the upward pop
+constexpr float kKnockbackDecay = 0.55f; // per-tick falloff (additive over the wish move)
 
 } // namespace
 
@@ -193,6 +196,13 @@ void Player::TickWalk(const vc::World& world, float dt) {
             AddExhaustion(KeyDown(vox::Key::LeftControl) ? 0.2f : 0.05f); // vanilla jump cost
         }
     }
+
+    // M32 knockback: a mob hit adds a decaying horizontal impulse ON TOP of the
+    // wish velocity (which is re-set from input each tick), so the shove still
+    // reads through movement for a few ticks before fading.
+    m_velocity.x += m_knockback.x;
+    m_velocity.z += m_knockback.z;
+    m_knockback *= kKnockbackDecay;
 
     m_grounded = false;
     MoveAxis(world, 1, m_velocity.y * dt);
@@ -397,16 +407,17 @@ void Player::Heal(float amount) {
     }
 }
 
-void Player::ApplyDamage(float amount) {
+bool Player::ApplyDamage(float amount) {
     if (m_dead || amount <= 0.0f) {
-        return;
+        return false;
     }
+    bool freshHit = false;
     // Vanilla EntityLivingBase.attackEntityFrom hurt-resist window: within the
     // first half of the window a fresh hit only lands the amount ABOVE the last
     // one; otherwise it lands in full and arms the window.
     if (m_hurtResist > kMaxHurtResist / 2) {
         if (amount <= m_lastDamage) {
-            return;
+            return false;
         }
         m_health -= amount - m_lastDamage;
         m_lastDamage = amount;
@@ -418,10 +429,49 @@ void Player::ApplyDamage(float amount) {
         // (vanilla only does this on a full hit, not a within-window top-up).
         m_hurtTime = kMaxHurtTime;
         m_hurtThisTick = true;
+        m_hurtRollSign = 1.0f; // undirected by default (environmental damage)
+        freshHit = true;
     }
     if (m_health <= 0.0f) {
         m_health = 0.0f;
         m_dead = true;
+    }
+    return freshHit;
+}
+
+void Player::Hurt(float amount, const glm::vec3& fromPos) {
+    if (!ApplyDamage(amount)) {
+        return; // dead, no-damage, or absorbed by the resist window — no knockback
+    }
+    // Knockback away from the source (vanilla EntityLivingBase.knockBack);
+    // horizontal direction from the attacker to us, with a small upward pop.
+    glm::vec3 away = m_position - fromPos;
+    away.y = 0.0f;
+    if (glm::length(away) > 1e-4f) {
+        away = glm::normalize(away);
+    } else {
+        away = {0.0f, 0.0f, 1.0f};
+    }
+    m_knockback = away * kKnockback;
+    if (m_grounded) {
+        m_velocity.y = kKnockbackUp;
+    }
+    // Directional hurt tilt: lean by which side the hit came from (sign of the
+    // shove projected onto the look-right axis).
+    const float yawRad = glm::radians(m_yaw);
+    const glm::vec3 right{-std::sin(yawRad), 0.0f, std::cos(yawRad)};
+    m_hurtRollSign = glm::dot(away, right) >= 0.0f ? 1.0f : -1.0f;
+}
+
+void Player::ExternalPush(const vc::World& world, float dx, float dz) {
+    if (m_mode == Mode::Fly) {
+        return; // creative noclip: mobs don't shove you
+    }
+    if (dx != 0.0f) {
+        MoveAxis(world, 0, dx);
+    }
+    if (dz != 0.0f) {
+        MoveAxis(world, 2, dz);
     }
 }
 
@@ -446,6 +496,8 @@ void Player::Respawn(const glm::vec3& feetPos) {
     m_lastDamage = 0.0f;
     m_hurtTime = 0;
     m_hurtThisTick = false;
+    m_hurtRollSign = 1.0f;
+    m_knockback = glm::vec3{0.0f};
     m_dead = false;
     m_mode = Mode::Walk;
     Teleport(feetPos); // resets velocity + arms spawn fall-grace
@@ -462,7 +514,7 @@ float Player::CameraRoll(double alpha) const {
     }
     f /= static_cast<float>(kMaxHurtTime);
     f = std::sin(f * f * f * f * kPi);
-    return f * 14.0f;
+    return f * 14.0f * m_hurtRollSign;
 }
 
 bool Player::ConsumeHurt() {

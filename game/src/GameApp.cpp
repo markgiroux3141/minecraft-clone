@@ -263,6 +263,12 @@ void GameApp::OnInit() {
     m_entityModelShader =
         vox::Shader::FromFiles("shaders/entity_model.vert", "shaders/entity_model.frag");
     m_humanoid = std::make_unique<vc::HumanoidModel>();
+    // M32 mob models: the zombie is the biped with the zombie skin + arms-out
+    // pose; the pig is a quadruped. Both silently skip drawing without the
+    // gitignored skin overlay (like the debug Steve), so a clean clone is fine.
+    m_zombieModel = std::make_unique<vc::HumanoidModel>(
+        "mc/textures/entity/zombie/zombie.png", /*zombiePose=*/true);
+    m_pigModel = std::make_unique<vc::PigModel>();
 
     m_outlineShader = vox::Shader::FromFiles("shaders/outline.vert", "shaders/outline.frag");
     constexpr float corners[] = {
@@ -439,6 +445,37 @@ void GameApp::OnTick(double dt) {
             m_sounds.PlayHurt(); // M30: damage noise on each fresh hit
         }
         m_world->Tick(); // scheduled block updates (falling sand, water flow)
+
+        // M32: tick mobs (AI/physics/combat/spawning). World stays Player- and
+        // audio-free, so it gets the player state + callbacks and hands back
+        // hurt/death sound events to play here.
+        vc::World::MobTickCtx mobCtx;
+        mobCtx.playerFeet = m_player.Position();
+        mobCtx.playerHalfWidth = Player::kHalfWidth;
+        mobCtx.playerHeight = Player::kHeight;
+        mobCtx.isNight = IsNight();
+        mobCtx.damagePlayer = [&](float dmg, const glm::vec3& from) {
+            // Fly is creative (M30): no mob damage. Zombies still chase + shove
+            // so you can watch them harmlessly.
+            if (m_player.GetMode() == Player::Mode::Walk) {
+                m_player.Hurt(dmg, from);
+            }
+        };
+        mobCtx.pushPlayer = [&](float dx, float dz) { m_player.ExternalPush(*m_world, dx, dz); };
+        m_world->TickMobs(mobCtx);
+        if (m_player.ConsumeHurt()) {
+            m_sounds.PlayHurt(); // a mob hit landed during the mob tick
+        }
+        for (const vc::MobSound& s : m_world->MobSoundEvents()) {
+            const bool hostile = vc::MobDefOf(s.type).hostile;
+            if (s.kind == 0) {
+                m_sounds.PlayMobHurt(hostile, s.pos);
+            } else {
+                m_sounds.PlayMobDeath(hostile, s.pos);
+            }
+        }
+        m_world->MobSoundEvents().clear();
+
         m_particles->Tick(*m_world);
         m_viewModel->Tick(m_inventory.Slot(m_hotbarSlot));
 
@@ -581,6 +618,25 @@ void GameApp::TickDebugMob(double dt) {
     m.age += 1.0f;
 }
 
+void GameApp::SpawnMobAhead(vc::MobType type) {
+    if (!m_world || m_state != State::Playing) {
+        return;
+    }
+    // ~3 blocks ahead at eye-level x/z; it falls onto the ground via gravity.
+    glm::vec3 ahead = m_player.Position() + m_camera.Forward() * 3.0f;
+    ahead.y = m_player.Position().y + 1.0f;
+    m_world->SpawnMob(type, ahead);
+    GAME_INFO("Spawned debug {} at ({:.1f}, {:.1f}, {:.1f})",
+              type == vc::MobType::Pig ? "pig" : "zombie", ahead.x, ahead.y, ahead.z);
+}
+
+bool GameApp::IsNight() const {
+    // Same phase as ComputeDayNight: night is when the sun is below the horizon
+    // (elevation = sin(2*pi*t) < 0; t = 0 sunrise, 0.5 sunset).
+    const double t = std::fmod(m_worldTime / kDayTicks, 1.0);
+    return std::sin(static_cast<float>(t) * glm::two_pi<float>()) < 0.0f;
+}
+
 void GameApp::ThrowItem(const vc::ItemStack& stack) {
     if (!m_world || stack.Empty()) {
         return;
@@ -721,6 +777,19 @@ void GameApp::HandleInput(double frameDt, int scroll) {
     }
     m_debugMobKeyWasDown = mobKey;
 
+    // M32 debug spawns: B = pig, C = zombie, dropped ~3 blocks ahead so they're
+    // easy to test without waiting for natural spawns.
+    const bool pigKey = vox::Input::IsKeyDown(vox::Key::B);
+    if (pigKey && !m_spawnPigKeyWasDown) {
+        SpawnMobAhead(vc::MobType::Pig);
+    }
+    m_spawnPigKeyWasDown = pigKey;
+    const bool zombieKey = vox::Input::IsKeyDown(vox::Key::C);
+    if (zombieKey && !m_spawnZombieKeyWasDown) {
+        SpawnMobAhead(vc::MobType::Zombie);
+    }
+    m_spawnZombieKeyWasDown = zombieKey;
+
     // 1..9 select the hotbar slot; the wheel cycles it (vanilla: scroll
     // up moves left, wrapping).
     for (size_t i = 0; i < vc::Inventory::kHotbarSize; ++i) {
@@ -740,7 +809,36 @@ void GameApp::HandleInput(double frameDt, int scroll) {
     m_placeCooldown = std::max(0.0, m_placeCooldown - frameDt);
 
     const bool breakDown = vox::Input::IsMouseButtonDown(vox::MouseButton::Left);
-    if (m_player.GetMode() == Player::Mode::Fly) {
+
+    // M32 melee: on the LMB press edge, if a mob is in reach and nearer than
+    // any targeted block, attack it (with knockback) instead of digging.
+    bool attackedMob = false;
+    if (breakDown && !m_breakWasDown) {
+        float mobDist = 0.0f;
+        const auto mobHit =
+            m_world->RaycastMob(m_camera.Position(), m_camera.Forward(), kReachDistance, mobDist);
+        if (mobHit) {
+            const float blockDist =
+                m_target ? glm::length(m_target->point - m_camera.Position()) : 1e9f;
+            if (mobDist <= blockDist) {
+                vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
+                float dmg = 2.0f; // bare hand (half-hearts*… tunable: no sword item yet)
+                if (const vc::ItemDef* tool = vc::ItemRegistry::Get().Find(hand.id);
+                    tool && tool->tool == vc::ToolClass::Axe) {
+                    dmg += static_cast<float>(tool->tier) + 1.0f; // wood 1 .. iron 3 bonus
+                }
+                m_world->DamageMob(*mobHit, dmg, m_player.Position());
+                m_viewModel->TriggerSwing();
+                m_digCell.reset();
+                m_digProgress = 0.0f;
+                attackedMob = true;
+            }
+        }
+    }
+
+    if (attackedMob) {
+        // Attack consumed the click; don't also break a block this press.
+    } else if (m_player.GetMode() == Player::Mode::Fly) {
         // Creative-style (decided with the user): fly mode pops blocks
         // instantly and drops nothing — the palette is the source there.
         if (breakDown && m_target && (!m_breakWasDown || m_breakCooldown == 0.0)) {
@@ -1485,6 +1583,7 @@ void GameApp::OnRender(double alpha, double frameDt) {
             m_entityModelShader->SetFloat2(
                 "u_light", {static_cast<float>(vc::ChunkLight::Sky(packed)) / 15.0f,
                             static_cast<float>(vc::ChunkLight::Block(packed)) / 15.0f});
+            m_entityModelShader->SetFloat("u_hurt", 0.0f); // debug Steve never flashes
 
             // Pixel/Y-down model space -> world: place feet at pos, face the
             // travel direction, scale 1/16, then flip upright (Rx(pi) + the
@@ -1499,6 +1598,62 @@ void GameApp::OnRender(double alpha, double frameDt) {
 
             vox::Renderer::SetCullFace(false);
             m_humanoid->Render(*m_entityModelShader, m);
+            vox::Renderer::SetCullFace(true);
+            m_chunkShader->Bind();
+        }
+
+        // M32: living mobs (pigs/zombies). Same opaque slot + box-model shader
+        // as the debug Steve; one bind, then per-mob articulation + matrix.
+        const auto& mobs = m_world->Mobs();
+        if (!mobs.empty()) {
+            constexpr float kPi = 3.14159265358979323846f;
+            const float a = static_cast<float>(alpha);
+            m_entityModelShader->Bind();
+            m_entityModelShader->SetMat4("u_viewProj", viewProj);
+            m_entityModelShader->SetInt("u_skin", 1);
+            m_entityModelShader->SetFloat3("u_sunDir", dayNight.lightDir);
+            m_entityModelShader->SetFloat("u_sunLight", dayNight.sunLight);
+            m_entityModelShader->SetFloat3("u_skyTint", dayNight.skyTint);
+            vox::Renderer::SetCullFace(false);
+            for (const vc::Mob& mob : mobs) {
+                const bool zombie = mob.type == vc::MobType::Zombie;
+                if (zombie ? (!m_zombieModel || !m_zombieModel->Ready())
+                           : (!m_pigModel || !m_pigModel->Ready())) {
+                    continue; // no skin overlay -> draw nothing (like the bare arm)
+                }
+                const vc::MobDef& def = vc::MobDefOf(mob.type);
+                const glm::vec3 pos = glm::mix(mob.prevPos, mob.pos, a);
+                const float yaw = glm::mix(mob.prevYaw, mob.yaw, a);
+                const float limbSwing = glm::mix(mob.prevLimbSwing, mob.limbSwing, a);
+                const float limbAmount =
+                    glm::mix(mob.prevLimbSwingAmount, mob.limbSwingAmount, a);
+
+                // Light at the body-center cell (like the entity-cube path).
+                const glm::ivec3 cell{static_cast<int>(std::floor(pos.x)),
+                                      static_cast<int>(std::floor(pos.y + def.height * 0.5f)),
+                                      static_cast<int>(std::floor(pos.z))};
+                const uint8_t packed = m_world->PackedLightAt(cell);
+                m_entityModelShader->SetFloat2(
+                    "u_light", {static_cast<float>(vc::ChunkLight::Sky(packed)) / 15.0f,
+                                static_cast<float>(vc::ChunkLight::Block(packed)) / 15.0f});
+                m_entityModelShader->SetFloat("u_hurt", mob.hurtTime > 0 ? 1.0f : 0.0f);
+
+                // Pixel/Y-down model -> world: feet at pos, facing travel/target,
+                // 1/16 scale, then the upright flip (Rx(pi) + the feet offset).
+                glm::mat4 m = glm::translate(glm::mat4(1.0f), pos);
+                m = glm::rotate(m, kPi * 0.5f - yaw, {0.0f, 1.0f, 0.0f});
+                m = glm::scale(m, glm::vec3(1.0f / 16.0f));
+                m = glm::translate(m, {0.0f, def.modelOffsetPx, 0.0f});
+                m = glm::rotate(m, kPi, {1.0f, 0.0f, 0.0f});
+
+                if (zombie) {
+                    m_zombieModel->SetRotationAngles(limbSwing, limbAmount, mob.age + a, 0.0f, 0.0f);
+                    m_zombieModel->Render(*m_entityModelShader, m);
+                } else {
+                    m_pigModel->SetRotationAngles(limbSwing, limbAmount, mob.age + a, 0.0f, 0.0f);
+                    m_pigModel->Render(*m_entityModelShader, m);
+                }
+            }
             vox::Renderer::SetCullFace(true);
             m_chunkShader->Bind();
         }

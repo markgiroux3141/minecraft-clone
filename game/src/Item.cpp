@@ -98,6 +98,8 @@ ItemId IronShovel = 0;
 ItemId Bucket = 0;
 ItemId WaterBucket = 0;
 ItemId LavaBucket = 0;
+ItemId RawPorkchop = 0;
+ItemId RottenFlesh = 0;
 
 namespace {
 
@@ -175,6 +177,18 @@ void RegisterDefaults() {
     lavaBucket.tile = 68;
     lavaBucket.maxStack = 1;
     LavaBucket = registry.Register(std::move(lavaBucket));
+
+    // M32 mob drops (sprite tiles 69/70 — appended after the M26 bucket tiles;
+    // keep BOTH atlas scripts in sync). Sprite-only: no food value yet.
+    ItemDef porkchop;
+    porkchop.name = "raw porkchop";
+    porkchop.tile = 69;
+    RawPorkchop = registry.Register(std::move(porkchop));
+
+    ItemDef flesh;
+    flesh.name = "rotten flesh";
+    flesh.tile = 70;
+    RottenFlesh = registry.Register(std::move(flesh));
 
     // Coal ore's drop is the coal item — its id only exists now, after
     // item registration (same late-patch pattern as stone -> cobblestone).

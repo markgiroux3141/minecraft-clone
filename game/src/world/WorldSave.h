@@ -26,6 +26,8 @@ namespace vc {
 //                             "vitals health food sat exh air" (M30)
 //   <dir>/furnaces.dat        text sidecar, one furnace block entity per
 //                             line (M21) — see FurnaceRecord
+//   <dir>/mobs.dat            text sidecar, one mob per line (M32) — see
+//                             MobRecord
 //   <dir>/r.<rx>.<rz>.vxr     region file covering 32x32 chunk columns:
 //     uint32 magic "VXR1", uint32 chunkCount,
 //     chunkCount x { int32 cx, cy, cz; uint32 blobSize },
@@ -119,6 +121,19 @@ public:
     const std::vector<FurnaceRecord>& GetFurnaces() const { return m_furnaces; }
     void SetFurnaces(std::vector<FurnaceRecord> furnaces);
 
+    // Mobs (M32), persisted in a mobs.dat sidecar (text, one mob per line) —
+    // like furnaces they change every tick, so SetMobs only marks the store
+    // dirty and the debounced Flush writes the file. type is MobType cast to
+    // int. Absent file = no mobs (an old save loads with an empty world).
+    struct MobRecord {
+        int type = 0;
+        glm::vec3 pos{0.0f};
+        float yaw = 0.0f;
+        float health = 0.0f;
+    };
+    const std::vector<MobRecord>& GetMobs() const { return m_mobs; }
+    void SetMobs(std::vector<MobRecord> mobs);
+
     // Null when the chunk was never saved. Invalidated by the next Put.
     const std::vector<uint8_t>* FindBlob(const glm::ivec3& chunkCoord) const;
 
@@ -159,6 +174,8 @@ private:
     void WriteRegionFile(const glm::ivec2& region) const;
     void ReadFurnaces();
     void WriteFurnaces() const;
+    void ReadMobs();
+    void WriteMobs() const;
 
     std::filesystem::path m_dir;
     int m_seed = 0;
@@ -168,6 +185,8 @@ private:
     std::optional<std::vector<InventorySlot>> m_inventory;
     std::vector<FurnaceRecord> m_furnaces;
     bool m_furnacesDirty = false;
+    std::vector<MobRecord> m_mobs;
+    bool m_mobsDirty = false;
     std::unordered_map<glm::ivec2, RegionChunks, IVec2Hash> m_regions;
     std::unordered_set<glm::ivec2, IVec2Hash> m_dirtyRegions;
     size_t m_count = 0;

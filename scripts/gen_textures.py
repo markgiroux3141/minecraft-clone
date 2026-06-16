@@ -479,6 +479,23 @@ bucket_water = bucket_sprite((60, 110, 210))
 bucket_lava = bucket_sprite((230, 110, 24))
 
 
+def porkchop_sprite(x, y):
+    # M32: a pink raw-meat blob with a paler fat rim.
+    d = (x - 8) ** 2 + (y - 8) ** 2
+    if d <= 30:
+        return speckle((226, 130, 132), x, y, 69, 12)
+    if d <= 42:
+        return speckle((236, 198, 196), x, y, 69, 8)  # fat edge
+    return (0, 0, 0, 0)
+
+
+def rotten_flesh_sprite(x, y):
+    # M32: a ragged greenish-brown scrap.
+    if (x - 8) ** 2 + (y - 8) ** 2 <= 34 and hash01(x, y, 70) > 0.18:
+        return speckle((124, 116, 78), x, y, 70, 16)
+    return (0, 0, 0, 0)
+
+
 # Layer index in the texture array == position in this list.
 TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top, leaves, water,
          snow, grass_side_snowed, tall_grass, dandelion, poppy, dead_bush,
@@ -501,7 +518,9 @@ TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top,
          # M26: lava (64, still — used for source and all flow levels, like
          # water) and obsidian (65, lava+water product), then bucket sprites
          # (66 empty / 67 water / 68 lava).
-         lava, obsidian, bucket_empty, bucket_water, bucket_lava]
+         lava, obsidian, bucket_empty, bucket_water, bucket_lava,
+         # M32 mob drops (69 porkchop / 70 rotten flesh).
+         porkchop_sprite, rotten_flesh_sprite]
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:

@@ -64,10 +64,20 @@ public:
 
     // M30 hurt-camera tilt (vanilla EntityRenderer.hurtCameraEffect): the roll
     // in degrees to layer onto the camera this frame, interpolated by the
-    // render alpha. Decays to 0 over the hurt window after each hit.
+    // render alpha. Decays to 0 over the hurt window after each hit. M32 makes
+    // the sign directional (lean away from a mob hit's side).
     float CameraRoll(double alpha) const;
     // True exactly once after a hit lands (drives the hurt sound); clears on read.
     bool ConsumeHurt();
+
+    // M32: damage from a source at fromPos (a mob's melee). On a fresh hit this
+    // adds horizontal knockback away from the source (+ a small upward pop) and
+    // makes the hurt-tilt directional. Wraps M30's ApplyDamage (which left
+    // directional knockback for this milestone).
+    void Hurt(float amount, const glm::vec3& fromPos);
+    // M32: a soft external shove (a mob pushing the player out of its body),
+    // resolved against blocks so it can't push you into a wall. No-op in fly.
+    void ExternalPush(const vc::World& world, float dx, float dz);
 
     // Does the player's AABB overlap this block? (placement check)
     bool Intersects(const glm::ivec3& block) const;
@@ -88,8 +98,10 @@ private:
     void TickFoodStats();
     // Vanilla EntityLivingBase.attackEntityFrom: applies `amount` health
     // points of damage subject to the hurt-resist window (a bigger hit during
-    // the window tops up to the new amount). Sets m_dead at <= 0.
-    void ApplyDamage(float amount);
+    // the window tops up to the new amount). Sets m_dead at <= 0. Returns true
+    // when a FRESH full hit landed (armed the hurt window) — Hurt uses this to
+    // attach directional knockback.
+    bool ApplyDamage(float amount);
     void Heal(float amount);
     // Player AABB (slightly grown horizontally) overlaps a cactus cell.
     bool TouchingCactus(const vc::World& world) const;
@@ -132,6 +144,8 @@ private:
     bool m_dead = false;
     int m_hurtTime = 0;          // counts down from kMaxHurtTime; drives the camera tilt
     bool m_hurtThisTick = false; // a hit landed this tick (one-shot for the hurt sound)
+    float m_hurtRollSign = 1.0f; // M32: directional sign of the hurt tilt (+1 = undirected)
+    glm::vec3 m_knockback{0.0f};  // M32: decaying horizontal shove from a mob hit
 
     glm::vec2 m_lastMouse{0.0f};
     bool m_hasLastMouse = false;

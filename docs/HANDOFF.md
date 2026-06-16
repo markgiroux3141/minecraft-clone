@@ -24,10 +24,14 @@ hurt-feedback (damage sound + camera tilt) and the real first-person fire
 overlay follow-ups — see the M30 section for what was built. M31 (ENTITY MODEL
 RENDERER — the `vox::BoxModel` jointed box-model renderer + a Steve debug entity
 on the G key) is now DONE and USER-VERIFIED ("works perfect") — see the M31
-section for the design. M32 (MOBS — AI, spawning, combat) is NEXT UP and builds
-directly on M31's renderer + M30's vitals + the existing FallingBlock/ItemEntity
-entity pattern; M33 (armor + the inventory player doll) follows. Both go in
-fresh contexts.
+section for the design. M32 (MOBS — AI, spawning, combat) is now CODE COMPLETE
+awaiting user verification — one passive (pig) + one hostile (zombie) with AI,
+natural light/cap-gated spawning, two-way melee combat (player LMB + knockback,
+zombie melee → directional player knockback), mob item drops, and mobs.dat
+persistence; built on M31's renderer + M30's vitals + the FallingBlock/ItemEntity
+pattern. See the M32 section for the design + the user test checklist (debug
+spawn keys B = pig, C = zombie). M33 (armor + the inventory player doll) is next,
+in a fresh context.
 Read alongside `ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md`
 (build commands, conventions).
 
@@ -38,7 +42,11 @@ re-imported (the committed placeholder atlas is already regenerated). M30's
 hurt-feedback follow-up also added a new sound family (`damage/`) and the fire
 overlay texture (`blocks/fire_layer_1.png` → `mc/textures/fire_layer_1.png`), so
 the same re-import pulls `damage/hit{1,2,3}.ogg` (player hurt noise) and the
-on-fire flames.
+on-fire flames. M32 added two more atlas item sprites (raw porkchop 69, rotten
+flesh 70), the pig/zombie entity skins (`entity/pig/pig.png`,
+`entity/zombie/zombie.png`), and two sound families (`mob/pig/`, `mob/zombie/`),
+so re-importing is needed for mobs to render + sound (161 sound files now). A
+clean clone with no overlay draws no mob and is silent, like the debug Steve.
 
 IMPORTANT RESOURCE: the user has Minecraft's Java source (MCP 9.40 =
 1.12) at `D:\Minecraft source code` — look up exact game dynamics there
@@ -73,7 +81,8 @@ Starts on the title screen (cursor free): click a world / New World /
 Quit. In game the cursor is captured: WASD move, mouse look, Space jump
 (walk) or rise (fly), LeftShift sink (fly), LeftControl sprint/boost,
 F toggles walk/fly, O toggles occlusion culling (debug), T fast-forwards
-world time (debug), LMB hold-to-break in walk (crack overlay, drops pop
+world time (debug), G spawns/despawns the debug Steve (M31), B/C spawn a
+debug pig/zombie ~3 blocks ahead (M32), LMB hold-to-break in walk (crack overlay, drops pop
 out as item entities and vacuum into the inventory; tools dig faster,
 stone needs a pickaxe to drop) / instant pop in fly (creative-style, no
 drops), RMB place (consumes one) or use a crafting table (opens its
@@ -2009,6 +2018,121 @@ night); press G again to remove it. Confirm orientation: it stands upright (not
 upside-down or sunk into the ground) and faces its direction of travel. (It has
 no collision and isn't saved — that's expected for the debug rig.)
 
+## M32 — mobs (AI, spawning, combat) (CODE COMPLETE)
+
+CODE COMPLETE 2026-06-16, awaiting user verification. Builds on M31's BoxModel
+renderer + M30's vitals + the existing FallingBlock/ItemEntity entity pattern.
+Decisions confirmed with the user before coding: zombie DAYLIGHT BURNING is
+deferred to backlog (kept M32 focused); FULL combat feedback (player melee +
+knockback, mob red hurt-flash + hurt/death sounds, zombie melee → directional
+player knockback). NO new world needed (gameplay only).
+
+- DATA MODEL (`game/src/world/Mob.{h,cpp}`): `MobType{Pig,Zombie}` + a
+  `kMobDefs` table (half-width/height, maxHealth, speed, hostile, attackDamage,
+  followRange, model feet-offset, drop count range). `Mob` is the same
+  tick-simulated, prev/current-interpolated, AABB struct as FallingBlock/
+  ItemEntity: pos/prevPos/vel, body yaw, health, onGround, fallDistance, the
+  vanilla walk-cycle accumulators (limbSwing/limbSwingAmount + prev, age), plus
+  hurtTime/attackCooldown/aiTimer/wanderDir. Pig 0.9×0.9 / 10 hp; zombie
+  0.6×1.95 / 20 hp / attack 3 / follow 16. `MobDropItem` returns the runtime
+  item id (pig → raw porkchop, zombie → rotten flesh).
+- SIMULATION (`World::TickMobs`, Mob.cpp): called from GameApp::OnTick in the
+  same Playing/ContainerOpen block as the player/world tick. World stays Player-
+  and audio-agnostic — it takes a `MobTickCtx{playerFeet, playerHalfWidth/Height,
+  isNight, damagePlayer(dmg,fromPos), pushPlayer(dx,dz)}`. Per mob: freeze if the
+  feet chunk isn't loaded (like the player/sand); AI → wish dir + facing; gravity
+  + axis-separated block collision with a 1-block auto-step (`MoveMobAxis`,
+  mirrors Player::MoveAxis over `World::CollisionBoxesAt`, full step-and-settle
+  with the same gain check so mobs don't climb walls); walk-cycle accumulators
+  (copied from the M31 DebugMob); soft entity push out of the player's body
+  (`pushPlayer` nudges the player via Player::ExternalPush, resolved against
+  blocks); hostile melee; fall/void death. AI: pig wanders (random stroll dir,
+  2–5 s, with idle pauses) at 0.55× speed; zombie within followRange targets the
+  player, walks straight at them (simple ground pathing; auto-step climbs
+  1-block rises), and on contact (`attackCooldown<=0`) calls `ctx.damagePlayer`
+  and resets the ~1 s cooldown. Knockback (set by DamageMob) decays through the
+  wish each tick via ground friction.
+- SPAWNING / DESPAWN (`World::SpawnMobs`, every ~2 s): counts mobs per category
+  within 64 blocks (caps 8/8), then a few attempts pick a ring position 24–44
+  blocks out, scan for ground (solid non-liquid below, 2 air above, only if the
+  chunk is loaded), and gate by light/surface: pig on `Grass` with sky-light ≥ 9
+  in daytime, zombie where block-light ≤ 7 and (`isNight` or sky-light ≤ 7).
+  Hostiles farther than 54 blocks despawn; passives persist. `isNight` is
+  GameApp's `IsNight()` (sun elevation < 0, same phase as ComputeDayNight).
+- COMBAT (`Player` + GameApp): M30 left directional knockback for this
+  milestone. `Player::ApplyDamage` now returns whether a FRESH hit landed;
+  `Player::Hurt(amount, fromPos)` wraps it to add a decaying horizontal
+  knockback (+ a small upward pop, applied additively over the wish velocity in
+  TickWalk) and a directional `CameraRoll` (the hurt tilt now leans by which
+  side the hit came from; environmental damage stays undirected). Player melee
+  (GameApp::HandleInput, LMB press-edge): `World::RaycastMob` (slab test vs mob
+  AABBs); if a mob is in reach (5) and nearer than the targeted block, it's
+  attacked instead of digging — bare hand 2.0, +tier+1 holding an axe (no sword
+  item exists yet — tunable). `World::DamageMob` applies health + red-flash
+  hurtTime + knockback away from the attacker + a hurt/death `MobSound` event;
+  drops loot and removes the mob at ≤ 0.
+- RENDERING (GameApp::OnRender mob pass, in the opaque slot next to the debug
+  Steve): the zombie reuses `HumanoidModel` (now takes a skin path + a
+  zombie-arms-forward pose flag) with `entity/zombie/zombie.png`; the pig is the
+  new `PigModel` (quadruped, ported from vanilla ModelQuadruped/ModelPig — head
+  with a snout, horizontal body, four short legs; 64×32 skin). One shader bind,
+  then per mob: interpolate pos/yaw/limbSwing, sample body-cell light,
+  `u_hurt` = hurtTime>0 (the entity_model.frag now blends toward red), and the
+  same upright-flip matrix as the debug Steve (the per-type feet offset is 24px
+  for both). Each model silently skips without its skin overlay (clean clone).
+- AUDIO (`GameSounds`): mob voices loaded from `mob/pig/` + `mob/zombie/`
+  (say/hurt/death sets; pig hurt falls back to its "say" set, vanilla has no pig
+  hurt clip). `PlayMobHurt/PlayMobDeath(hostile, pos)` are positional; GameApp
+  drains `World::MobSoundEvents()` after the mob tick (keeps World audio-free
+  like ForEachLitFurnace). The player's own grunt still rides M30's
+  ConsumeHurt → PlayHurt (now also checked after the mob tick).
+- PERSISTENCE: a `mobs.dat` sidecar mirroring furnaces.dat
+  (`WorldSave::MobRecord{type,pos,yaw,health}`, Get/SetMobs, ReadMobs/WriteMobs,
+  debounced Flush). World loads mobs in its ctor (unknown/newer types dropped)
+  and `SaveMobs()` rides SaveEditedChunks (autosave + ~World). savetest grew a
+  round-trip case (zombie/pig records + empty-set file deletion). An old save
+  with no mobs.dat loads with an empty world.
+- TESTABILITY: natural spawns aside, debug keys spawn a real mob ~3 blocks
+  ahead — `B` = pig, `C` = zombie (`GameApp::SpawnMobAhead`). G's debug Steve
+  (M31) is untouched.
+- Known M32 limits / decisions: soft entity push is mob-side (the mob shoves
+  itself out and nudges the player via ExternalPush) rather than hard player↔mob
+  block-style collision — you can still pass through a mob with a shove, no
+  getting stuck (a hard push is backlog); zombies don't burn in daylight
+  (deferred); no sword/attack-cooldown-bar, no baby/variant mobs, no breeding/
+  feeding, pig/zombie only; pathing is straight-line + auto-step (no A*), so a
+  zombie can hang up on a 2-block wall or a deep hole; mob drops aren't affected
+  by the food/eating system (porkchop/rotten flesh are sprite-only items — no
+  eating yet, that's backlog with the rest of farming/food).
+
+- POST-SCREENSHOT TWEAKS (2026-06-16, from the user's first look): the pig body
+  pivot Y was lowered 17 → 12 so the body sits ON the legs instead of dropping to
+  the ground with the legs buried inside it (our upright flip maps
+  world-y = 24 − (pivotY + rotatedBoxY), so vanilla's 17 lands the body too low;
+  this also tucks the head down onto the body). The zombie chase speed was
+  dropped 4.4 → 4.0 b/s — just under the player's 4.3 walk, matching vanilla's
+  "slightly slower than walking" (movementSpeed 0.23): you can now walk away
+  slowly and sprint away easily, where 4.4 meant only sprinting worked. Mob
+  horizontal movement also gained an ACCELERATION RAMP (`kAccel` 14 b/s² in
+  TickMobs): instead of snapping velocity to wish*speed each tick, it steps
+  toward the target by a capped amount, so mobs have momentum + reaction lag
+  (a few ticks to reach speed, can't instantly reverse to track a dodging
+  player) and knockback bleeds off through the same ramp (no special case).
+
+WHAT THE USER SHOULD TEST (NO new world; re-run `import_mc_assets.py` first for
+the skins + mob sounds): press `B` for a pig — it should stand on the ground and
+amble around in random directions, legs trotting, body turning to face its path;
+press `C` for a zombie — it should turn toward you and walk straight at you,
+arms out, and when it reaches you deal damage that knocks you back + tilts the
+camera from the hit side + plays the hurt grunt. LMB-click a mob (in reach, with
+nothing closer) → it flashes red, takes knockback, and after a few hits dies
+with a death sound and drops porkchop / rotten flesh that you can pick up (watch
+the hotbar). Holding an axe kills faster. Let the clock run: pigs should appear
+on grass in daylight, zombies at night (use T to fast-forward); wander a long
+way from a spawned zombie and it should despawn. Quit + re-enter the world → the
+mobs you left are restored from mobs.dat (pigs persist; far hostiles may have
+despawned). An OLD world (no mobs.dat) loads fine with an empty mob set.
+
 ## Planned arc — survival & mobs (M30–M33)
 
 Scoped with the user 2026-06-15. Goal: enemies, a health system, armor, and a
@@ -2059,14 +2183,10 @@ What we already have working in our favor (don't rebuild these):
   animation, drawn on a debug entity — NO gameplay yet. Both mobs and the player
   doll consume this.
 
-- **M32 — Mobs (AI, spawning, combat)** 📋. A `LivingEntity`/`Mob` entity type
-  extending the M30/M31 pieces: health + an AABB the player physics also resolves
-  against, a skinned M31 model, prev/current interpolation. One passive (pig) +
-  one hostile (zombie) to exercise both paths. AI: wander/idle for passive,
-  target-and-path-to-player + melee for hostile (simple ground pathing first).
-  Spawning rules (light level + spawn caps + despawn), mob attacks deal M30
-  damage, player melee (LMB on a mob) deals damage with knockback, mobs drop
-  items (reuses M18 item entities). Persisted to a mobs sidecar like furnaces.
+- **M32 — Mobs (AI, spawning, combat)** ✅ CODE COMPLETE (see the detailed
+  "M32 — mobs" section above). A `Mob` entity over M30/M31: pig + zombie,
+  wander/idle vs chase-and-melee AI, light/cap spawn rules + despawn, two-way
+  melee with knockback + red hurt-flash, item drops, mobs.dat persistence.
 
 - **M33 — Armor & the player doll in the inventory UI** 📋. Equippable armor
   items (helmet/chest/legs/boots × a material tier) with durability (M19) and
@@ -2074,6 +2194,58 @@ What we already have working in our favor (don't rebuild these):
   (equip on click / shift-click). Render the PLAYER CHARACTER in the inventory
   screen — the M31 Steve model baked to the M29 framebuffer→UI path — showing the
   worn armor layer. Once M31 exists this is mostly wiring + the armor-layer skin.
+
+## Mob & enemy roadmap (post-M32, scoped with the user 2026-06-16)
+
+M32 shipped the mob FRAMEWORK (per-type AABB + health, wander/chase/melee AI,
+light/cap spawning, two-way knockback combat, drops, persistence, the biped +
+quadruped box-model renderer, hurt flash, per-mob sounds). The rest of the
+bestiary splits into "drops onto that framework for free" vs. "needs a shared
+system built first." This is the agreed ORDER for future milestones; do them
+roughly top-to-bottom, each its own milestone/context.
+
+FRAMEWORK-READY (no new system — a `MobDef` row + a model + a skin + a drop):
+- Cow / Sheep / Chicken / Mooshroom (passive). Cow/sheep reuse the quadruped
+  `PigModel` shape with different box dims + skin (cow is the trivial one —
+  beef/leather); chicken is its own small model. Sheep adds wool/shearing/color
+  + grass-eating; chicken adds egg-laying + slow-fall — those are small extras.
+- Husk / drowned-style zombie reskins.
+- Spider works NOW as a plain wide melee mob (per-type AABB already handles its
+  2-block width); wall-climbing is a later movement extension.
+
+NEEDS A SYSTEM FIRST (each system also unlocks player features — build once,
+reuse):
+- Creeper → an EXPLOSION system (sphere block-removal + damage falloff + fuse/
+  ignite). Also unlocks TNT, ghast fireballs, beds, end crystals.
+- Skeleton → a PROJECTILE/arrow entity + ranged AI. Also unlocks the player
+  bow & arrows, snowballs, eggs, fireballs, thrown potions.
+- Breeding / baby animals → a FOOD/EATING system (+ a model SCALE factor for
+  babies). Also makes the M32 porkchop/rotten-flesh drops actually useful;
+  pairs with a farming milestone.
+- Slime → split-on-death (spawn smaller children) + size variants + bounce.
+- Enderman → teleport + block-carry + look-to-aggro (mostly bespoke).
+
+RECOMMENDED ORDER:
+1. **M33 — armor + inventory player doll** (already the next planned-arc
+   milestone; finishes the survival loop now that enemies hit you).
+2. **Passive roster: cow + sheep + chicken** — cheap, high value. Do the two
+   small framework generalizations HERE (see below) so the roster scales.
+3. **Explosion system → Creeper (+ TNT)** — the iconic missing enemy; one
+   system, big payoff.
+4. **Projectile system → Skeleton (+ player bow/arrows)**.
+5. **Food/eating → breeding + babies** (pairs with farming).
+6. **Bespoke movers** as desired: spider climbing, slime splitting, enderman
+   teleport, bats.
+
+TWO SMALL GENERALIZATIONS to slip in during step 2 (cheap now, avoid churn
+later):
+- Make `World::SpawnMobs` (game/src/world/Mob.cpp) DATA-DRIVEN: it currently
+  hardcodes the pig-vs-zombie spawn rule in an if-chain — move the rule to a
+  per-`MobDef` "spawn category" (e.g. SurfaceDaylight vs Dark/anywhere) so a new
+  mob is just a table row.
+- Add a model SCALE factor to the mob render path (the box models already render
+  through one matrix) so baby animals (and size-varied slimes) are a multiplier,
+  not a new model.
 
 ## Backlog (after M28)
 
@@ -2091,7 +2263,12 @@ occlusion / render-distance / sensitivity); tall-grass wheat seeds
 flow-animated water (16x512 strip); stars; world-list scrolling;
 vanilla's 14/16 cactus inset +
 touch damage; 3D-extruded item sprites in hand + view bobbing (M20
-polish).
+polish). M32 deferrals: zombie daylight burning (sky-exposure check +
+per-mob fire timer + flame visuals on the model); hard player↔mob
+collision (M32 uses a soft mob-side push, so you can shove through a
+mob); smarter mob pathing (A*/jump-over-gap instead of straight-line +
+auto-step); more mobs (variants/babies, breeding); food/eating so the
+porkchop/rotten-flesh drops (and farming crops) actually restore hunger.
 
 ## How to verify (working agreement — reinforced 2026-06-13)
 

@@ -12,6 +12,8 @@ add_executable(game
     src/Item.cpp
     src/Item.h
     src/Main.cpp
+    src/PigModel.cpp
+    src/PigModel.h
     src/Particles.cpp
     src/Particles.h
     src/Player.cpp
@@ -45,6 +47,8 @@ add_executable(game
     src/world/Light.h
     src/world/LightEngine.cpp
     src/world/LightEngine.h
+    src/world/Mob.cpp
+    src/world/Mob.h
     src/world/OreGen.cpp
     src/world/OreGen.h
     src/world/TerrainGen.cpp

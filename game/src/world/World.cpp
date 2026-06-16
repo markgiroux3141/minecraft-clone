@@ -135,6 +135,23 @@ World::World(int defaultSeed, std::filesystem::path saveDir)
         state.cookTicks = std::clamp(r.cookTicks, 0, furnace::kCookTicks);
         m_furnaces.emplace(r.pos, state);
     }
+    // Mobs saved with the world (M32). Unknown types from a newer build are
+    // dropped rather than crashing.
+    for (const auto& r : m_save.GetMobs()) {
+        if (r.type < 0 || r.type >= static_cast<int>(MobType::Count)) {
+            continue;
+        }
+        Mob mob;
+        mob.type = static_cast<MobType>(r.type);
+        mob.pos = r.pos;
+        mob.prevPos = r.pos;
+        mob.yaw = r.yaw;
+        mob.prevYaw = r.yaw;
+        mob.health = std::clamp(r.health, 0.0f, MobDefOf(mob.type).maxHealth);
+        if (mob.health > 0.0f) {
+            m_mobs.push_back(mob);
+        }
+    }
 }
 
 World::~World() {
@@ -162,6 +179,7 @@ void World::SaveEditedChunks() {
         }
     }
     SaveFurnaces();
+    SaveMobs();
 }
 
 void World::SaveFurnaces() {

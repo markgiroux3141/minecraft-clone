@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -20,6 +21,7 @@
 #include "world/ChunkMesher.h"
 #include "world/Furnace.h"
 #include "world/Light.h"
+#include "world/Mob.h"
 #include "world/LightEngine.h"
 #include "world/TerrainGen.h"
 #include "world/WorldSave.h"
@@ -198,6 +200,39 @@ public:
             }
         }
     }
+
+    // --- M32 mobs ----------------------------------------------------------
+    // World stays Player- and audio-agnostic, so mob AI gets the player state
+    // it needs (feet + AABB + whether it's night for hostile spawns) and two
+    // callbacks: damagePlayer (a hostile's melee, with the source position for
+    // knockback) and pushPlayer (soft body collision shoving the player aside).
+    struct MobTickCtx {
+        glm::vec3 playerFeet{0.0f};
+        float playerHalfWidth = 0.3f;
+        float playerHeight = 1.8f;
+        bool isNight = false;
+        std::function<void(float dmg, const glm::vec3& fromPos)> damagePlayer;
+        std::function<void(float dx, float dz)> pushPlayer;
+    };
+    // One 20-TPS step of every mob: AI -> ground physics (gravity + axis-
+    // separated AABB collision with 1-block auto-step) -> walk-cycle anim ->
+    // combat -> soft entity push -> fall damage/death; then periodic natural
+    // spawning and far-mob despawn. Call from GameApp::OnTick.
+    void TickMobs(const MobTickCtx& ctx);
+    // Spawn a mob standing at feetPos (debug spawn key; natural spawns use it
+    // too). Clamped to nothing — caller picks a valid spot.
+    void SpawnMob(MobType type, const glm::vec3& feetPos);
+    const std::vector<Mob>& Mobs() const { return m_mobs; }
+    // Ray vs mob AABBs (player melee). Returns the nearest hit mob's index and
+    // its distance in outDist; nothing past maxDist.
+    std::optional<size_t> RaycastMob(const glm::vec3& origin, const glm::vec3& dir,
+                                     float maxDist, float& outDist) const;
+    // Damage a mob (player melee): health, red-flash, knockback away from
+    // fromPos, hurt/death sound event; drops loot and removes it at <= 0.
+    void DamageMob(size_t index, float amount, const glm::vec3& fromPos);
+    // Mob sounds the sim wants played this tick (hurt/death). GameApp drains
+    // and clears it after Tick, keeping World audio-free (like ForEachLitFurnace).
+    std::vector<MobSound>& MobSoundEvents() { return m_mobSounds; }
 
     // Per-furnace block-entity state (M21), keyed by world position.
     // Created empty on first access (RMB-open does it); ticked by Tick()
@@ -442,6 +477,18 @@ private:
     // One tick of EntityItem physics for every dropped item (called from
     // Tick): move with axis-separated collision, drag, merge, despawn.
     void TickItemEntities();
+
+    // --- M32 mobs (impl in Mob.cpp) ---------------------------------------
+    // Periodic natural spawn attempt around the player (light + caps + ring).
+    void SpawnMobs(const MobTickCtx& ctx);
+    // Drop a dead mob's loot and queue its death sound (caller erases it).
+    void EmitMobDeath(const Mob& mob);
+    // Snapshot m_mobs into the save store (autosave/quit companion to
+    // SaveFurnaces).
+    void SaveMobs();
+    std::vector<Mob> m_mobs;            // persisted to mobs.dat
+    std::vector<MobSound> m_mobSounds;  // drained by GameApp each tick
+    uint32_t m_mobTickCount = 0;        // gates the periodic spawn attempt
     // If the replaceable block at pos (plant) is about to be crushed by
     // flowing water or a landing gravity block, pop its drop first.
     void CrushDrops(const glm::ivec3& pos);
