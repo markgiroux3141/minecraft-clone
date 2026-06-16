@@ -245,12 +245,13 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   no health system" hooks already stubbed throughout), vanilla regen gated on
   hunger, starvation, death → respawn. HUD heart/food/bubble rows via the
   existing icon path. No new renderer, no mobs; health/hunger persisted.
-- **M31 — Entity model renderer** 📋: a jointed multi-cuboid "box model"
-  renderer (vanilla `ModelBase`/`ModelRenderer`) in the engine — named parts
-  with per-part pivot/rotation, one skin texture, hierarchical transforms,
-  render-interpolated; generalizes the FallingBlock/ItemEntity cube path.
-  Ships with the Steve humanoid + an idle/walk animation on a debug entity.
-  THE shared dependency of mobs and the in-UI player doll.
+- **M31 — Entity model renderer** ✅: `vox::BoxModel` — a jointed multi-cuboid
+  "box model" renderer (vanilla `ModelBase`/`ModelRenderer`) in the engine —
+  named parts with per-part pivot/rotation, one skin texture, classic per-box
+  UV unwrap, hierarchical transforms, render-interpolated. Ships with the Steve
+  humanoid (`vc::HumanoidModel`, a verbatim `ModelBiped.setRotationAngles` port)
+  + walk/idle animation on a debug entity (press G). THE shared dependency of
+  mobs and the in-UI player doll.
 - **M32 — Mobs (AI, spawning, combat)** 📋: a `LivingEntity`/`Mob` type over
   M30/M31 — health + a player-collidable AABB + an M31 skinned model. One
   passive (pig) + one hostile (zombie); wander/idle vs target-path-to-player +

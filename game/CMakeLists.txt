@@ -5,6 +5,8 @@ add_executable(game
     src/Crafting.h
     src/GameApp.cpp
     src/GameApp.h
+    src/HumanoidModel.cpp
+    src/HumanoidModel.h
     src/Inventory.cpp
     src/Inventory.h
     src/Item.cpp

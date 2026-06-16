@@ -16,6 +16,7 @@
 #include "vox/renderer/UiRenderer.h"
 #include "vox/renderer/VertexArray.h"
 
+#include "HumanoidModel.h"
 #include "Inventory.h"
 #include "Particles.h"
 #include "Player.h"
@@ -115,6 +116,33 @@ private:
     std::shared_ptr<vox::Shader> m_entityShader;
     std::shared_ptr<vox::VertexArray> m_entityCube;
     std::shared_ptr<vox::VertexArray> m_itemQuad;
+
+    // M31: jointed box-model renderer (the M32 mob path + M33 player doll
+    // build on this). For now a single debug Steve, toggled with G, walks a
+    // small circle in front of the player to exercise the limb animation; no
+    // gameplay, no collision, not persisted.
+    std::shared_ptr<vox::Shader> m_entityModelShader;
+    std::unique_ptr<vc::HumanoidModel> m_humanoid;
+    struct DebugMob {
+        bool active = false;
+        glm::vec3 center{0.0f}; // circle center (set when spawned)
+        float angle = 0.0f;     // position around the circle, radians
+        glm::vec3 prevPos{0.0f};
+        glm::vec3 pos{0.0f};
+        float prevYaw = 0.0f;
+        float yaw = 0.0f; // body facing, radians (world)
+        // Vanilla EntityLivingBase walk-cycle accumulators (+ prev for render
+        // interpolation) and age (drives the idle sway).
+        float limbSwing = 0.0f;
+        float prevLimbSwing = 0.0f;
+        float limbSwingAmount = 0.0f;
+        float prevLimbSwingAmount = 0.0f;
+        float age = 0.0f;
+    };
+    DebugMob m_debugMob;
+    bool m_debugMobKeyWasDown = false;
+    void ToggleDebugMob();
+    void TickDebugMob(double dt);
 
     // M20 game feel: block-break particles + the first-person hand.
     std::unique_ptr<vc::ParticleSystem> m_particles;

@@ -15,6 +15,8 @@ add_library(vox_engine STATIC
     src/vox/platform/KeyCodes.h
     src/vox/platform/Window.cpp
     src/vox/platform/Window.h
+    src/vox/renderer/BoxModel.cpp
+    src/vox/renderer/BoxModel.h
     src/vox/renderer/Buffer.cpp
     src/vox/renderer/Buffer.h
     src/vox/renderer/Camera.cpp

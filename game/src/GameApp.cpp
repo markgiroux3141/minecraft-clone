@@ -259,6 +259,11 @@ void GameApp::OnInit() {
     m_particles = std::make_unique<vc::ParticleSystem>();
     m_viewModel = std::make_unique<vc::ViewModel>(m_entityCube, m_itemQuad);
 
+    // M31 jointed box-model renderer + the debug Steve test model.
+    m_entityModelShader =
+        vox::Shader::FromFiles("shaders/entity_model.vert", "shaders/entity_model.frag");
+    m_humanoid = std::make_unique<vc::HumanoidModel>();
+
     m_outlineShader = vox::Shader::FromFiles("shaders/outline.vert", "shaders/outline.frag");
     constexpr float corners[] = {
         0, 0, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, // bottom-then-top ring order below
@@ -497,6 +502,11 @@ void GameApp::OnTick(double dt) {
             m_worldTime += kTimeFastForward; // debug: watch the cycle quickly
         }
 
+        // M31: walk the debug Steve (only while actually playing).
+        if (m_state == State::Playing) {
+            TickDebugMob(dt);
+        }
+
         // M30: health hit zero this tick — drop into the death screen.
         if (m_player.Dead() && m_state != State::Dead) {
             EnterDeathScreen();
@@ -504,6 +514,71 @@ void GameApp::OnTick(double dt) {
     }
     ++m_tickCount;
     ++m_totalTicks;
+}
+
+void GameApp::ToggleDebugMob() {
+    if (!m_world) {
+        return;
+    }
+    if (m_debugMob.active) {
+        m_debugMob.active = false;
+        GAME_INFO("Debug mob despawned");
+        return;
+    }
+    // Spawn a circle ~4 blocks ahead of the player, on the surface there.
+    glm::vec3 ahead = m_player.Position() + m_camera.Forward() * 4.0f;
+    ahead.y = m_player.Position().y;
+    m_debugMob = DebugMob{};
+    m_debugMob.active = true;
+    m_debugMob.center = {ahead.x, ahead.y, ahead.z};
+    m_debugMob.pos = m_debugMob.center;
+    m_debugMob.prevPos = m_debugMob.center;
+    GAME_INFO("Debug mob spawned at ({:.1f}, {:.1f}, {:.1f})", ahead.x, ahead.y, ahead.z);
+}
+
+void GameApp::TickDebugMob(double dt) {
+    if (!m_debugMob.active || !m_world) {
+        return;
+    }
+    DebugMob& m = m_debugMob;
+    m.prevPos = m.pos;
+    m.prevYaw = m.yaw;
+    m.prevLimbSwing = m.limbSwing;
+    m.prevLimbSwingAmount = m.limbSwingAmount;
+
+    // Pace a 2.5-block circle; face the direction of travel.
+    constexpr float kRadius = 2.5f;
+    constexpr float kOmega = 1.1f; // rad/s around the circle (~3 b/s tangential)
+    m.angle += kOmega * static_cast<float>(dt);
+    const float prevX = m.pos.x;
+    const float prevZ = m.pos.z;
+    m.pos.x = m.center.x + std::cos(m.angle) * kRadius;
+    m.pos.z = m.center.z + std::sin(m.angle) * kRadius;
+    m.yaw = std::atan2(m.pos.z - prevZ, m.pos.x - prevX);
+
+    // Follow the surface: scan down from a little above the spawn height for
+    // the first solid, non-liquid, non-plant block and stand the feet on top.
+    const int cx = static_cast<int>(std::floor(m.pos.x));
+    const int cz = static_cast<int>(std::floor(m.pos.z));
+    const int top = static_cast<int>(std::floor(m.center.y)) + 4;
+    for (int y = top; y > top - 24; --y) {
+        const vc::BlockDef& def = vc::BlockRegistry::Get().Def(m_world->GetBlock(cx, y, cz));
+        if (def.solid && !def.liquid && !def.cross) {
+            m.pos.y = static_cast<float>(y + 1);
+            break;
+        }
+    }
+
+    // Vanilla EntityLivingBase walk-cycle accumulators from horizontal speed.
+    const float dx = m.pos.x - m.prevPos.x;
+    const float dz = m.pos.z - m.prevPos.z;
+    float speed = std::sqrt(dx * dx + dz * dz) * 4.0f;
+    if (speed > 1.0f) {
+        speed = 1.0f;
+    }
+    m.limbSwingAmount += (speed - m.limbSwingAmount) * 0.4f;
+    m.limbSwing += m.limbSwingAmount;
+    m.age += 1.0f;
 }
 
 void GameApp::ThrowItem(const vc::ItemStack& stack) {
@@ -638,6 +713,13 @@ void GameApp::HandleInput(double frameDt, int scroll) {
         GAME_INFO("Occlusion culling {}", m_occlusionCulling ? "on" : "off");
     }
     m_occlusionKeyWasDown = occlusionKey;
+
+    // G spawns / despawns the debug Steve (M31 box-model test entity).
+    const bool mobKey = vox::Input::IsKeyDown(vox::Key::G);
+    if (mobKey && !m_debugMobKeyWasDown) {
+        ToggleDebugMob();
+    }
+    m_debugMobKeyWasDown = mobKey;
 
     // 1..9 select the hotbar slot; the wheel cycles it (vanilla: scroll
     // up moves left, wrapping).
@@ -1374,6 +1456,49 @@ void GameApp::OnRender(double alpha, double frameDt) {
                 vox::Renderer::SetDepthWrite(true);
             }
 
+            vox::Renderer::SetCullFace(true);
+            m_chunkShader->Bind();
+        }
+
+        // M31: the debug Steve (jointed box model). Opaque + alpha-tested, so
+        // it draws in the opaque slot before the blended water pass.
+        if (m_debugMob.active && m_humanoid && m_humanoid->Ready()) {
+            const float a = static_cast<float>(alpha);
+            const glm::vec3 pos = glm::mix(m_debugMob.prevPos, m_debugMob.pos, a);
+            const float limbSwing = glm::mix(m_debugMob.prevLimbSwing, m_debugMob.limbSwing, a);
+            const float limbAmount =
+                glm::mix(m_debugMob.prevLimbSwingAmount, m_debugMob.limbSwingAmount, a);
+            m_humanoid->SetRotationAngles(limbSwing, limbAmount, m_debugMob.age + a, 0.0f, 0.0f);
+
+            // Sample light at the body cell (like the entity-cube path).
+            const glm::ivec3 cell{static_cast<int>(std::floor(pos.x)),
+                                  static_cast<int>(std::floor(pos.y)) + 1,
+                                  static_cast<int>(std::floor(pos.z))};
+            const uint8_t packed = m_world->PackedLightAt(cell);
+
+            m_entityModelShader->Bind();
+            m_entityModelShader->SetMat4("u_viewProj", viewProj);
+            m_entityModelShader->SetInt("u_skin", 1);
+            m_entityModelShader->SetFloat3("u_sunDir", dayNight.lightDir);
+            m_entityModelShader->SetFloat("u_sunLight", dayNight.sunLight);
+            m_entityModelShader->SetFloat3("u_skyTint", dayNight.skyTint);
+            m_entityModelShader->SetFloat2(
+                "u_light", {static_cast<float>(vc::ChunkLight::Sky(packed)) / 15.0f,
+                            static_cast<float>(vc::ChunkLight::Block(packed)) / 15.0f});
+
+            // Pixel/Y-down model space -> world: place feet at pos, face the
+            // travel direction, scale 1/16, then flip upright (Rx(pi) + the
+            // 24px feet offset). The model looks toward +Z after the flip, so
+            // the body yaw is (pi/2 - travelYaw).
+            constexpr float kPi = 3.14159265358979323846f;
+            glm::mat4 m = glm::translate(glm::mat4(1.0f), pos);
+            m = glm::rotate(m, kPi * 0.5f - m_debugMob.yaw, {0.0f, 1.0f, 0.0f});
+            m = glm::scale(m, glm::vec3(1.0f / 16.0f));
+            m = glm::translate(m, {0.0f, 24.0f, 0.0f});
+            m = glm::rotate(m, kPi, {1.0f, 0.0f, 0.0f});
+
+            vox::Renderer::SetCullFace(false);
+            m_humanoid->Render(*m_entityModelShader, m);
             vox::Renderer::SetCullFace(true);
             m_chunkShader->Bind();
         }

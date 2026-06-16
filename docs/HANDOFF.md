@@ -21,8 +21,13 @@ doll in the UI), landing IN ORDER one at a time — see the "Planned arc —
 survival & mobs" section for the full breakdown and the why-this-order. M30
 (HEALTH, DAMAGE & HUNGER) is now DONE and USER-VERIFIED, including the
 hurt-feedback (damage sound + camera tilt) and the real first-person fire
-overlay follow-ups — see the M30 section for what was built. M31–M33 go in fresh contexts (M31, the entity
-box-model renderer, is the shared bottleneck and next up).
+overlay follow-ups — see the M30 section for what was built. M31 (ENTITY MODEL
+RENDERER — the `vox::BoxModel` jointed box-model renderer + a Steve debug entity
+on the G key) is now DONE and USER-VERIFIED ("works perfect") — see the M31
+section for the design. M32 (MOBS — AI, spawning, combat) is NEXT UP and builds
+directly on M31's renderer + M30's vitals + the existing FallingBlock/ItemEntity
+entity pattern; M33 (armor + the inventory player doll) follows. Both go in
+fresh contexts.
 Read alongside `ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md`
 (build commands, conventions).
 
@@ -1927,6 +1932,83 @@ restored; an OLD world loads at full health and plays normally. HURT FEEDBACK
 snaps the view into a quick tilt that eases back; on death the view slowly keels
 over behind the "You Died!" screen.
 
+## M31 — entity model renderer (DONE)
+
+DONE 2026-06-16, USER-VERIFIED ("works perfect" — debug Steve walks the circle,
+limbs swing, skin maps, orientation correct). The shared bottleneck of
+the survival & mobs arc: a reusable jointed box-model renderer. NO gameplay yet
+— it ships on a debug entity (press G) so the renderer + animation can be
+verified before M32 mobs / M33 player-doll consume it. NO new world needed.
+IMPORTANT: the debug Steve only draws with the gitignored mc asset overlay
+present (it loads `mc/textures/entity/steve.png`, the same skin M20's
+first-person arm uses) — re-run `import_mc_assets.py` if a fresh pull shows
+nothing on G. A clean clone without the overlay silently draws no mob (like the
+bare-hand arm), which is fine.
+
+- ENGINE: `vox::BoxModel` (engine/src/vox/renderer/BoxModel.{h,cpp}) — a jointed
+  multi-cuboid model in the spirit of vanilla `ModelBase`/`ModelRenderer`.
+  `AddPart(name, pivot, boxes, parent)` registers a named part (cuboid group)
+  with a rotation point and an optional parent (children inherit the parent
+  transform; parents must be added first). Each `Box` is an origin+size in
+  PIXELS (part-local, relative to the pivot — matching `ModelRenderer.addBox`),
+  a `texOffset` into the skin, an `inflate` (vanilla "delta", e.g. the hat
+  overlay's 0.5), and a `mirror` flag (reflects across X so a left limb reuses
+  the right's UV island). `Build()` bakes one VAO per part with the classic
+  vanilla box UV unwrap (the six `TexturedQuad` islands laid out around
+  `texOffset`, ported verbatim — see `AppendBox`). The renderer is animation-
+  AND unit-AGNOSTIC: it does no scaling/flip of its own. The caller sets each
+  part's rotation (`SetRotation`, radians, vanilla Y-down local frame, applied
+  Z→Y→X), binds a shader + sets view/proj + lighting, then calls `Render(shader,
+  modelToWorld)` — which sets `u_model` per part (modelToWorld × accumulated
+  local) and binds the skin to unit 1. `modelToWorld` maps pixel/Y-down model
+  space to world space, folding in the 1/16 scale + the upright flip; both the
+  in-world mob path and the future UI doll reuse this with different matrices.
+- SHADERS: `assets/shaders/entity_model.{vert,frag}` — pos/normal/uv in, per-
+  part `u_model`, `sampler2D u_skin`. Same lighting model as `block_entity.frag`
+  (one sampled sky/block light for the whole entity, sun/moon diffuse, no fog)
+  + an alpha discard < 0.5 so transparent skin-overlay layers (the hat) cut out.
+  Game-owned files loaded by GameApp; `BoxModel` stays GL-clean and takes the
+  bound `Shader&`.
+- GAME: `vc::HumanoidModel` (game/src/HumanoidModel.{h,cpp}) — builds the Steve
+  biped on a `vox::BoxModel`: head (+hat overlay), body, R/L arms, R/L legs,
+  authored from ModelBiped's exact pixel boxes/pivots/texOffsets (left limbs use
+  `mirror`), skin = `mc/textures/entity/steve.png` (64×64). `SetRotationAngles`
+  is a verbatim `ModelBiped.setRotationAngles` port (limb swing on the walk
+  cycle at 0.6662 freq, arms/legs ±π out of phase, + the constant idle arm
+  sway; head tracks yaw/pitch in degrees). `Ready()` is false without the skin.
+- DEBUG ENTITY (GameApp): `m_debugMob` (a `DebugMob` struct — active flag,
+  circle center, prev/current pos+yaw, vanilla `limbSwing`/`limbSwingAmount`
+  accumulators with prev for interpolation, age). G toggles it (`ToggleDebugMob`,
+  Playing only): spawns ~4 blocks ahead, then `TickDebugMob` (20 TPS) paces a
+  2.5-block circle (~3 b/s), faces its travel direction, scans down each tick to
+  stand the feet on the surface, and feeds the walk-cycle accumulators from its
+  horizontal speed (vanilla `EntityLivingBase.onLivingUpdate`). It is render-
+  interpolated, drawn in the opaque slot of OnRender (between the entity-cube
+  pass and the water pass) via the model matrix `T(pos)·Ry(π/2−yaw)·S(1/16)·
+  T(0,24px)·Rx(π)` (the Rx(π)+24px flip turns vanilla's Y-down, feet-at-y24
+  model upright with feet at the entity base; the model faces +Z after the flip,
+  hence the π/2−yaw body yaw). Light sampled at the body cell like the cubes.
+  NOT persisted, NO collision, NO gameplay — purely a renderer test rig.
+- Known M31 limits / notes: only the head HAT overlay layer is included (body/
+  arm/leg second layers are 1.8+ "skin overlay" boxes — backlog); the mirror
+  path U-flips islands across X but doesn't swap the east/west islands the way
+  vanilla does (visually identical on the symmetric Steve skin); the debug mob
+  ground-scan is a simple column probe (the small circle can clip a steep
+  hillside — it's a debug rig, not a real entity). If the model renders upside-
+  down or facing the wrong way on the user's first look, the fix is a sign flip
+  in that one `modelToWorld` (the Rx(π) / the π/2−yaw term) — called out because
+  per the working agreement the agent didn't run the game to confirm orientation.
+
+WHAT THE USER SHOULD TEST (NO new world; re-run import_mc_assets.py first so the
+Steve skin is present): enter a world, press G — a Steve should appear ~4 blocks
+in front, standing on the ground, and walk a small circle with arms and legs
+swinging in opposite phase (plus a subtle idle arm sway) and the body turning to
+face the way it walks; the skin should map correctly (face on the front of the
+head, no scrambled UVs); it should be lit by the world (darker in shade/at
+night); press G again to remove it. Confirm orientation: it stands upright (not
+upside-down or sunk into the ground) and faces its direction of travel. (It has
+no collision and isn't saved — that's expected for the debug rig.)
+
 ## Planned arc — survival & mobs (M30–M33)
 
 Scoped with the user 2026-06-15. Goal: enemies, a health system, armor, and a
@@ -1966,7 +2048,9 @@ What we already have working in our favor (don't rebuild these):
   renderer, no mobs — fully self-contained. Persist health/hunger in level.dat.
   This is the milestone we START now; the rest go in fresh contexts.
 
-- **M31 — Entity model renderer (engine)** 📋. THE shared bottleneck. A jointed
+- **M31 — Entity model renderer (engine)** ✅ DONE & USER-VERIFIED (see the
+  detailed "M31 — entity model renderer" section above).
+  THE shared bottleneck. A jointed
   multi-cuboid "box model" renderer (vanilla `ModelBase`/`ModelRenderer`): named
   parts with per-part pivot + rotation, a single skin texture with per-box UV
   layout, hierarchical transforms, render-interpolated. Lives in the engine
