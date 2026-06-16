@@ -7,6 +7,9 @@ per-mod breadcrumb guides are:
 
 - [BUILDCRAFT_GUIDE.md](BUILDCRAFT_GUIDE.md) — where everything lives in the BC source
 - [INDUSTRIALCRAFT_GUIDE.md](INDUSTRIALCRAFT_GUIDE.md) — where everything lives in the IC2 source
+- [INTEGRATION_SPEC.md](INTEGRATION_SPEC.md) — **the design spec** (architecture,
+  shared-vs-separate decisions, prerequisites, phasing). Read this for "how do we
+  build it"; this file is "what exists in the source."
 
 ## Source locations
 
@@ -110,7 +113,12 @@ Everything below is gameplay → lives in `game/src/`, renders only through
 `vox::Renderer`, simulates in `OnTick` (20 TPS — same tick rate both mods
 assume, so per-tick constants like EU/t and MJ/t transfer directly).
 
-Prerequisites we don't have yet (as of M18) that both mods assume:
+Prerequisites both mods assume. NOTE: this list was written at M18 — as of M30,
+items 1–5 below mostly EXIST (the furnace is a de-facto tile entity, M19 added
+crafting, M24 added block metadata, the furnace GUI is a working container). See
+[INTEGRATION_SPEC.md](INTEGRATION_SPEC.md) §"Prerequisites" for the current state
+and what genuinely remains (generalizing the furnace; a FluidStack primitive).
+The original list, for reference:
 
 1. **Tile entities** — blocks with per-instance state + per-tick logic
    (inventories, energy buffers, progress bars). Needed by everything below.
