@@ -11,7 +11,7 @@ namespace vc {
 
 // M32: the living entities. One passive (pig) + one hostile (zombie) to
 // exercise both AI paths. A Mob is the same tick-simulated, prev/current-
-// interpolated, AABB-collided shape as World::FallingBlock / World::ItemEntity
+// interpolated, AABB-collided shape as EntityManager::FallingBlock / ItemEntity
 // (the M30/M31 vitals + box-model renderer plug in on top): health, a body AABB
 // it resolves against blocks, a skinned vox::BoxModel, and the vanilla
 // EntityLivingBase walk-cycle accumulators.

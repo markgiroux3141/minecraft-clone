@@ -49,9 +49,17 @@ game/src/
 
 Shared entity state (render-interpolated position, walk-cycle accumulators)
 lives once on the `vc::Body` / `vc::LivingAnim` bases in `entity/Entity.h`;
-`Mob`, `World::ItemEntity` and the debug mob compose them instead of
-re-declaring the fields. (`World::FallingBlock` opts out — it is column-locked
-1-D motion, not a free vec3 body.)
+`Mob`, `EntityManager::ItemEntity` and the debug mob compose them instead of
+re-declaring the fields. (`EntityManager::FallingBlock` opts out — it is
+column-locked 1-D motion, not a free vec3 body.)
+
+Free-moving entities (falling blocks, dropped items, mobs) live on
+`vc::EntityManager` (`entity/`), owned by `World` and reached via
+`World::Entities()`. It reads block/collision state only through World's public
+query API (the `World&` it is constructed with) — never the chunk map. The two
+voxel→entity hooks invert: World's edit rules call back into it to spawn drops
+(`SpawnBlockDrop`) and detach gravity blocks (`SpawnFallingBlock`). Mob
+persistence marshals through `World::SaveStore()` (the store stays on World).
 
 ## God-object carve-down (in progress)
 
@@ -66,9 +74,11 @@ planned, roughly in priority order:
   dig-sound pacing) → folded into `vc::GameSounds` (`audio/`): `ReconcileFurnaceLoops`/
   `StopAllFurnaceLoops`, `Reset/UpdateLocomotion`, `Reset/TickDigSound` own the voice
   map + footstep/dig state; GameApp just drives them with world refs.
-- ⬜ Entity simulation (item entities, falling blocks, mob list ownership +
-  tick) → a `vc::EntityManager` owned by `World`, so `World.cpp` keeps only
-  voxel/chunk concerns.
+- ✅ Entity simulation (item entities, falling blocks, mob list ownership +
+  tick) → `vc::EntityManager` (`entity/`) owned by `World` and reached via
+  `World::Entities()`. Owns `FallingBlock`/`ItemEntity`/`Mob` + their spawn/
+  tick/query/persist methods; World keeps only voxel/chunk/save concerns and
+  calls back in for drops + the falling-sand handover. (World.cpp −380 lines.)
 - ⬜ Input *handling* (`HandleInput`, the break/place/use verbs) → an
   `InputController` that operates on Player/World, leaving `GameApp` as pure
   wiring.

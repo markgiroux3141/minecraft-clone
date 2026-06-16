@@ -8,10 +8,10 @@ namespace vc {
 // The sim runs at a fixed 20 TPS (OnTick) while rendering is uncapped
 // (OnRender) — so any moving body keeps its PREVIOUS and CURRENT tick state and
 // the renderer interpolates between them by the frame alpha. Before M-refactor
-// these fields were copy-pasted onto Mob, World::ItemEntity and GameApp's
-// DebugMob; they now compose these bases instead (see CLAUDE.md "Keeping
-// modules small"). World::FallingBlock deliberately opts out — it is
-// column-locked 1-D motion (y/prevY only), not a free vec3 body.
+// these fields were copy-pasted onto Mob, EntityManager::ItemEntity and
+// GameApp's DebugMob; they now compose these bases instead (see CLAUDE.md
+// "Keeping modules small"). EntityManager::FallingBlock deliberately opts out —
+// it is column-locked 1-D motion (y/prevY only), not a free vec3 body.
 
 // A render-interpolated kinematic body. Position is bottom-center (feet),
 // matching the player. Call BeginTick() at the top of each tick (before

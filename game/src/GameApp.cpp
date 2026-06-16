@@ -446,7 +446,7 @@ void GameApp::OnTick(double dt) {
         // M32: tick mobs (AI/physics/combat/spawning). World stays Player- and
         // audio-free, so it gets the player state + callbacks and hands back
         // hurt/death sound events to play here.
-        vc::World::MobTickCtx mobCtx;
+        vc::EntityManager::MobTickCtx mobCtx;
         mobCtx.playerFeet = m_player.Position();
         mobCtx.playerHalfWidth = Player::kHalfWidth;
         mobCtx.playerHeight = Player::kHeight;
@@ -459,11 +459,11 @@ void GameApp::OnTick(double dt) {
             }
         };
         mobCtx.pushPlayer = [&](float dx, float dz) { m_player.ExternalPush(*m_world, dx, dz); };
-        m_world->TickMobs(mobCtx);
+        m_world->Entities().TickMobs(mobCtx);
         if (m_player.ConsumeHurt()) {
             m_sounds.PlayHurt(); // a mob hit landed during the mob tick
         }
-        for (const vc::MobSound& s : m_world->MobSoundEvents()) {
+        for (const vc::MobSound& s : m_world->Entities().MobSoundEvents()) {
             const bool hostile = vc::MobDefOf(s.type).hostile;
             if (s.kind == 0) {
                 m_sounds.PlayMobHurt(hostile, s.pos);
@@ -471,7 +471,7 @@ void GameApp::OnTick(double dt) {
                 m_sounds.PlayMobDeath(hostile, s.pos);
             }
         }
-        m_world->MobSoundEvents().clear();
+        m_world->Entities().MobSoundEvents().clear();
 
         m_particles->Tick(*m_world);
         m_viewModel->Tick(m_inventory.Slot(m_hotbarSlot));
@@ -481,15 +481,14 @@ void GameApp::OnTick(double dt) {
         const glm::vec3 feet = m_player.Position();
         const glm::vec3 reach{Player::kHalfWidth + 1.0f, 0.5f, Player::kHalfWidth + 1.0f};
         bool pickedUp = false;
-        m_world->PickupItems(feet - reach,
-                             feet + glm::vec3{0.0f, Player::kHeight, 0.0f} + reach,
-                             [&](uint16_t id, int count, int damage) {
-                                 const vc::ItemStack leftover =
-                                     m_inventory.Add({id, count, damage});
-                                 const int taken = count - leftover.count;
-                                 if (taken > 0) pickedUp = true;
-                                 return taken;
-                             });
+        m_world->Entities().PickupItems(
+            feet - reach, feet + glm::vec3{0.0f, Player::kHeight, 0.0f} + reach,
+            [&](uint16_t id, int count, int damage) {
+                const vc::ItemStack leftover = m_inventory.Add({id, count, damage});
+                const int taken = count - leftover.count;
+                if (taken > 0) pickedUp = true;
+                return taken;
+            });
         if (pickedUp) m_sounds.PlayPickup(); // one pop per tick max
 
         // M22: footsteps, landing thud, and a splash when entering water —
@@ -590,7 +589,7 @@ void GameApp::SpawnMobAhead(vc::MobType type) {
     // ~3 blocks ahead at eye-level x/z; it falls onto the ground via gravity.
     glm::vec3 ahead = m_player.Position() + m_camera.Forward() * 3.0f;
     ahead.y = m_player.Position().y + 1.0f;
-    m_world->SpawnMob(type, ahead);
+    m_world->Entities().SpawnMob(type, ahead);
     GAME_INFO("Spawned debug {} at ({:.1f}, {:.1f}, {:.1f})",
               type == vc::MobType::Pig ? "pig" : "zombie", ahead.x, ahead.y, ahead.z);
 }
@@ -610,7 +609,7 @@ void GameApp::ThrowItem(const vc::ItemStack& stack) {
     // the look; 40-tick pickup delay so it isn't vacuumed straight back.
     const glm::vec3 dir = m_camera.Forward();
     const glm::vec3 origin = m_camera.Position() + glm::vec3{0.0f, -0.3f, 0.0f} + dir * 0.3f;
-    m_world->SpawnItem(origin, dir * 6.0f, stack.id, stack.count, 40, stack.damage);
+    m_world->Entities().SpawnItem(origin, dir * 6.0f, stack.id, stack.count, 40, stack.damage);
 }
 
 void GameApp::OpenContainer(State container) {
@@ -781,7 +780,8 @@ void GameApp::HandleInput(double frameDt, int scroll) {
     if (breakDown && !m_input.breakWasDown) {
         float mobDist = 0.0f;
         const auto mobHit =
-            m_world->RaycastMob(m_camera.Position(), m_camera.Forward(), kReachDistance, mobDist);
+            m_world->Entities().RaycastMob(m_camera.Position(), m_camera.Forward(), kReachDistance,
+                                           mobDist);
         if (mobHit) {
             const float blockDist =
                 m_target ? glm::length(m_target->point - m_camera.Position()) : 1e9f;
@@ -792,7 +792,7 @@ void GameApp::HandleInput(double frameDt, int scroll) {
                     tool && tool->tool == vc::ToolClass::Axe) {
                     dmg += static_cast<float>(tool->tier) + 1.0f; // wood 1 .. iron 3 bonus
                 }
-                m_world->DamageMob(*mobHit, dmg, m_player.Position());
+                m_world->Entities().DamageMob(*mobHit, dmg, m_player.Position());
                 m_viewModel->TriggerSwing();
                 m_digCell.reset();
                 m_digProgress = 0.0f;
@@ -883,7 +883,8 @@ void GameApp::HandleInput(double frameDt, int scroll) {
                     m_particles->SpawnBlockDestroy(*m_world, m_target->block, targetId);
                     m_sounds.PlayBreak(def.soundType, glm::vec3(m_target->block) + 0.5f);
                     if (canHarvest) {
-                        m_world->SpawnBlockDrop(m_target->block, def.ResolveDrop(targetId), 1);
+                        m_world->Entities().SpawnBlockDrop(m_target->block,
+                                                           def.ResolveDrop(targetId), 1);
                     }
                     // Tools wear one use per broken block (vanilla: any
                     // block with hardness > 0) and break at zero.
@@ -1399,8 +1400,8 @@ void GameApp::OnRender(double alpha, double frameDt) {
         // overlay share one shader and the unit-cube VAO. Opaque (alpha-
         // tested), so before the water pass (which expects the chunk
         // shader bound again afterwards).
-        const auto& fallingBlocks = m_world->FallingBlocks();
-        const auto& items = m_world->ItemEntities();
+        const auto& fallingBlocks = m_world->Entities().FallingBlocks();
+        const auto& items = m_world->Entities().ItemEntities();
         const int crackStage =
             m_digCell ? std::min(static_cast<int>(m_digProgress * 10.0f) - 1, 9) : -1;
         if (!fallingBlocks.empty() || !items.empty() || crackStage >= 0) {
@@ -1436,7 +1437,7 @@ void GameApp::OnRender(double alpha, double frameDt) {
             };
 
             for (const auto& falling : fallingBlocks) {
-                if (!m_world->FallingBlockVisible(falling)) {
+                if (!m_world->Entities().FallingBlockVisible(falling)) {
                     continue; // mesh handover in progress (no double-draw/gap)
                 }
                 const float y = glm::mix(falling.prevY, falling.y, static_cast<float>(alpha));
@@ -1548,7 +1549,7 @@ void GameApp::OnRender(double alpha, double frameDt) {
 
         // M32: living mobs (pigs/zombies). Same opaque slot + box-model shader
         // as the debug Steve; one bind, then per-mob articulation + matrix.
-        const auto& mobs = m_world->Mobs();
+        const auto& mobs = m_world->Entities().Mobs();
         if (!mobs.empty()) {
             constexpr float kPi = 3.14159265358979323846f;
             const float a = static_cast<float>(alpha);

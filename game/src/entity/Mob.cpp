@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 
+#include "entity/EntityManager.h"
 #include "world/Block.h"
 #include "world/Light.h"
 #include "world/World.h"
@@ -107,7 +108,7 @@ bool MoveMobAxis(const World& world, glm::vec3& pos, glm::vec3& vel, bool& onGro
 
 } // namespace
 
-void World::SpawnMob(MobType type, const glm::vec3& feetPos) {
+void EntityManager::SpawnMob(MobType type, const glm::vec3& feetPos) {
     Mob mob;
     mob.type = type;
     mob.pos = feetPos;
@@ -117,7 +118,7 @@ void World::SpawnMob(MobType type, const glm::vec3& feetPos) {
     m_mobs.push_back(mob);
 }
 
-void World::EmitMobDeath(const Mob& mob) {
+void EntityManager::EmitMobDeath(const Mob& mob) {
     const MobDef& def = MobDefOf(mob.type);
     const ItemId drop = MobDropItem(mob.type);
     const int count = def.dropMin + MobRandInt(def.dropMax - def.dropMin + 1);
@@ -130,16 +131,36 @@ void World::EmitMobDeath(const Mob& mob) {
     m_mobSounds.push_back({mob.type, mob.pos, 1}); // death
 }
 
-void World::SaveMobs() {
+void EntityManager::LoadMobs() {
+    // Mobs saved with the world (M32). Unknown types from a newer build are
+    // dropped rather than crashing.
+    for (const auto& r : m_world.SaveStore().GetMobs()) {
+        if (r.type < 0 || r.type >= static_cast<int>(MobType::Count)) {
+            continue;
+        }
+        Mob mob;
+        mob.type = static_cast<MobType>(r.type);
+        mob.pos = r.pos;
+        mob.prevPos = r.pos;
+        mob.yaw = r.yaw;
+        mob.prevYaw = r.yaw;
+        mob.health = std::clamp(r.health, 0.0f, MobDefOf(mob.type).maxHealth);
+        if (mob.health > 0.0f) {
+            m_mobs.push_back(mob);
+        }
+    }
+}
+
+void EntityManager::SaveMobs() {
     std::vector<WorldSave::MobRecord> records;
     records.reserve(m_mobs.size());
     for (const Mob& m : m_mobs) {
         records.push_back({static_cast<int>(m.type), m.pos, m.yaw, m.health});
     }
-    m_save.SetMobs(std::move(records));
+    m_world.SaveStore().SetMobs(std::move(records));
 }
 
-std::optional<size_t> World::RaycastMob(const glm::vec3& origin, const glm::vec3& dir,
+std::optional<size_t> EntityManager::RaycastMob(const glm::vec3& origin, const glm::vec3& dir,
                                         float maxDist, float& outDist) const {
     // Slab method against each mob's AABB; nearest entry distance wins.
     std::optional<size_t> best;
@@ -182,7 +203,7 @@ std::optional<size_t> World::RaycastMob(const glm::vec3& origin, const glm::vec3
     return best;
 }
 
-void World::DamageMob(size_t index, float amount, const glm::vec3& fromPos) {
+void EntityManager::DamageMob(size_t index, float amount, const glm::vec3& fromPos) {
     if (index >= m_mobs.size() || amount <= 0.0f) {
         return;
     }
@@ -207,7 +228,7 @@ void World::DamageMob(size_t index, float amount, const glm::vec3& fromPos) {
     }
 }
 
-void World::TickMobs(const MobTickCtx& ctx) {
+void EntityManager::TickMobs(const MobTickCtx& ctx) {
     const glm::vec3 playerFeet = ctx.playerFeet;
 
     for (size_t i = 0; i < m_mobs.size();) {
@@ -229,9 +250,9 @@ void World::TickMobs(const MobTickCtx& ctx) {
         // still-generating terrain) — exactly like the player / falling sand.
         const glm::ivec3 feetChunk{static_cast<int>(std::floor(mob.pos.x)) >> 4,
                                    std::clamp(static_cast<int>(std::floor(mob.pos.y)) >> 4, 0,
-                                              kHeightChunks - 1),
+                                              World::kHeightChunks - 1),
                                    static_cast<int>(std::floor(mob.pos.z)) >> 4};
-        if (!GetChunk(feetChunk)) {
+        if (!m_world.GetChunk(feetChunk)) {
             ++i;
             continue;
         }
@@ -295,15 +316,15 @@ void World::TickMobs(const MobTickCtx& ctx) {
 
         const float startY = mob.pos.y;
         mob.onGround = false;
-        MoveMobAxis(*this, mob.pos, mob.vel, mob.onGround, 1, mob.vel.y * kTickDt, def.halfWidth,
+        MoveMobAxis(m_world, mob.pos, mob.vel, mob.onGround, 1, mob.vel.y * kTickDt, def.halfWidth,
                     def.height);
         const bool groundedBeforeStep = mob.onGround;
 
         const glm::vec3 flatStart = mob.pos;
         const glm::vec3 flatVel = mob.vel;
-        const bool hitX = MoveMobAxis(*this, mob.pos, mob.vel, mob.onGround, 0,
+        const bool hitX = MoveMobAxis(m_world, mob.pos, mob.vel, mob.onGround, 0,
                                       mob.vel.x * kTickDt, def.halfWidth, def.height);
-        const bool hitZ = MoveMobAxis(*this, mob.pos, mob.vel, mob.onGround, 2,
+        const bool hitZ = MoveMobAxis(m_world, mob.pos, mob.vel, mob.onGround, 2,
                                       mob.vel.z * kTickDt, def.halfWidth, def.height);
         if ((hitX || hitZ) && groundedBeforeStep) {
             // Try the same move lifted by a step and settled back (walk up a
@@ -313,14 +334,14 @@ void World::TickMobs(const MobTickCtx& ctx) {
             mob.pos = flatStart;
             mob.vel = flatVel;
             const float beforeLift = mob.pos.y;
-            MoveMobAxis(*this, mob.pos, mob.vel, mob.onGround, 1, kStepHeight, def.halfWidth,
+            MoveMobAxis(m_world, mob.pos, mob.vel, mob.onGround, 1, kStepHeight, def.halfWidth,
                         def.height);
             const float lifted = mob.pos.y - beforeLift;
-            MoveMobAxis(*this, mob.pos, mob.vel, mob.onGround, 0, flatVel.x * kTickDt,
+            MoveMobAxis(m_world, mob.pos, mob.vel, mob.onGround, 0, flatVel.x * kTickDt,
                         def.halfWidth, def.height);
-            MoveMobAxis(*this, mob.pos, mob.vel, mob.onGround, 2, flatVel.z * kTickDt,
+            MoveMobAxis(m_world, mob.pos, mob.vel, mob.onGround, 2, flatVel.z * kTickDt,
                         def.halfWidth, def.height);
-            MoveMobAxis(*this, mob.pos, mob.vel, mob.onGround, 1, -lifted, def.halfWidth,
+            MoveMobAxis(m_world, mob.pos, mob.vel, mob.onGround, 1, -lifted, def.halfWidth,
                         def.height);
             const float stepGain = (mob.pos.x - flatStart.x) * (mob.pos.x - flatStart.x) +
                                    (mob.pos.z - flatStart.z) * (mob.pos.z - flatStart.z);
@@ -412,7 +433,7 @@ void World::TickMobs(const MobTickCtx& ctx) {
     }
 }
 
-void World::SpawnMobs(const MobTickCtx& ctx) {
+void EntityManager::SpawnMobs(const MobTickCtx& ctx) {
     // Category caps within a generous radius of the player.
     int passive = 0;
     int hostile = 0;
@@ -438,9 +459,9 @@ void World::SpawnMobs(const MobTickCtx& ctx) {
         const int bottom = std::max(1, static_cast<int>(std::floor(ctx.playerFeet.y)) - 12);
         int groundY = -1;
         for (int y = top; y >= bottom; --y) {
-            const BlockDef& below = BlockRegistry::Get().Def(GetBlock(wx, y - 1, wz));
-            const bool airHere = !BlockRegistry::Get().Def(GetBlock(wx, y, wz)).solid;
-            const bool airAbove = !BlockRegistry::Get().Def(GetBlock(wx, y + 1, wz)).solid;
+            const BlockDef& below = BlockRegistry::Get().Def(m_world.GetBlock(wx, y - 1, wz));
+            const bool airHere = !BlockRegistry::Get().Def(m_world.GetBlock(wx, y, wz)).solid;
+            const bool airAbove = !BlockRegistry::Get().Def(m_world.GetBlock(wx, y + 1, wz)).solid;
             if (below.solid && !below.liquid && !below.cross && airHere && airAbove) {
                 groundY = y;
                 break;
@@ -450,10 +471,10 @@ void World::SpawnMobs(const MobTickCtx& ctx) {
             continue; // no valid ground (or chunk not loaded)
         }
 
-        const uint8_t packed = PackedLightAt({wx, groundY, wz});
+        const uint8_t packed = m_world.PackedLightAt({wx, groundY, wz});
         const int skyLight = ChunkLight::Sky(packed);
         const int blockLight = ChunkLight::Block(packed);
-        const BlockId belowId = GetBlock(wx, groundY - 1, wz);
+        const BlockId belowId = m_world.GetBlock(wx, groundY - 1, wz);
 
         // Pick the category by the spawn rules; bail if its cap is full.
         MobType type;

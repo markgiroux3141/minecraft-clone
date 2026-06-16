@@ -9,6 +9,8 @@ add_executable(game
     src/audio/Sounds.h
     # Entities (simulated bodies + their box-models)
     src/entity/Entity.h
+    src/entity/EntityManager.cpp
+    src/entity/EntityManager.h
     src/entity/HumanoidModel.cpp
     src/entity/HumanoidModel.h
     src/entity/Mob.cpp
