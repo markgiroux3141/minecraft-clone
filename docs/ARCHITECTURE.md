@@ -314,10 +314,11 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   light/cap spawn rules + despawn; mob attacks deal M30 damage with directional
   knockback, player LMB melee + knockback + red hurt-flash, mob drops (porkchop/
   rotten flesh) reuse M18 item entities; persisted in a mobs.dat sidecar.
-- **M33 — Armor & in-UI player doll** 📋: equippable armor (4 slots × tier)
-  with M19 durability + damage reduction in M30's path; activate the inert
-  inventory armor slots; render the player character (M31 model baked through
-  the M29 framebuffer→UI path) in the inventory, worn armor shown.
+- **M33 — Armor & in-UI player doll** ✅: equippable armor (4 slots × 5
+  materials = 20 ItemDefs) with M19 durability + vanilla 1.12 CombatRules
+  damage reduction in M30's path; the inventory armor slots equip on click;
+  the player character (M31 model + inflated armor-layer bipeds) bakes through
+  the M29 framebuffer→UI path into the inventory, worn armor shown.
 - **Backlog**: stair auto-corner shapes (inner/outer), per-face light sampling
   for model blocks (slab faces are flat-lit), tight selection/raycast box for
   partial blocks, full 256-tall world (wants empty-air-chunk culling

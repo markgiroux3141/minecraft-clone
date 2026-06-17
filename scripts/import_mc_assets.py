@@ -55,6 +55,16 @@ COPIES = [
     # animation strip (32 frames of 16x16); the HUD tiles a frame across the
     # bottom of the view.
     ("textures/blocks/fire_layer_1.png", "textures/fire_layer_1.png"),
+    # M33 worn-armor model layers for the inventory player doll. layer_1 =
+    # helmet/chest/arms, layer_2 = leggings/boots; leather ships a grayscale
+    # base + an untinted overlay (the doll tints the base like the icons).
+    *[(f"textures/models/armor/{m}_layer_{n}.png",
+       f"textures/models/armor/{m}_layer_{n}.png")
+      for m in ("leather", "chainmail", "iron", "gold", "diamond") for n in (1, 2)],
+    ("textures/models/armor/leather_layer_1_overlay.png",
+     "textures/models/armor/leather_layer_1_overlay.png"),
+    ("textures/models/armor/leather_layer_2_overlay.png",
+     "textures/models/armor/leather_layer_2_overlay.png"),
 ]
 
 
@@ -114,6 +124,19 @@ def flattened(img: Image.Image) -> Image.Image:
     out.alpha_composite(img)
     out.putalpha(255)
     return out
+
+
+# Vanilla's default un-dyed leather color (ItemArmor: 0xA06540), applied to
+# the grayscale leather icons/layers before compositing the untinted overlay.
+LEATHER_DEFAULT = (160, 101, 64)
+
+
+def armor_icon(items: Path, material: str, slot: str) -> Image.Image:
+    icon = load_tile(items / f"{material}_{slot}.png")
+    if material == "leather":
+        icon = tinted(icon, LEATHER_DEFAULT)
+        icon.alpha_composite(load_tile(items / f"leather_{slot}_overlay.png"))
+    return icon
 
 
 def build_atlas(mc: Path, out_path: Path) -> None:
@@ -225,6 +248,16 @@ def build_atlas(mc: Path, out_path: Path) -> None:
         # M32 mob drops (69 porkchop / 70 rotten flesh) — real item sprites.
         load_tile(items / "porkchop_raw.png"),
         load_tile(items / "rotten_flesh.png"),
+        # M33 armor icons (71..90) — material-major (leather, chainmail, iron,
+        # gold, diamond) x slot (helmet, chestplate, leggings, boots), matching
+        # Item.cpp's RegisterDefaults. Leather is grayscale + a tinted overlay.
+        *[armor_icon(items, mat, slot)
+          for mat in ("leather", "chainmail", "iron", "gold", "diamond")
+          for slot in ("helmet", "chestplate", "leggings", "boots")],
+        # Empty-slot placeholders (91..94, Head/Chest/Legs/Feet) for the
+        # inventory armor slots.
+        *[load_tile(items / f"empty_armor_slot_{slot}.png")
+          for slot in ("helmet", "chestplate", "leggings", "boots")],
     ]
 
     strip = Image.new("RGBA", (TILE * len(tiles), TILE))
@@ -275,6 +308,17 @@ def import_textures(mc: Path, assets: Path) -> None:
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(mc / src, target)
         print(f"copied {src} -> {target}")
+    # M33: the leather armor MODEL layers ship grayscale + a separate overlay
+    # (like the icons), so the raw copies are colorless. Bake the tinted base +
+    # overlay over them so the inventory doll shows brown leather.
+    armor_out = assets / "mc" / "textures" / "models" / "armor"
+    for n in (1, 2):
+        base = tinted(Image.open(mc / f"textures/models/armor/leather_layer_{n}.png")
+                      .convert("RGBA"), LEATHER_DEFAULT)
+        base.alpha_composite(Image.open(mc / f"textures/models/armor/leather_layer_{n}_overlay.png")
+                             .convert("RGBA"))
+        base.save(armor_out / f"leather_layer_{n}.png")
+        print(f"baked tinted leather_layer_{n}.png")
 
 
 def import_sounds(store: Path, assets: Path) -> None:

@@ -263,6 +263,7 @@ void GameApp::OnInit() {
     m_entityModelShader =
         vox::Shader::FromFiles("shaders/entity_model.vert", "shaders/entity_model.frag");
     m_humanoid = std::make_unique<vc::HumanoidModel>();
+    m_playerDoll = std::make_unique<vc::PlayerDoll>(); // M33 inventory player doll
     // M32 mob models: the zombie is the biped with the zombie skin + arms-out
     // pose; the pig is a quadruped. Both silently skip drawing without the
     // gitignored skin overlay (like the debug Steve), so a clean clone is fine.
@@ -365,6 +366,22 @@ void GameApp::EnterWorld(const std::string& name, int defaultSeed) {
         for (size_t i = 0; i < std::size(shapes); ++i) {
             m_inventory.Slot(12 + i) = {shapes[i], vc::kMaxStackSize};
         }
+        // M33 debug kit: a full set of diamond armor in the grid so equipping
+        // + damage reduction is one E-press away in a fresh world (every piece
+        // is also in the creative palette for any world).
+        for (int s = 0; s < vc::kArmorSlots; ++s) {
+            m_inventory.Slot(20 + s) = {
+                vc::items::ArmorPiece(vc::items::Diamond, static_cast<vc::ArmorSlot>(s)), 1};
+        }
+    }
+
+    // M33 worn armor (absent in pre-armor saves -> nothing equipped).
+    if (const auto& saved = m_world->SaveStore().GetArmor()) {
+        for (const auto& s : *saved) {
+            if (s.slot >= 0 && s.slot < vc::kArmorSlots && vc::IsArmor(s.id) && s.count > 0) {
+                m_inventory.Armor(static_cast<size_t>(s.slot)) = {s.id, 1, std::max(s.damage, 0)};
+            }
+        }
     }
 
     // M30 vitals: restore from the save, or full health for a new/old world.
@@ -431,12 +448,34 @@ void GameApp::PersistPlayerState() {
         }
     }
     m_world->SaveStore().SetInventory(std::move(slots));
+
+    std::vector<vc::WorldSave::InventorySlot> armor;
+    for (int s = 0; s < vc::kArmorSlots; ++s) {
+        const vc::ItemStack& piece = m_inventory.Armor(static_cast<size_t>(s));
+        if (!piece.Empty()) {
+            armor.push_back({s, piece.id, piece.count, piece.damage});
+        }
+    }
+    m_world->SaveStore().SetArmor(std::move(armor));
 }
 
 void GameApp::OnTick(double dt) {
     // Container screens don't pause the world (vanilla): block updates
     // run and the player keeps falling/floating, just without movement keys.
     if (m_world && (m_state == State::Playing || ContainerOpen())) {
+        // M33: sum the worn-armor defense + toughness and feed it to the
+        // player's damage calc before this tick's environmental damage runs.
+        float armorDefense = 0.0f;
+        float armorToughness = 0.0f;
+        for (int s = 0; s < vc::kArmorSlots; ++s) {
+            const vc::ItemStack& piece = m_inventory.Armor(static_cast<size_t>(s));
+            if (!piece.Empty()) {
+                armorDefense += static_cast<float>(vc::ArmorDefense(piece.id));
+                armorToughness += vc::ArmorToughness(piece.id);
+            }
+        }
+        m_player.SetArmorStats(armorDefense, armorToughness);
+
         m_player.Tick(*m_world, dt, m_state == State::Playing);
         if (m_player.ConsumeHurt()) {
             m_sounds.PlayHurt(); // M30: damage noise on each fresh hit
@@ -472,6 +511,23 @@ void GameApp::OnTick(double dt) {
             }
         }
         m_world->Entities().MobSoundEvents().clear();
+
+        // M33: wear the worn pieces by the damage they absorbed this tick
+        // (vanilla InventoryPlayer.damageArmor: max(1, raw/4) per piece);
+        // a piece at its durability limit breaks and vanishes.
+        if (const float wear = m_player.ConsumeArmorWear(); wear > 0.0f) {
+            const int dmg = std::max(1, static_cast<int>(wear / 4.0f));
+            for (int s = 0; s < vc::kArmorSlots; ++s) {
+                vc::ItemStack& piece = m_inventory.Armor(static_cast<size_t>(s));
+                const vc::ItemDef* def = vc::ItemRegistry::Get().Find(piece.id);
+                if (!piece.Empty() && def && def->maxDamage > 0) {
+                    piece.damage += dmg;
+                    if (piece.damage >= def->maxDamage) {
+                        piece = {};
+                    }
+                }
+            }
+        }
 
         m_particles->Tick(*m_world);
         m_viewModel->Tick(m_inventory.Slot(m_hotbarSlot));
@@ -1107,6 +1163,22 @@ void GameApp::DrawUi() {
     // the 2D batch; restores the window framebuffer + viewport itself.
     m_blockIcons->EnsureBuilt(static_cast<int>(16.0f * vc::GuiScale(screen)),
                               GetWindow().Width(), GetWindow().Height());
+
+    // M33: bake the player doll (body + worn armor) while depth is still on,
+    // then restore the window framebuffer + viewport (like EnsureBuilt). Only
+    // the player inventory shows it; other container screens leave it null.
+    m_guiTextures.playerDoll = nullptr;
+    if (m_state == State::Inventory && m_playerDoll) {
+        const float gs = vc::GuiScale(screen);
+        const auto* doll = m_playerDoll->Bake(
+            *m_entityModelShader, static_cast<int>(vc::InventoryScreen::kDollBoxSize.x * gs),
+            static_cast<int>(vc::InventoryScreen::kDollBoxSize.y * gs), m_inventory.ArmorSlots(),
+            static_cast<float>(m_totalTicks));
+        if (doll) {
+            m_guiTextures.playerDoll = *doll;
+        }
+        vox::Renderer::SetViewport(GetWindow().Width(), GetWindow().Height());
+    }
 
     m_ui->Begin(GetWindow().Width(), GetWindow().Height(), m_blockTextures.get());
     if (EyeInLava()) {

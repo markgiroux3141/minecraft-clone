@@ -90,6 +90,12 @@ public:
     // Rewrites the manifest immediately, like SetPlayerState (quit-path).
     void SetInventory(std::vector<InventorySlot> slots);
 
+    // M33 worn armor, persisted on its own "armor2 <n> <slot> <id> <count>
+    // <damage>..." manifest line (slot is the ArmorSlot index 0..3). Reuses
+    // InventorySlot; absent in saves that predate armor (no pieces worn).
+    const std::optional<std::vector<InventorySlot>>& GetArmor() const { return m_armor; }
+    void SetArmor(std::vector<InventorySlot> slots);
+
     // M30 player vitals, also in the manifest as
     // "vitals <health> <foodLevel> <saturation> <exhaustion> <air>". Absent in
     // saves that predate it — the player spawns at full health/food.
@@ -183,6 +189,7 @@ private:
     std::optional<Vitals> m_vitals;
     std::optional<int64_t> m_worldTime;
     std::optional<std::vector<InventorySlot>> m_inventory;
+    std::optional<std::vector<InventorySlot>> m_armor;
     std::vector<FurnaceRecord> m_furnaces;
     bool m_furnacesDirty = false;
     std::vector<MobRecord> m_mobs;

@@ -20,6 +20,11 @@ namespace vc {
 // owns the inventory, the craft grid, the carried stack, and the state.
 class InventoryScreen {
 public:
+    // M33: the player-doll box inside the inventory panel, in unscaled GUI
+    // pixels. GameApp bakes the doll texture at this size * the GUI scale so
+    // the blit is 1:1 crisp.
+    static constexpr glm::vec2 kDollBoxSize{50.0f, 64.0f};
+
     // craft is row-major craftSize x craftSize (2 = player grid, 3 =
     // crafting table; selects the panel art too). leftClick/rightClick
     // are press edges. Slot clicks follow vanilla PICKUP rules; the

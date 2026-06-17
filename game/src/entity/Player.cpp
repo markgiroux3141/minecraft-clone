@@ -265,7 +265,7 @@ void Player::TickWalk(const vc::World& world, float dt) {
         m_fallDistance = 0.0f;
     } else if (m_grounded) {
         if (!m_spawnFallGrace && m_fallDistance > 3.0f) {
-            ApplyDamage(std::ceil(m_fallDistance - 3.0f));
+            ApplyDamage(std::ceil(m_fallDistance - 3.0f), /*bypassArmor=*/true);
         }
         m_fallDistance = 0.0f;
         m_spawnFallGrace = false;
@@ -407,24 +407,39 @@ void Player::Heal(float amount) {
     }
 }
 
-bool Player::ApplyDamage(float amount) {
+float Player::AbsorbArmor(float amount, bool bypassArmor) {
+    if (bypassArmor || m_armorDefense <= 0.0f) {
+        return amount;
+    }
+    // Book the raw amount for durability wear (vanilla wears armor on the
+    // incoming damage, before reduction), then apply CombatRules.
+    m_armorWear += amount;
+    const float f = 2.0f + m_armorToughness / 4.0f;
+    const float clamped =
+        std::clamp(m_armorDefense - amount / f, m_armorDefense * 0.2f, 20.0f);
+    return amount * (1.0f - clamped / 25.0f);
+}
+
+bool Player::ApplyDamage(float amount, bool bypassArmor) {
     if (m_dead || amount <= 0.0f) {
         return false;
     }
     bool freshHit = false;
     // Vanilla EntityLivingBase.attackEntityFrom hurt-resist window: within the
     // first half of the window a fresh hit only lands the amount ABOVE the last
-    // one; otherwise it lands in full and arms the window.
+    // one; otherwise it lands in full and arms the window. m_lastDamage tracks
+    // the raw (pre-armor) amount, like vanilla; armor reduces only the health
+    // delta actually subtracted.
     if (m_hurtResist > kMaxHurtResist / 2) {
         if (amount <= m_lastDamage) {
             return false;
         }
-        m_health -= amount - m_lastDamage;
+        m_health -= AbsorbArmor(amount - m_lastDamage, bypassArmor);
         m_lastDamage = amount;
     } else {
         m_lastDamage = amount;
         m_hurtResist = kMaxHurtResist;
-        m_health -= amount;
+        m_health -= AbsorbArmor(amount, bypassArmor);
         // Fresh hit: arm the hurt-tilt window and the one-shot hurt sound
         // (vanilla only does this on a full hit, not a within-window top-up).
         m_hurtTime = kMaxHurtTime;
@@ -437,6 +452,17 @@ bool Player::ApplyDamage(float amount) {
         m_dead = true;
     }
     return freshHit;
+}
+
+void Player::SetArmorStats(float defensePoints, float toughness) {
+    m_armorDefense = defensePoints;
+    m_armorToughness = toughness;
+}
+
+float Player::ConsumeArmorWear() {
+    const float wear = m_armorWear;
+    m_armorWear = 0.0f;
+    return wear;
 }
 
 void Player::Hurt(float amount, const glm::vec3& fromPos) {
@@ -576,11 +602,12 @@ void Player::TickVitals(const vc::World& world) {
     if (inWater) {
         m_fireTicks = 0;
     }
-    // Burning: 1 dmg every second the fire timer runs.
+    // Burning: 1 dmg every second the fire timer runs. Vanilla's ON_FIRE
+    // (burn-over-time) bypasses armor — unlike standing in lava.
     if (m_fireTicks > 0) {
         --m_fireTicks;
         if (m_fireTicks % 20 == 0) {
-            ApplyDamage(1.0f);
+            ApplyDamage(1.0f, /*bypassArmor=*/true);
         }
     }
     // Cactus: 1 dmg/tick while the (grown) AABB touches one.
@@ -592,14 +619,14 @@ void Player::TickVitals(const vc::World& world) {
         --m_air;
         if (m_air <= -20) {
             m_air = 0;
-            ApplyDamage(2.0f);
+            ApplyDamage(2.0f, /*bypassArmor=*/true);
         }
     } else {
         m_air = kMaxAir;
     }
     // The void.
     if (m_position.y < -64.0f) {
-        ApplyDamage(4.0f);
+        ApplyDamage(4.0f, /*bypassArmor=*/true);
     }
 
     // Movement exhaustion (vanilla addMovementStat): sprinting drains far
@@ -646,7 +673,7 @@ void Player::TickFoodStats() {
         // Starvation (normal difficulty: floors at 1 health, never kills).
         if (++m_foodTimer >= 80) {
             if (m_health > 1.0f) {
-                ApplyDamage(1.0f);
+                ApplyDamage(1.0f, /*bypassArmor=*/true);
             }
             m_foodTimer = 0;
         }

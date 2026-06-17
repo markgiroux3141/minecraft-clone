@@ -16,6 +16,11 @@ namespace vc {
 using ItemId = uint16_t;
 inline constexpr ItemId kFirstItemId = 1024;
 
+// M33: the four worn-armor slots. Indices 0..3 double as the armor array
+// index in Inventory and the display order top-to-bottom in the doll UI.
+enum class ArmorSlot { Head = 0, Chest = 1, Legs = 2, Feet = 3 };
+inline constexpr int kArmorSlots = 4;
+
 struct ItemDef {
     std::string name;
     uint16_t tile = 0; // atlas layer of the 2D sprite (UI icon + world drop)
@@ -25,6 +30,15 @@ struct ItemDef {
     int maxStack = 64;       // tools stack to 1
     int tier = 0; // pickaxe harvest tier vs BlockDef::harvestLevel (M21):
                   // wood 0, stone 1, iron 2
+    // M33 armor: `armor` flags an equippable piece; the rest are the vanilla
+    // 1.12 ItemArmor.ArmorMaterial values (defense points + toughness feed
+    // CombatRules.getDamageAfterAbsorb). armorTexture is the material key
+    // ("iron", "diamond", ...) used to pick the worn-layer model texture.
+    bool armor = false;
+    ArmorSlot armorSlot = ArmorSlot::Head;
+    int defensePoints = 0;
+    float armorToughness = 0.0f;
+    std::string armorTexture;
 };
 
 class ItemRegistry {
@@ -52,6 +66,18 @@ const std::string& ItemName(ItemId id);
 uint16_t ItemIconTile(ItemId id); // sprite tile, or the block's side face
 int ItemMaxStack(ItemId id);
 
+// M33 armor queries (all false/zero for non-armor ids).
+bool IsArmor(ItemId id);
+ArmorSlot ArmorSlotOf(ItemId id); // meaningful only when IsArmor(id)
+int ArmorDefense(ItemId id);
+float ArmorToughness(ItemId id);
+const std::string& ArmorTexture(ItemId id); // material key, e.g. "iron"
+
+// Atlas tiles for the empty-armor-slot placeholder sprites, indexed by
+// ArmorSlot (Head/Chest/Legs/Feet). Drawn by InventoryScreen; not items.
+// Must match both atlas scripts (tiles 91..94, after the M33 armor icons).
+inline constexpr uint16_t kEmptyArmorSlotTile[kArmorSlots] = {91, 92, 93, 94};
+
 namespace items {
 
 extern ItemId Stick;
@@ -77,6 +103,15 @@ extern ItemId LavaBucket;
 // M32 mob drops (sprite-only for now; eating/food value is backlog).
 extern ItemId RawPorkchop; // pig
 extern ItemId RottenFlesh;  // zombie
+
+// M33 armor: the 20 pieces register contiguously, material-major then slot,
+// starting at FirstArmor (leather helmet). ArmorPiece() addresses one by
+// material + slot rather than 20 named externs.
+enum ArmorMaterial { Leather = 0, Chainmail = 1, Iron = 2, Gold = 3, Diamond = 4 };
+extern ItemId FirstArmor;
+inline ItemId ArmorPiece(ArmorMaterial material, ArmorSlot slot) {
+    return static_cast<ItemId>(FirstArmor + material * kArmorSlots + static_cast<int>(slot));
+}
 
 // The liquid SOURCE block a filled bucket places (Air for the empty bucket
 // or any non-bucket item) — lets the bucket use code stay data-driven.

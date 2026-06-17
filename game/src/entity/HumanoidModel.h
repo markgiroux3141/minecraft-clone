@@ -19,8 +19,17 @@ class HumanoidModel {
 public:
     // skinRel is an asset-relative path (e.g. "mc/textures/entity/zombie/zombie.png").
     // zombiePose holds the arms out straight ahead (vanilla shambling zombie).
+    // M33: inflate grows every box (the armor layers are inflated bipeds — 1.0
+    // for the helmet/chest/boots layer, 0.5 for the leggings layer); texW/texH
+    // give the skin's dimensions (armor layer textures are 64x32); includeHat
+    // drops the head overlay box for armor (it has no second layer).
     explicit HumanoidModel(std::string skinRel = "mc/textures/entity/steve.png",
-                           bool zombiePose = false);
+                           bool zombiePose = false, float inflate = 0.0f, float texW = 64.0f,
+                           float texH = 64.0f, bool includeHat = true);
+
+    // The six biped parts, for per-part show/hide on the armor layers.
+    enum class Part { Head, Body, RightArm, LeftArm, RightLeg, LeftLeg };
+    void SetVisible(Part part, bool visible);
 
     // True once the skin loaded (needs the gitignored mc asset overlay; a
     // clean clone without it skips drawing, like the first-person arm).

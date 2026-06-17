@@ -29,6 +29,8 @@ add_executable(game
     # Game-side render helpers
     src/render/Particles.cpp
     src/render/Particles.h
+    src/render/PlayerDoll.cpp
+    src/render/PlayerDoll.h
     src/render/ViewModel.cpp
     src/render/ViewModel.h
     # UI / screens / HUD

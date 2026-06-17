@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 
+#include "vox/renderer/Texture.h"
 #include "vox/renderer/UiRenderer.h"
 
 #include "item/Crafting.h"
@@ -25,6 +26,11 @@ constexpr float kGridY = 84.0f;
 constexpr float kHotbarY = 142.0f;
 constexpr glm::vec2 kPlayerCraftPos{98.0f, 18.0f};
 constexpr glm::vec2 kPlayerResultPos{154.0f, 28.0f};
+// M33: the four worn-armor slots down the left edge (vanilla ContainerPlayer:
+// x=8, y=8 + slot*18), and the player-doll box between them and the craft grid.
+constexpr glm::vec2 kArmorPos{8.0f, 8.0f};
+constexpr glm::vec2 kDollPos{26.0f, 8.0f};
+constexpr glm::vec2 kDollSize = InventoryScreen::kDollBoxSize;
 constexpr glm::vec2 kTableCraftPos{30.0f, 17.0f};
 constexpr glm::vec2 kTableResultPos{124.0f, 35.0f};
 // ContainerFurnace: input over fuel on the left, output on the right;
@@ -100,6 +106,15 @@ void ClickSlot(ItemStack& slot, ItemStack& carried, bool right) {
             carried = {};
         }
     } else if (!SameKind(slot, carried)) {
+        std::swap(slot, carried);
+    }
+}
+
+// M33 armor slots (vanilla SlotArmor): only the matching armor type goes in,
+// but the worn piece can always be taken out. Armor stacks to 1, so a swap
+// covers equip/unequip for both mouse buttons.
+void ClickArmorSlot(ItemStack& slot, ItemStack& carried, ArmorSlot which) {
+    if (carried.Empty() || (IsArmor(carried.id) && ArmorSlotOf(carried.id) == which)) {
         std::swap(slot, carried);
     }
 }
@@ -203,6 +218,14 @@ void InventoryScreen::Draw(vox::UiRenderer& ui, glm::vec2 screen, glm::vec2 mous
             ui.DrawRect(panelOrigin + pos * s, glm::vec2(16.0f * s), kSlotFill);
         }
         ui.DrawRect(panelOrigin + resultPos * s, glm::vec2(16.0f * s), kSlotFill);
+        if (!table) {
+            for (int a = 0; a < kArmorSlots; ++a) {
+                ui.DrawRect(panelOrigin +
+                                (kArmorPos + glm::vec2(0.0f, static_cast<float>(a) * kSlotPitch)) *
+                                    s,
+                            glm::vec2(16.0f * s), kSlotFill);
+            }
+        }
     }
 
     // A regular interactive slot (inventory and craft cells alike).
@@ -226,6 +249,35 @@ void InventoryScreen::Draw(vox::UiRenderer& ui, glm::vec2 screen, glm::vec2 mous
                                                    static_cast<float>(i / craftSize)) *
                                              kSlotPitch;
         doSlot(craft[static_cast<size_t>(i)], panelOrigin + pos * s);
+    }
+
+    // M33: the player doll (drawn under the armor icons), then the four armor
+    // slots — empty ones show their placeholder sprite; equip is type-gated.
+    if (!table) {
+        if (tex.playerDoll) {
+            const glm::vec2 texSize{static_cast<float>(tex.playerDoll->Width()),
+                                    static_cast<float>(tex.playerDoll->Height())};
+            ui.DrawImage(tex.playerDoll, panelOrigin + kDollPos * s, kDollSize * s, {0.0f, 0.0f},
+                         texSize);
+        }
+        for (int a = 0; a < kArmorSlots; ++a) {
+            const glm::vec2 pos =
+                panelOrigin + (kArmorPos + glm::vec2(0.0f, static_cast<float>(a) * kSlotPitch)) * s;
+            ItemStack& piece = inv.Armor(static_cast<size_t>(a));
+            if (piece.Empty()) {
+                ui.DrawAtlasTile(pos, glm::vec2(16.0f * s), kEmptyArmorSlotTile[a]);
+            }
+            DrawItemStack(ui, pos, s, piece, tex.blockIcons);
+            if (Hover(mouse, pos, glm::vec2(16.0f * s))) {
+                ui.DrawRect(pos, glm::vec2(16.0f * s), kHoverHighlight);
+                if (!piece.Empty()) {
+                    tooltip = ItemName(piece.id);
+                }
+                if (click) {
+                    ClickArmorSlot(piece, carried, static_cast<ArmorSlot>(a));
+                }
+            }
+        }
     }
 
     // Result slot: shows the recipe match; clicking crafts into the

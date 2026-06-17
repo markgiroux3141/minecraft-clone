@@ -61,6 +61,34 @@ int ItemMaxStack(ItemId id) {
     return 64;
 }
 
+bool IsArmor(ItemId id) {
+    const ItemDef* item = ItemRegistry::Get().Find(id);
+    return item != nullptr && item->armor;
+}
+
+ArmorSlot ArmorSlotOf(ItemId id) {
+    if (const ItemDef* item = ItemRegistry::Get().Find(id)) {
+        return item->armorSlot;
+    }
+    return ArmorSlot::Head;
+}
+
+int ArmorDefense(ItemId id) {
+    const ItemDef* item = ItemRegistry::Get().Find(id);
+    return (item != nullptr && item->armor) ? item->defensePoints : 0;
+}
+
+float ArmorToughness(ItemId id) {
+    const ItemDef* item = ItemRegistry::Get().Find(id);
+    return (item != nullptr && item->armor) ? item->armorToughness : 0.0f;
+}
+
+const std::string& ArmorTexture(ItemId id) {
+    static const std::string kEmpty;
+    const ItemDef* item = ItemRegistry::Get().Find(id);
+    return (item != nullptr && item->armor) ? item->armorTexture : kEmpty;
+}
+
 namespace items {
 
 BlockId BucketLiquid(ItemId id) {
@@ -100,6 +128,7 @@ ItemId WaterBucket = 0;
 ItemId LavaBucket = 0;
 ItemId RawPorkchop = 0;
 ItemId RottenFlesh = 0;
+ItemId FirstArmor = 0;
 
 namespace {
 
@@ -189,6 +218,52 @@ void RegisterDefaults() {
     flesh.name = "rotten flesh";
     flesh.tile = 70;
     RottenFlesh = registry.Register(std::move(flesh));
+
+    // M33 armor: 5 materials x 4 slots = 20 pieces (sprite tiles 71..90,
+    // material-major, slot order helmet/chestplate/leggings/boots — matches
+    // ArmorSlot Head/Chest/Legs/Feet = 0..3). Values are vanilla 1.12
+    // ItemArmor.ArmorMaterial: durability = MAX_DAMAGE_ARRAY[slot] * the
+    // material factor; defense points + toughness straight from the enum
+    // (only diamond has toughness 2.0). Keep BOTH atlas scripts in sync
+    // (gen_textures.py placeholders + import_mc_assets.py real icons).
+    struct ArmorMat {
+        const char* key;     // layer-texture material key (file name stem)
+        const char* display; // item name prefix
+        int factor;          // durability multiplier
+        float toughness;
+    };
+    static constexpr ArmorMat kArmorMats[] = {
+        {"leather", "leather", 5, 0.0f},   {"chainmail", "chainmail", 15, 0.0f},
+        {"iron", "iron", 15, 0.0f},        {"gold", "golden", 7, 0.0f},
+        {"diamond", "diamond", 33, 2.0f},
+    };
+    static constexpr int kSlotMaxDamage[kArmorSlots] = {11, 16, 15, 13}; // Head,Chest,Legs,Feet
+    static constexpr const char* kSlotName[kArmorSlots] = {"helmet", "chestplate", "leggings",
+                                                           "boots"};
+    // Defense points per material per slot, in Head/Chest/Legs/Feet order
+    // (vanilla's damageReductionAmountArray reindexed from feet-first).
+    static constexpr int kArmorDefense[5][kArmorSlots] = {
+        {1, 3, 2, 1}, {2, 5, 4, 1}, {2, 6, 5, 2}, {2, 5, 3, 1}, {3, 8, 6, 3},
+    };
+    uint16_t armorTile = 71;
+    for (int m = 0; m < 5; ++m) {
+        for (int s = 0; s < kArmorSlots; ++s) {
+            ItemDef a;
+            a.name = std::string(kArmorMats[m].display) + " " + kSlotName[s];
+            a.tile = armorTile++;
+            a.maxStack = 1;
+            a.maxDamage = kSlotMaxDamage[s] * kArmorMats[m].factor;
+            a.armor = true;
+            a.armorSlot = static_cast<ArmorSlot>(s);
+            a.defensePoints = kArmorDefense[m][s];
+            a.armorToughness = kArmorMats[m].toughness;
+            a.armorTexture = kArmorMats[m].key;
+            const ItemId id = registry.Register(std::move(a));
+            if (m == 0 && s == 0) {
+                FirstArmor = id;
+            }
+        }
+    }
 
     // Coal ore's drop is the coal item — its id only exists now, after
     // item registration (same late-patch pattern as stone -> cobblestone).

@@ -102,10 +102,13 @@ int main() {
         Check(!save.GetWorldTime().has_value(), "pre-time manifest reads as absent");
         Check(!save.GetInventory().has_value(), "pre-inventory manifest reads as absent");
         Check(!save.GetVitals().has_value(), "pre-vitals manifest reads as absent");
+        Check(!save.GetArmor().has_value(), "pre-armor manifest reads as absent");
         save.SetWorldTime(13337);
         save.SetPlayerState({{1234.5f, 70.25f, -8.125f}, 123.5f, -45.0f, true});
         save.SetInventory({{0, 1, 64, 0}, {8, 1025, 1, 37}, {35, 20, 17, 0}});
         save.SetVitals({7.5f, 13, 2.25f, 1.5f, 140});
+        // M33 armor: helmet (slot 0) + boots (slot 3), worn (count 1) with wear.
+        save.SetArmor({{0, 1095, 1, 12}, {3, 1098, 1, 0}});
     }
     {
         vc::WorldSave save(dir, 7);
@@ -125,6 +128,11 @@ int main() {
         Check(vitals.has_value() && vitals->health == 7.5f && vitals->foodLevel == 13 &&
                   vitals->saturation == 2.25f && vitals->exhaustion == 1.5f && vitals->air == 140,
               "vitals (health/food/saturation/exhaustion/air) round-trip exactly");
+        const auto& armor = save.GetArmor();
+        Check(armor.has_value() && armor->size() == 2 && (*armor)[0].slot == 0 &&
+                  (*armor)[0].id == 1095 && (*armor)[0].count == 1 && (*armor)[0].damage == 12 &&
+                  (*armor)[1].slot == 3 && (*armor)[1].id == 1098 && (*armor)[1].damage == 0,
+              "worn armor (slot/id/count/wear) round-trips exactly");
         Check(save.Seed() == 42, "seed survives the manifest rewrite");
         Check(save.SavedChunkCount() == 4, "chunks survive the manifest rewrite");
         save.SetInventory({});
@@ -134,6 +142,8 @@ int main() {
         const auto& inv = save.GetInventory();
         Check(inv.has_value() && inv->empty(),
               "empty inventory reads back as present-but-empty (not absent)");
+        Check(save.GetArmor().has_value() && save.GetArmor()->size() == 2,
+              "armor persists across an inventory-only rewrite");
     }
     {
         // Furnace block entities (M21): the furnaces.dat sidecar

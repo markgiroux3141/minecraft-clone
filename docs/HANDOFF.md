@@ -30,8 +30,17 @@ natural light/cap-gated spawning, two-way melee combat (player LMB + knockback,
 zombie melee → directional player knockback), mob item drops, and mobs.dat
 persistence; built on M31's renderer + M30's vitals + the FallingBlock/ItemEntity
 pattern. See the M32 section for the design + the user test checklist (debug
-spawn keys B = pig, C = zombie). M33 (armor + the inventory player doll) is next,
-in a fresh context.
+spawn keys B = pig, C = zombie). M33 (ARMOR + THE INVENTORY PLAYER DOLL) is now
+DONE and USER-VERIFIED ("the character model is facing in the right direction,
+armor works, everything looks good") — full vanilla armor set (leather/chainmail/
+iron/gold/diamond × helmet/chest/legs/boots = 20 items), vanilla 1.12 CombatRules
+damage reduction + durability wear, the four inventory armor slots (equip on
+click, type-gated), and a 3D player doll baked into the inventory panel showing
+worn armor. See the M33 section for the design. This closes the M30–M33 survival
+& mobs arc; the next milestone (mob roster / explosion / projectile systems) is
+scoped in the "Mob & enemy roadmap" section, in a fresh context. NOTE: after
+pulling on this machine, re-run `import_mc_assets.py` (M33 added armor icons,
+model-layer textures, and empty-slot sprites).
 Read alongside `ARCHITECTURE.md` (layering rules, roadmap) and `CLAUDE.md`
 (build commands, conventions).
 
@@ -2132,6 +2141,96 @@ on grass in daylight, zombies at night (use T to fast-forward); wander a long
 way from a spawned zombie and it should despawn. Quit + re-enter the world → the
 mobs you left are restored from mobs.dat (pigs persist; far hostiles may have
 despawned). An OLD world (no mobs.dat) loads fine with an empty mob set.
+
+## M33 — armor & the inventory player doll (DONE & USER-VERIFIED)
+
+DONE & USER-VERIFIED 2026-06-17 ("the character model is facing in the right
+direction, armor works, everything looks good"). Finishes the survival arc:
+now that mobs hit you (M32), armor mitigates it, and the player character shows
+in the inventory. Decisions confirmed with the user before coding: FULL vanilla
+armor set (5 materials × 4 slots), the worn-armor LAYER rendered on the doll
+(not body-only), and vanilla 1.12 armor-points math. Built on M19 items/
+durability, M30's damage path, M31's box-model renderer, and M29's framebuffer→UI
+path — almost entirely wiring + data, one new engine capability (per-part model
+visibility).
+
+- ITEM DATA (`game/src/item/Item.{h,cpp}`): `ItemDef` grew `armor`, `armorSlot`
+  (`ArmorSlot{Head,Chest,Legs,Feet}` = 0..3), `defensePoints`, `armorToughness`,
+  `armorTexture` (the material key, e.g. "iron"). `RegisterDefaults` appends 20
+  pieces from a material×slot table (sprite tiles 71..90, material-major) using
+  vanilla `ItemArmor.ArmorMaterial` values: durability = MAX_DAMAGE_ARRAY[slot]
+  ({11,16,15,13} for head/chest/legs/feet) × the material factor (leather 5,
+  chain/iron 15, gold 7, diamond 33); defense points + toughness (only diamond
+  2.0) straight from the enum. `FirstArmor` + `ArmorPiece(material, slot)`
+  address a piece without 20 named externs; `IsArmor/ArmorSlotOf/ArmorDefense/
+  ArmorToughness/ArmorTexture` are the queries. The creative palette auto-lists
+  them (it enumerates the whole item registry).
+- ASSETS (`import_mc_assets.py` + `gen_textures.py`): both atlas scripts grew
+  the SAME 24 tiles in the SAME order — 20 armor icons (71..90) + 4 empty-slot
+  placeholders (91..94, Head/Chest/Legs/Feet), so the texture array is 95 layers
+  now (was 71). Leather icons are grayscale base × the default un-dyed color
+  (0xA06540) composited with the untinted overlay. The import COPIES the worn
+  model-layer textures (`models/armor/{mat}_layer_{1,2}.png`) and RE-BAKES the
+  two leather layers tinted (same as the icons). RE-IMPORT REQUIRED on this
+  machine for the real icons + doll skins (a clean clone draws placeholder
+  silhouettes + no doll, like the debug Steve).
+- INVENTORY (`game/src/item/Inventory.{h,cpp}`): a separate
+  `std::array<ItemStack, kArmorSlots> m_armor` with `Armor(slot)`/`ArmorSlots()`
+  accessors (NOT part of the 36 main slots). Persisted on its own `armor2`
+  manifest line (mirrors `inventory2`; absent in pre-armor saves → nothing worn);
+  `GameApp::EnterWorld` loads it, `PersistPlayerState` writes it. savetest grew a
+  worn-armor round-trip + the persists-across-inventory-rewrite case. A NEW world
+  also gets a debug diamond set in grid slots 20..23.
+- DEFENSE (`Player.{h,cpp}` + `GameApp::OnTick`): `ApplyDamage(amount,
+  bypassArmor)` — `AbsorbArmor` runs vanilla `CombatRules.getDamageAfterAbsorb`
+  (`f = 2 + toughness/4; clamp(armor - dmg/f, armor*0.2, 20); dmg*(1 - that/25)`)
+  for armor-applicable sources. Per vanilla, FALL / burn-over-time (onFire) /
+  drown / starve / void BYPASS armor; lava-touch / cactus / mob melee do NOT.
+  `GameApp` sums the worn pieces' defense+toughness into `Player::SetArmorStats`
+  before the tick; after combat it drains `Player::ConsumeArmorWear` (the raw
+  absorbed damage) and wears each piece by `max(1, raw/4)` (vanilla
+  `InventoryPlayer.damageArmor`), breaking pieces at their durability limit.
+- DOLL RENDERER (`game/src/render/PlayerDoll.{h,cpp}`, new): bakes the body +
+  worn armor to an offscreen `vox::Framebuffer` (M29 path), blitted into the
+  inventory panel. Reuses `HumanoidModel`, now generalized: constructor takes an
+  `inflate`, skin dims (armor layers are 64×32), and `includeHat`; `BoxModel`
+  gained per-part `SetVisible` (the new engine capability). Armor layers are
+  inflated bipeds per vanilla `LayerArmorBase`: layer 1 (+1.0, `{mat}_layer_1`)
+  for helmet (head) / chest (body+arms) / boots (legs); layer 2 (+0.5,
+  `{mat}_layer_2`) for leggings (body+legs). Models are built lazily per
+  material + cached. The bake uses a y-up ortho (BlockIcons' upright trick) and
+  flat full-bright lighting; it runs in `DrawUi` right after the block-icon bake
+  (depth still on) only in `State::Inventory`, then restores the viewport.
+- UI (`game/src/ui/InventoryScreen.{h,cpp}`): four armor slots down the left
+  edge (vanilla x=8, y=8/26/44/62) — empty ones draw their placeholder sprite;
+  `ClickArmorSlot` is a type-gated swap (only the matching `ArmorSlot` goes in,
+  anything comes out — works for both buttons since armor stacks to 1). The doll
+  texture (passed via `GuiTextures::playerDoll`) blits into the panel box
+  (`kDollBoxSize` 50×64, baked at that × the GUI scale). Both the slots and the
+  doll are player-screen only (`!table`); the crafting table + furnace screens
+  are untouched.
+- KNOWN M33 LIMITS / decisions: NO shift-click quick-equip (the game has no
+  shift-click quick-move anywhere yet — equip by grabbing from the palette/
+  inventory and clicking the slot); armor isn't a mob/chest drop yet (creative
+  palette + the new-world debug set are the sources); no enchantments/
+  enchantability; the doll is a static idle pose (no mouse-follow head like
+  vanilla); armor durability, like the rest of the inventory, persists on quit
+  only (not the 30 s autosave). The doll YAW (`PlayerDoll.cpp` `yaw = 200°`) +
+  scale/position were user-confirmed as facing forward and well-placed.
+
+WHAT THE USER SHOULD TEST (re-run `import_mc_assets.py` first; works in ANY
+world — armor is in the creative palette, and a NEW world also spawns a debug
+diamond set in the inventory grid): open E → the four armor slots show down the
+left with empty-slot icons, and the player doll renders between them and the 2×2
+craft grid. Grab armor from the palette (or the debug set) and click an armor
+slot → it equips (and the doll shows the worn layer); a wrong-slot piece is
+rejected; click a worn slot with an empty cursor → it comes off. Confirm the
+doll FACES FORWARD and is sized/placed sensibly (flag if not). Take damage from a
+zombie (C to spawn) with vs. without armor → armor visibly reduces the hit, and
+pieces wear (durability bar on the icon) and eventually break. Confirm FALL /
+drowning / starvation still hurt at full strength through armor (they bypass it),
+while lava/cactus/mob hits are reduced. Quit + re-enter → worn armor restored
+from the `armor2` line; an OLD world loads fine with nothing worn.
 
 ## Planned arc — survival & mobs (M30–M33)
 

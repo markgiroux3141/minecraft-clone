@@ -496,6 +496,63 @@ def rotten_flesh_sprite(x, y):
     return (0, 0, 0, 0)
 
 
+# M33 armor placeholder silhouettes (the real icons come from
+# import_mc_assets.py). Each shape is a flat material-colored stencil; the
+# four shapes mirror the equip order helmet/chestplate/leggings/boots.
+def helmet_sprite(color, salt):
+    def pixel(x, y):
+        if 3 <= x <= 12 and 2 <= y <= 10:
+            if 7 <= y <= 10 and 6 <= x <= 9:  # face opening
+                return (0, 0, 0, 0)
+            if y == 2 and (x < 4 or x > 11):  # round the crown
+                return (0, 0, 0, 0)
+            return speckle(color, x, y, salt, 10)
+        return (0, 0, 0, 0)
+
+    return pixel
+
+
+def chest_sprite(color, salt):
+    def pixel(x, y):
+        if 3 <= y <= 4 and 2 <= x <= 13:  # shoulders
+            return speckle(color, x, y, salt, 10)
+        if 5 <= y <= 13 and 4 <= x <= 11:  # torso
+            return speckle(color, x, y, salt, 10)
+        return (0, 0, 0, 0)
+
+    return pixel
+
+
+def legs_sprite(color, salt):
+    def pixel(x, y):
+        if 4 <= y <= 5 and 4 <= x <= 11:  # belt
+            return speckle(color, x, y, salt, 10)
+        if 6 <= y <= 14 and (4 <= x <= 6 or 9 <= x <= 11):  # two legs
+            return speckle(color, x, y, salt, 10)
+        return (0, 0, 0, 0)
+
+    return pixel
+
+
+def boots_sprite(color, salt):
+    def pixel(x, y):
+        if 9 <= y <= 12 and (3 <= x <= 6 or 9 <= x <= 12):  # uppers
+            return speckle(color, x, y, salt, 10)
+        if 13 <= y <= 14 and (3 <= x <= 7 or 9 <= x <= 13):  # soles
+            return speckle(color, x, y, salt, 10)
+        return (0, 0, 0, 0)
+
+    return pixel
+
+
+# Material colors (leather, chainmail, iron, gold, diamond) + the empty-slot
+# placeholder color, and the four shapes in equip order.
+ARMOR_COLORS = [(160, 101, 64), (150, 152, 160), (200, 200, 206),
+                (240, 212, 80), (120, 222, 214)]
+ARMOR_SHAPES = [helmet_sprite, chest_sprite, legs_sprite, boots_sprite]
+EMPTY_SLOT_COLOR = (78, 78, 84)
+
+
 # Layer index in the texture array == position in this list.
 TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top, leaves, water,
          snow, grass_side_snowed, tall_grass, dandelion, poppy, dead_bush,
@@ -520,7 +577,13 @@ TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top,
          # (66 empty / 67 water / 68 lava).
          lava, obsidian, bucket_empty, bucket_water, bucket_lava,
          # M32 mob drops (69 porkchop / 70 rotten flesh).
-         porkchop_sprite, rotten_flesh_sprite]
+         porkchop_sprite, rotten_flesh_sprite] + [
+         # M33 armor icons (71..90): material-major x slot (helmet, chestplate,
+         # leggings, boots), matching Item.cpp's RegisterDefaults.
+         ARMOR_SHAPES[s](color, 71 + m * 4 + s)
+         for m, color in enumerate(ARMOR_COLORS) for s in range(4)] + [
+         # Empty-slot placeholders (91..94, Head/Chest/Legs/Feet).
+         ARMOR_SHAPES[s](EMPTY_SLOT_COLOR, 91 + s) for s in range(4)]
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:

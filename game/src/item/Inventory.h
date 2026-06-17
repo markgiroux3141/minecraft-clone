@@ -33,15 +33,27 @@ public:
     const ItemStack& Slot(size_t index) const { return m_slots[index]; }
     std::span<const ItemStack> Hotbar() const { return {m_slots.data(), kHotbarSize}; }
 
+    // M33 worn armor, indexed by ArmorSlot (Head/Chest/Legs/Feet). Separate
+    // from the 36 main slots; persisted on its own manifest line.
+    ItemStack& Armor(ArmorSlot slot) { return m_armor[static_cast<size_t>(slot)]; }
+    const ItemStack& Armor(ArmorSlot slot) const { return m_armor[static_cast<size_t>(slot)]; }
+    ItemStack& Armor(size_t index) { return m_armor[index]; }
+    const ItemStack& Armor(size_t index) const { return m_armor[index]; }
+    const std::array<ItemStack, kArmorSlots>& ArmorSlots() const { return m_armor; }
+
     // Merges into matching stacks first, then the first empty slot (slot
     // order, so the hotbar fills before the grid — vanilla's rule).
     // Returns whatever didn't fit.
     ItemStack Add(ItemStack stack);
 
-    void Clear() { m_slots.fill(ItemStack{}); }
+    void Clear() {
+        m_slots.fill(ItemStack{});
+        m_armor.fill(ItemStack{});
+    }
 
 private:
     std::array<ItemStack, kSize> m_slots{};
+    std::array<ItemStack, kArmorSlots> m_armor{};
 };
 
 } // namespace vc

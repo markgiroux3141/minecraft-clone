@@ -115,6 +115,12 @@ void BoxModel::SetRotation(int part, glm::vec3 radians) {
     }
 }
 
+void BoxModel::SetVisible(int part, bool visible) {
+    if (part >= 0 && part < static_cast<int>(m_parts.size())) {
+        m_parts[static_cast<size_t>(part)].visible = visible;
+    }
+}
+
 void BoxModel::SetSkin(std::shared_ptr<Texture2D> skin, float texWidth, float texHeight) {
     m_skin = std::move(skin);
     m_texWidth = texWidth;
@@ -162,7 +168,7 @@ void BoxModel::Render(Shader& shader, const glm::mat4& modelToWorld, int skinUni
         const glm::mat4 parent =
             part.parent < 0 ? modelToWorld : full[static_cast<size_t>(part.parent)];
         full[i] = parent * local;
-        if (part.indexCount == 0) {
+        if (part.indexCount == 0 || !part.visible) {
             continue;
         }
         shader.SetMat4("u_model", full[i]);

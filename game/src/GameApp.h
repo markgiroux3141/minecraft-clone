@@ -21,6 +21,7 @@
 #include "entity/PigModel.h"
 #include "item/Inventory.h"
 #include "render/Particles.h"
+#include "render/PlayerDoll.h"
 #include "entity/Player.h"
 #include "render/ViewModel.h"
 #include "ui/BlockIcons.h"
@@ -164,6 +165,8 @@ private:
     std::unique_ptr<vox::UiRenderer> m_ui;
     // M29: baked 3D block-icon sheet for inventory/hotbar slots.
     std::unique_ptr<vc::BlockIcons> m_blockIcons;
+    // M33: baked player-doll (body + worn armor) for the inventory screen.
+    std::unique_ptr<vc::PlayerDoll> m_playerDoll;
 
     // Player items (M17): hotbar = inventory slots 0..8, keys 1..9 select;
     // m_carried rides the mouse while a container screen is open. The

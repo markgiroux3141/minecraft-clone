@@ -15,30 +15,50 @@ constexpr float kPi = glm::pi<float>();
 constexpr float kDegToRad = kPi / 180.0f;
 } // namespace
 
-HumanoidModel::HumanoidModel(std::string skinRel, bool zombiePose) : m_zombiePose(zombiePose) {
+HumanoidModel::HumanoidModel(std::string skinRel, bool zombiePose, float inflate, float texW,
+                             float texH, bool includeHat)
+    : m_zombiePose(zombiePose) {
     using Box = vox::BoxModel::Box;
-    // Vanilla ModelBiped boxes (pixels, Y-down model space, 64x64 skin). The
-    // origin is part-local (relative to the pivot/rotationPoint). Pivots and
-    // texture offsets are verbatim from ModelBiped's constructor.
-    m_head = m_model.AddPart("head", {0.0f, 0.0f, 0.0f},
-                             {Box{{-4, -8, -4}, {8, 8, 8}, {0, 0}, 0.0f, false},
-                              // bipedHeadwear: same box, +0.5 inflate, texOffset(32,0).
-                              Box{{-4, -8, -4}, {8, 8, 8}, {32, 0}, 0.5f, false}});
+    // Vanilla ModelBiped boxes (pixels, Y-down model space). The origin is
+    // part-local (relative to the pivot/rotationPoint). Pivots and texture
+    // offsets are verbatim from ModelBiped's constructor; `inflate` adds the
+    // vanilla armor-model delta to every box.
+    std::vector<Box> headBoxes{Box{{-4, -8, -4}, {8, 8, 8}, {0, 0}, inflate, false}};
+    if (includeHat) {
+        // bipedHeadwear: same box, +0.5 inflate, texOffset(32,0).
+        headBoxes.push_back(Box{{-4, -8, -4}, {8, 8, 8}, {32, 0}, inflate + 0.5f, false});
+    }
+    m_head = m_model.AddPart("head", {0.0f, 0.0f, 0.0f}, headBoxes);
     m_body = m_model.AddPart("body", {0.0f, 0.0f, 0.0f},
-                             {Box{{-4, 0, -2}, {8, 12, 4}, {16, 16}, 0.0f, false}});
+                             {Box{{-4, 0, -2}, {8, 12, 4}, {16, 16}, inflate, false}});
     m_rightArm = m_model.AddPart("rightArm", {-5.0f, 2.0f, 0.0f},
-                                 {Box{{-3, -2, -2}, {4, 12, 4}, {40, 16}, 0.0f, false}});
+                                 {Box{{-3, -2, -2}, {4, 12, 4}, {40, 16}, inflate, false}});
     m_leftArm = m_model.AddPart("leftArm", {5.0f, 2.0f, 0.0f},
-                                {Box{{-1, -2, -2}, {4, 12, 4}, {40, 16}, 0.0f, true}});
+                                {Box{{-1, -2, -2}, {4, 12, 4}, {40, 16}, inflate, true}});
     m_rightLeg = m_model.AddPart("rightLeg", {-1.9f, 12.0f, 0.0f},
-                                 {Box{{-2, 0, -2}, {4, 12, 4}, {0, 16}, 0.0f, false}});
+                                 {Box{{-2, 0, -2}, {4, 12, 4}, {0, 16}, inflate, false}});
     m_leftLeg = m_model.AddPart("leftLeg", {1.9f, 12.0f, 0.0f},
-                                {Box{{-2, 0, -2}, {4, 12, 4}, {0, 16}, 0.0f, true}});
+                                {Box{{-2, 0, -2}, {4, 12, 4}, {0, 16}, inflate, true}});
 
     if (std::filesystem::exists(vox::assets::Resolve(skinRel))) {
-        m_model.SetSkin(vox::Texture2D::FromFile(skinRel), 64.0f, 64.0f);
+        m_model.SetSkin(vox::Texture2D::FromFile(skinRel), texW, texH);
     }
     m_model.Build();
+}
+
+void HumanoidModel::SetVisible(Part part, bool visible) {
+    const int idx = [&] {
+        switch (part) {
+        case Part::Head: return m_head;
+        case Part::Body: return m_body;
+        case Part::RightArm: return m_rightArm;
+        case Part::LeftArm: return m_leftArm;
+        case Part::RightLeg: return m_rightLeg;
+        case Part::LeftLeg: return m_leftLeg;
+        }
+        return -1;
+    }();
+    m_model.SetVisible(idx, visible);
 }
 
 void HumanoidModel::SetRotationAngles(float limbSwing, float limbSwingAmount, float age,

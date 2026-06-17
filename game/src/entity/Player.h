@@ -79,6 +79,15 @@ public:
     // resolved against blocks so it can't push you into a wall. No-op in fly.
     void ExternalPush(const vc::World& world, float dx, float dz);
 
+    // M33 armor. GameApp pushes the worn pieces' summed defense points +
+    // toughness here each tick; ApplyDamage feeds them through vanilla 1.12's
+    // CombatRules.getDamageAfterAbsorb for non-armor-bypassing sources.
+    void SetArmorStats(float defensePoints, float toughness);
+    // Raw armor-applicable damage accumulated since the last call (cleared on
+    // read). GameApp converts it to durability wear on the worn pieces
+    // (vanilla InventoryPlayer.damageArmor: max(1, raw/4) per piece).
+    float ConsumeArmorWear();
+
     // Does the player's AABB overlap this block? (placement check)
     bool Intersects(const glm::ivec3& block) const;
 
@@ -100,8 +109,12 @@ private:
     // points of damage subject to the hurt-resist window (a bigger hit during
     // the window tops up to the new amount). Sets m_dead at <= 0. Returns true
     // when a FRESH full hit landed (armed the hurt window) — Hurt uses this to
-    // attach directional knockback.
-    bool ApplyDamage(float amount);
+    // attach directional knockback. bypassArmor skips the M33 armor calc for
+    // vanilla unblockable sources (fall, drown, starve, void, burn-over-time).
+    bool ApplyDamage(float amount, bool bypassArmor = false);
+    // CombatRules.getDamageAfterAbsorb: reduces armor-applicable damage by the
+    // worn defense/toughness and books the raw amount for durability wear.
+    float AbsorbArmor(float amount, bool bypassArmor);
     void Heal(float amount);
     // Player AABB (slightly grown horizontally) overlaps a cactus cell.
     bool TouchingCactus(const vc::World& world) const;
@@ -146,6 +159,9 @@ private:
     bool m_hurtThisTick = false; // a hit landed this tick (one-shot for the hurt sound)
     float m_hurtRollSign = 1.0f; // M32: directional sign of the hurt tilt (+1 = undirected)
     glm::vec3 m_knockback{0.0f};  // M32: decaying horizontal shove from a mob hit
+    float m_armorDefense = 0.0f;  // M33: summed worn defense points (vanilla armor value)
+    float m_armorToughness = 0.0f; // M33: summed worn toughness (diamond 2/piece)
+    float m_armorWear = 0.0f;     // M33: raw armor-applicable damage pending durability wear
 
     glm::vec2 m_lastMouse{0.0f};
     bool m_hasLastMouse = false;

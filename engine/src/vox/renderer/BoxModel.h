@@ -55,6 +55,11 @@ public:
     // (vanilla rotateAngleX/Y/Z). Applied in vanilla order Z, then Y, then X.
     void SetRotation(int part, glm::vec3 radians);
 
+    // Hide/show a part (vanilla ModelRenderer.showModel). Hidden parts and
+    // their geometry are skipped in Render — the M33 armor layers render only
+    // the parts the worn piece covers. Default visible.
+    void SetVisible(int part, bool visible);
+
     // Skin texture + its dimensions in pixels (vanilla textureWidth/Height,
     // usually 64x64). Required for the box UV unwrap.
     void SetSkin(std::shared_ptr<Texture2D> skin, float texWidth, float texHeight);
@@ -77,6 +82,7 @@ private:
         glm::vec3 pivot{0.0f};
         glm::vec3 rotation{0.0f};
         int parent = -1;
+        bool visible = true;
         std::vector<Box> boxes;
         std::shared_ptr<VertexArray> vao;
         uint32_t indexCount = 0;

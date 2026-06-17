@@ -168,6 +168,19 @@ void WorldSave::ReadManifest(int defaultSeed) {
                         m_inventory = std::move(slots);
                     }
                 }
+            } else if (tag == "armor2") {
+                size_t n = 0;
+                if (in >> n) {
+                    std::vector<InventorySlot> slots;
+                    slots.reserve(n);
+                    InventorySlot s;
+                    while (slots.size() < n && in >> s.slot >> s.id >> s.count >> s.damage) {
+                        slots.push_back(s);
+                    }
+                    if (slots.size() == n) {
+                        m_armor = std::move(slots);
+                    }
+                }
             } else {
                 break;
             }
@@ -200,6 +213,13 @@ void WorldSave::WriteManifest() const {
             << ' ' << m_vitals->saturation << ' ' << m_vitals->exhaustion << ' ' << m_vitals->air
             << '\n';
     }
+    if (m_armor) {
+        out << "armor2 " << m_armor->size();
+        for (const InventorySlot& s : *m_armor) {
+            out << ' ' << s.slot << ' ' << s.id << ' ' << s.count << ' ' << s.damage;
+        }
+        out << '\n';
+    }
 }
 
 void WorldSave::SetPlayerState(const PlayerState& state) {
@@ -214,6 +234,11 @@ void WorldSave::SetWorldTime(int64_t ticks) {
 
 void WorldSave::SetInventory(std::vector<InventorySlot> slots) {
     m_inventory = std::move(slots);
+    WriteManifest();
+}
+
+void WorldSave::SetArmor(std::vector<InventorySlot> slots) {
+    m_armor = std::move(slots);
     WriteManifest();
 }
 

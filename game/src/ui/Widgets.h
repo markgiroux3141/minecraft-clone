@@ -29,6 +29,9 @@ struct GuiTextures {
     // Baked 3D block-icon sheet (M29). Non-null in game; null in menus that
     // don't draw item stacks, falling back to flat texture tiles.
     const BlockIcons* blockIcons = nullptr;
+    // M33: baked player-doll texture (body + worn armor), drawn in the
+    // inventory panel. Null on a clean clone (no skin overlay) or other screens.
+    std::shared_ptr<vox::Texture2D> playerDoll;
 };
 
 inline constexpr glm::vec4 kUiText{1.0f, 1.0f, 1.0f, 0.95f};
