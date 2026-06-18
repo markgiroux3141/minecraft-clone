@@ -496,6 +496,38 @@ def rotten_flesh_sprite(x, y):
     return (0, 0, 0, 0)
 
 
+# M34 placeholders (real art comes from import_mc_assets.py): a full-tile wool
+# block + simple item blobs for the passive-mob drops + shears.
+def wool_white(x, y):
+    return speckle((222, 222, 224), x, y, 95, 6)
+
+
+def _blob(color, salt, radius2=34):
+    def pixel(x, y):
+        return speckle(color, x, y, salt, 12) if (x - 8) ** 2 + (y - 8) ** 2 <= radius2 \
+            else (0, 0, 0, 0)
+    return pixel
+
+
+def feather_sprite(x, y):
+    # A thin pale diagonal quill.
+    return (236, 236, 240, 255) if abs((x) - (15 - y)) <= 1 and 2 <= x <= 13 else (0, 0, 0, 0)
+
+
+def egg_sprite(x, y):
+    # A cream oval, taller than wide.
+    if ((x - 8) ** 2) / 16.0 + ((y - 8) ** 2) / 28.0 <= 1.0:
+        return speckle((226, 214, 180), x, y, 101, 8)
+    return (0, 0, 0, 0)
+
+
+def shears_sprite(x, y):
+    # Two crossed gray blades.
+    if (abs(x - y) <= 1 or abs(x - (15 - y)) <= 1) and 3 <= x <= 12:
+        return speckle((150, 152, 160), x, y, 102, 8)
+    return (0, 0, 0, 0)
+
+
 # M33 armor placeholder silhouettes (the real icons come from
 # import_mc_assets.py). Each shape is a flat material-colored stencil; the
 # four shapes mirror the equip order helmet/chestplate/leggings/boots.
@@ -583,7 +615,17 @@ TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top,
          ARMOR_SHAPES[s](color, 71 + m * 4 + s)
          for m, color in enumerate(ARMOR_COLORS) for s in range(4)] + [
          # Empty-slot placeholders (91..94, Head/Chest/Legs/Feet).
-         ARMOR_SHAPES[s](EMPTY_SLOT_COLOR, 91 + s) for s in range(4)]
+         ARMOR_SHAPES[s](EMPTY_SLOT_COLOR, 91 + s) for s in range(4)] + [
+         # M34: white wool BLOCK (95) + passive-mob drop / shears sprites
+         # (96..102), matching Block.cpp / Item.cpp RegisterDefaults.
+         wool_white,
+         _blob((196, 70, 70), 96),    # raw beef
+         _blob((150, 101, 64), 97),   # leather
+         _blob((222, 130, 130), 98),  # raw mutton
+         _blob((236, 200, 170), 99),  # raw chicken
+         feather_sprite,              # feather (100)
+         egg_sprite,                  # egg (101)
+         shears_sprite]               # shears (102)
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:

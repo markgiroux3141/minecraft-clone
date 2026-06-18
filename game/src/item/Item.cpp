@@ -128,6 +128,13 @@ ItemId WaterBucket = 0;
 ItemId LavaBucket = 0;
 ItemId RawPorkchop = 0;
 ItemId RottenFlesh = 0;
+ItemId RawBeef = 0;
+ItemId LeatherItem = 0;
+ItemId RawMutton = 0;
+ItemId RawChicken = 0;
+ItemId Feather = 0;
+ItemId Egg = 0;
+ItemId Shears = 0;
 ItemId FirstArmor = 0;
 
 namespace {
@@ -264,6 +271,28 @@ void RegisterDefaults() {
             }
         }
     }
+
+    // M34 passive-mob drops + shears (sprite tiles 96..102, after the wool
+    // BLOCK tile 95 — keep BOTH atlas scripts in sync). All plain sprites
+    // except shears, a 238-use damageable tool (vanilla) with no dig bonus yet.
+    const auto sprite = [&](const char* name, uint16_t tile) {
+        ItemDef d;
+        d.name = name;
+        d.tile = tile;
+        return registry.Register(std::move(d));
+    };
+    RawBeef = sprite("raw beef", 96);
+    LeatherItem = sprite("leather", 97);
+    RawMutton = sprite("raw mutton", 98);
+    RawChicken = sprite("raw chicken", 99);
+    Feather = sprite("feather", 100);
+    Egg = sprite("egg", 101);
+    ItemDef shears;
+    shears.name = "shears";
+    shears.tile = 102;
+    shears.maxStack = 1;
+    shears.maxDamage = 238; // vanilla Items.SHEARS
+    Shears = registry.Register(std::move(shears));
 
     // Coal ore's drop is the coal item — its id only exists now, after
     // item registration (same late-patch pattern as stone -> cobblestone).

@@ -4,6 +4,7 @@
 #include <cmath>
 #include <vector>
 
+#include "entity/Mob.h" // MobType, MobSoundFolder
 #include "vox/core/Assets.h"
 #include "vox/core/Log.h"
 #include "world/World.h"
@@ -74,17 +75,28 @@ void GameSounds::Load(vox::AudioEngine& audio) {
     m_caveAmbient = LoadSet("ambient/cave", "cave", 18); // 1.12 has 18
     m_hurt = LoadSet("damage", "hit", 3);                // entity.player.hurt
 
-    // M32 mob voices. The numbered "say"/"hurt" variants go through LoadSet;
-    // the single unnumbered "death.ogg" is loaded by name (LoadSet probes
-    // <name>N.ogg). Anything missing is silently skipped.
-    m_pigSay = LoadSet("mob/pig", "say", 3);
-    m_zombieSay = LoadSet("mob/zombie", "say", 3);
-    m_zombieHurt = LoadSet("mob/zombie", "hurt", 3);
-    for (auto* dst : {&m_pigDeath, &m_zombieDeath}) {
-        const char* folder = (dst == &m_pigDeath) ? "pig" : "zombie";
-        const std::string rel = std::string("mc/sounds/mob/") + folder + "/death.ogg";
+    // Mob voices, one set per MobType (M32 pig/zombie + M34 cow/sheep/chicken).
+    // The numbered "say"/"hurt" variants go through LoadSet; the single
+    // unnumbered "death.ogg" is loaded by name. Anything missing is silently
+    // skipped (a clean clone with no overlay is mute, like the rest).
+    static_assert(kMobVoiceCount == static_cast<int>(MobType::Count),
+                  "per-type mob voice array must cover every MobType");
+    for (int t = 0; t < kMobVoiceCount; ++t) {
+        const std::string folder = std::string("mob/") + MobSoundFolder(static_cast<MobType>(t));
+        MobVoice& voice = m_mobVoices[t];
+        voice.say = LoadSet(folder.c_str(), "say", 4);
+        voice.hurt = LoadSet(folder.c_str(), "hurt", 4);
+        const std::string deathRel = std::string("mc/sounds/") + folder + "/death.ogg";
+        if (vox::ClipHandle h = audio.LoadClip(vox::assets::Resolve(deathRel)); h) {
+            voice.death.clips[voice.death.count++] = h;
+        }
+    }
+    // shear.ogg / plop.ogg are UNNUMBERED in 1.12, so the material+N probe in
+    // LoadSet misses them — load by explicit name (like splash/death).
+    for (auto [set, rel] : {std::pair{&m_sheepShear, "mc/sounds/mob/sheep/shear.ogg"},
+                            std::pair{&m_chickenEgg, "mc/sounds/mob/chicken/plop.ogg"}}) {
         if (vox::ClipHandle h = audio.LoadClip(vox::assets::Resolve(rel)); h) {
-            dst->clips[dst->count++] = h;
+            set->clips[set->count++] = h;
         }
     }
 
@@ -186,19 +198,30 @@ void GameSounds::PlayHurt() {
     m_audio->Play2D(Pick(m_hurt), vox::AudioBus::Sfx, 0.7f, Jitter(1.0f, 0.1f));
 }
 
-void GameSounds::PlayMobHurt(bool hostile, const glm::vec3& pos) {
+void GameSounds::PlayMobHurt(MobType type, const glm::vec3& pos) {
     if (!m_audio) return;
-    // Pig reuses its "say" set for hurt (vanilla has no pig hurt clip).
-    const ClipSet& set = hostile ? (m_zombieHurt.count ? m_zombieHurt : m_zombieSay) : m_pigSay;
+    const MobVoice& voice = m_mobVoices[static_cast<int>(type)];
+    // Most mobs reuse their "say" set for hurt (1.12 has no separate hurt clip
+    // for pig/cow/sheep/chicken).
+    const ClipSet& set = voice.hurt.count ? voice.hurt : voice.say;
     m_audio->Play3D(Pick(set), pos, vox::AudioBus::Sfx, 0.7f, Jitter(1.0f, 0.1f));
 }
 
-void GameSounds::PlayMobDeath(bool hostile, const glm::vec3& pos) {
+void GameSounds::PlayMobDeath(MobType type, const glm::vec3& pos) {
     if (!m_audio) return;
-    const ClipSet& death = hostile ? m_zombieDeath : m_pigDeath;
-    const ClipSet& say = hostile ? m_zombieSay : m_pigSay;
-    m_audio->Play3D(Pick(death.count ? death : say), pos, vox::AudioBus::Sfx, 0.8f,
-                    Jitter(1.0f, 0.1f));
+    const MobVoice& voice = m_mobVoices[static_cast<int>(type)];
+    m_audio->Play3D(Pick(voice.death.count ? voice.death : voice.say), pos, vox::AudioBus::Sfx,
+                    0.8f, Jitter(1.0f, 0.1f));
+}
+
+void GameSounds::PlaySheepShear(const glm::vec3& pos) {
+    if (!m_audio || !m_sheepShear.count) return;
+    m_audio->Play3D(Pick(m_sheepShear), pos, vox::AudioBus::Sfx, 0.8f, Jitter(1.0f, 0.1f));
+}
+
+void GameSounds::PlayChickenEgg(const glm::vec3& pos) {
+    if (!m_audio || !m_chickenEgg.count) return;
+    m_audio->Play3D(Pick(m_chickenEgg), pos, vox::AudioBus::Sfx, 0.6f, Jitter(1.0f, 0.1f));
 }
 
 vox::VoiceHandle GameSounds::StartFurnaceLoop(const glm::vec3& blockCenter) {

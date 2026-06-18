@@ -319,7 +319,23 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   damage reduction in M30's path; the inventory armor slots equip on click;
   the player character (M31 model + inflated armor-layer bipeds) bakes through
   the M29 framebuffer→UI path into the inventory, worn armor shown.
-- **Backlog**: stair auto-corner shapes (inner/outer), per-face light sampling
+- **M34 — Passive mob roster (cow + sheep + chicken)** ✅: three passive mobs on
+  the M32 framework. New species models (`CowModel`/`SheepModel`/`ChickenModel`,
+  all `vc::IMobModel`) — the sheep is a body layer + a toggleable inflated wool
+  layer. Two framework generalizations done here: `World::SpawnMobs` is now
+  DATA-DRIVEN (per-`MobDef` `SpawnRule` + weighted pick, not an if-chain), and the
+  render path carries a per-mob `modelScale` (baby/variant hook, all 1.0 today).
+  Multi-item death drops (cow beef+leather, sheep mutton+wool, chicken
+  chicken+feather), sheep shearing (shears item + RMB → white wool block + sheared
+  flag hides the wool layer), chicken egg-laying (5–10 min timer) + slow-fall, and
+  per-`MobType` mob voices. New content: white wool block + beef/leather/mutton/
+  chicken/feather/egg/shears items (atlas tiles 95–102). Debug spawn keys
+  V/N/M (cow/sheep/chicken).
+- **Backlog**: eating food (vanilla `ItemFood` — RMB-hold to eat, restore the
+  M30 hunger/saturation; the M32/M34 meat drops exist but can't be eaten yet),
+  creative-palette CATEGORY TABS (the palette scrolls now — tabs are the vanilla
+  follow-up once the item count justifies categories), stair auto-corner shapes
+  (inner/outer), per-face light sampling
   for model blocks (slab faces are flat-lit), tight selection/raycast box for
   partial blocks, full 256-tall world (wants empty-air-chunk culling
   first), tall-grass wheat seeds (1/8 chance, BlockTallGrass — pairs with

@@ -7,18 +7,18 @@
 
 namespace vc {
 
-// The pig, a quadruped built on vox::BoxModel — a port of vanilla
-// ModelQuadruped + ModelPig (head with a snout, a horizontal body, four short
-// legs; 64x32 skin). Same render contract as HumanoidModel so GameApp's mob
-// pass can treat both uniformly: SetRotationAngles then Render(shader, matrix).
-class PigModel : public IMobModel {
+// The cow, a quadruped on vox::BoxModel — a port of vanilla ModelCow (extends
+// ModelQuadruped(12, 0)): a head with two horns + a snout-less face, a deep
+// horizontal body with a small udder, and four 12px legs (64x32 skin). Same
+// IMobModel contract as PigModel so GameApp's mob pass treats them uniformly.
+class CowModel : public IMobModel {
 public:
-    PigModel();
+    CowModel();
 
     bool Ready() const override { return m_model.HasSkin(); }
 
-    // limbSwing/limbSwingAmount drive the trot (diagonal leg pairs); age is
-    // unused (no idle sway on the pig); head yaw/pitch in DEGREES.
+    // limbSwing/limbSwingAmount drive the trot (diagonal leg pairs); age unused;
+    // head yaw/pitch in DEGREES.
     void SetRotationAngles(float limbSwing, float limbSwingAmount, float age, float headYawDeg,
                            float headPitchDeg) override;
 

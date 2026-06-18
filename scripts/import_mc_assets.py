@@ -50,6 +50,14 @@ COPIES = [
     # M32 mob skins: pig (64x32) and zombie (64x64, reuses the biped model).
     ("textures/entity/pig/pig.png", "textures/entity/pig/pig.png"),
     ("textures/entity/zombie/zombie.png", "textures/entity/zombie/zombie.png"),
+    # M34 passive roster skins (all 64x32). Sheep has two layers: the body
+    # (sheep.png) and the woolly fur overlay (sheep_fur.png, shown un-sheared).
+    ("textures/entity/cow/cow.png", "textures/entity/cow/cow.png"),
+    ("textures/entity/sheep/sheep.png", "textures/entity/sheep/sheep.png"),
+    ("textures/entity/sheep/sheep_fur.png", "textures/entity/sheep/sheep_fur.png"),
+    # Chicken's skin is flat (entity/chicken.png) in 1.12; copy it into a
+    # chicken/ subfolder so the model path matches cow/sheep.
+    ("textures/entity/chicken.png", "textures/entity/chicken/chicken.png"),
     # Fire overlay (M30): the first-person "on fire" flames — vanilla's
     # ItemRenderer.renderFireInFirstPerson uses fire_layer_1. 16x512 vertical
     # animation strip (32 frames of 16x16); the HUD tiles a frame across the
@@ -258,6 +266,16 @@ def build_atlas(mc: Path, out_path: Path) -> None:
         # inventory armor slots.
         *[load_tile(items / f"empty_armor_slot_{slot}.png")
           for slot in ("helmet", "chestplate", "leggings", "boots")],
+        # M34: white wool BLOCK (95), then the passive-mob drop + shears item
+        # sprites (96..102) — matches Block.cpp / Item.cpp RegisterDefaults.
+        load_tile(blocks / "wool_colored_white.png"),
+        load_tile(items / "beef_raw.png"),
+        load_tile(items / "leather.png"),
+        load_tile(items / "mutton_raw.png"),
+        load_tile(items / "chicken_raw.png"),
+        load_tile(items / "feather.png"),
+        load_tile(items / "egg.png"),
+        load_tile(items / "shears.png"),
     ]
 
     strip = Image.new("RGBA", (TILE * len(tiles), TILE))
@@ -290,7 +308,8 @@ def want_sound(rel: str) -> str | None:
     # path under assets/mc/sounds/, or None to skip. Music is flattened from
     # music/game/<name>.ogg to music/<name>.ogg (the game loads it flat).
     for family in ("dig/", "step/", "ambient/cave/", "liquid/", "fire/", "item/bucket/",
-                   "damage/", "mob/pig/", "mob/zombie/"):
+                   "damage/", "mob/pig/", "mob/zombie/", "mob/cow/", "mob/sheep/",
+                   "mob/chicken/"):
         if rel.startswith(family):
             return rel
     if rel in ("random/pop.ogg", "random/glass1.ogg", "random/glass2.ogg",

@@ -10,11 +10,31 @@
 
 namespace vc {
 
-ItemId MobDropItem(MobType type) {
+std::vector<MobDrop> MobDrops(MobType type, bool sheared) {
     switch (type) {
-    case MobType::Pig: return items::RawPorkchop;
-    case MobType::Zombie: return items::RottenFlesh;
-    default: return blocks::Air;
+    case MobType::Pig: return {{items::RawPorkchop, 1, 3}};
+    case MobType::Zombie: return {{items::RottenFlesh, 0, 2}};
+    case MobType::Cow: return {{items::RawBeef, 1, 3}, {items::LeatherItem, 0, 2}};
+    case MobType::Sheep: {
+        std::vector<MobDrop> drops = {{items::RawMutton, 1, 2}};
+        if (!sheared) {
+            drops.push_back({blocks::WhiteWool, 1, 1}); // wool block id (block half of the id space)
+        }
+        return drops;
+    }
+    case MobType::Chicken: return {{items::RawChicken, 1, 1}, {items::Feather, 0, 2}};
+    default: return {};
+    }
+}
+
+const char* MobSoundFolder(MobType type) {
+    switch (type) {
+    case MobType::Pig: return "pig";
+    case MobType::Zombie: return "zombie";
+    case MobType::Cow: return "cow";
+    case MobType::Sheep: return "sheep";
+    case MobType::Chicken: return "chicken";
+    default: return "pig";
     }
 }
 
@@ -115,18 +135,22 @@ void EntityManager::SpawnMob(MobType type, const glm::vec3& feetPos) {
     mob.prevPos = feetPos;
     mob.health = MobDefOf(type).maxHealth;
     mob.aiTimer = MobRandInt(40);
+    if (MobDefOf(type).laysEggs) {
+        mob.eggTimer = 6000 + MobRandInt(6000); // vanilla EntityChicken: 6000..11999
+    }
     m_mobs.push_back(mob);
 }
 
 void EntityManager::EmitMobDeath(const Mob& mob) {
     const MobDef& def = MobDefOf(mob.type);
-    const ItemId drop = MobDropItem(mob.type);
-    const int count = def.dropMin + MobRandInt(def.dropMax - def.dropMin + 1);
-    if (drop != blocks::Air && count > 0) {
-        const glm::ivec3 cell{static_cast<int>(std::floor(mob.pos.x)),
-                              static_cast<int>(std::floor(mob.pos.y + def.height * 0.5f)),
-                              static_cast<int>(std::floor(mob.pos.z))};
-        SpawnBlockDrop(cell, drop, count);
+    const glm::ivec3 cell{static_cast<int>(std::floor(mob.pos.x)),
+                          static_cast<int>(std::floor(mob.pos.y + def.height * 0.5f)),
+                          static_cast<int>(std::floor(mob.pos.z))};
+    for (const MobDrop& drop : MobDrops(mob.type, mob.sheared)) {
+        const int count = drop.min + MobRandInt(drop.max - drop.min + 1);
+        if (drop.item != blocks::Air && count > 0) {
+            SpawnBlockDrop(cell, drop.item, count);
+        }
     }
     m_mobSounds.push_back({mob.type, mob.pos, 1}); // death
 }
@@ -145,6 +169,9 @@ void EntityManager::LoadMobs() {
         mob.yaw = r.yaw;
         mob.prevYaw = r.yaw;
         mob.health = std::clamp(r.health, 0.0f, MobDefOf(mob.type).maxHealth);
+        if (MobDefOf(mob.type).laysEggs) {
+            mob.eggTimer = 6000 + MobRandInt(6000); // egg cycle restarts on load
+        }
         if (mob.health > 0.0f) {
             m_mobs.push_back(mob);
         }
@@ -228,6 +255,18 @@ void EntityManager::DamageMob(size_t index, float amount, const glm::vec3& fromP
     }
 }
 
+int EntityManager::ShearMob(size_t index) {
+    if (index >= m_mobs.size()) {
+        return 0;
+    }
+    Mob& mob = m_mobs[index];
+    if (mob.type != MobType::Sheep || mob.sheared) {
+        return 0;
+    }
+    mob.sheared = true;
+    return 1 + MobRandInt(3); // vanilla EntitySheep.onSheared: 1..3 wool
+}
+
 void EntityManager::TickMobs(const MobTickCtx& ctx) {
     const glm::vec3 playerFeet = ctx.playerFeet;
 
@@ -293,6 +332,11 @@ void EntityManager::TickMobs(const MobTickCtx& ctx) {
         // --- Physics: gravity + axis-separated collision with auto-step ----
         const float speed = chasing ? def.speed : def.speed * 0.55f;
         mob.vel.y = std::max(mob.vel.y - kGravity * kTickDt, -kTerminal);
+        // Chicken flutter: damp the descent to 60%/tick while airborne (vanilla
+        // EntityChicken.onLivingUpdate) so it drifts down instead of plummeting.
+        if (def.slowFall && !mob.onGround && mob.vel.y < 0.0f) {
+            mob.vel.y *= 0.6f;
+        }
 
         // Horizontal movement with an acceleration ramp: step the current
         // velocity toward the target (wish*speed, or 0 when idle) by a capped
@@ -399,9 +443,22 @@ void EntityManager::TickMobs(const MobTickCtx& ctx) {
             mob.attackCooldown = 20; // ~1 s between swings
         }
 
+        // --- Egg laying (chicken) -----------------------------------------
+        // Vanilla EntityChicken: every 6000..11999 ticks an adult drops an egg
+        // at its feet and queues the "plop". No baby/jockey system, so every
+        // chicken qualifies.
+        if (def.laysEggs && --mob.eggTimer <= 0) {
+            const glm::ivec3 cell{static_cast<int>(std::floor(mob.pos.x)),
+                                  static_cast<int>(std::floor(mob.pos.y)),
+                                  static_cast<int>(std::floor(mob.pos.z))};
+            SpawnBlockDrop(cell, items::Egg, 1);
+            m_mobSounds.push_back({mob.type, mob.pos, 2}); // egg plop
+            mob.eggTimer = 6000 + MobRandInt(6000);
+        }
+
         // --- Fall damage / death ------------------------------------------
         if (mob.onGround) {
-            if (mob.fallDistance > 3.0f) {
+            if (mob.fallDistance > 3.0f && !def.slowFall) {
                 mob.health -= std::ceil(mob.fallDistance - 3.0f);
                 mob.hurtTime = 10;
                 m_mobSounds.push_back({mob.type, mob.pos, 0});
@@ -476,20 +533,47 @@ void EntityManager::SpawnMobs(const MobTickCtx& ctx) {
         const int blockLight = ChunkLight::Block(packed);
         const BlockId belowId = m_world.GetBlock(wx, groundY - 1, wz);
 
-        // Pick the category by the spawn rules; bail if its cap is full.
-        MobType type;
+        // Which spawn rule does this spot satisfy? (Data-driven: a mob's
+        // MobDef::spawnRule + spawnWeight decides eligibility, not an if-chain.)
+        SpawnRule rule;
         if (belowId == blocks::Grass && skyLight >= 9 && !ctx.isNight) {
             if (passive >= kPassiveCap) {
                 continue;
             }
-            type = MobType::Pig;
+            rule = SpawnRule::SurfaceDay;
         } else if (blockLight <= 7 && (ctx.isNight || skyLight <= 7)) {
             if (hostile >= kHostileCap) {
                 continue;
             }
-            type = MobType::Zombie;
+            rule = SpawnRule::Dark;
         } else {
             continue;
+        }
+
+        // Weighted pick among the mobs whose spawnRule matches (vanilla biome
+        // SpawnListEntry weights). With one mob per rule today this is a plain
+        // pick; it scales to the full roster without touching this code.
+        int totalWeight = 0;
+        for (const MobDef& def : kMobDefs) {
+            if (def.spawnRule == rule) {
+                totalWeight += def.spawnWeight;
+            }
+        }
+        if (totalWeight <= 0) {
+            continue;
+        }
+        int roll = MobRandInt(totalWeight);
+        MobType type = MobType::Pig;
+        for (int t = 0; t < static_cast<int>(MobType::Count); ++t) {
+            const MobDef& def = kMobDefs[t];
+            if (def.spawnRule != rule) {
+                continue;
+            }
+            roll -= def.spawnWeight;
+            if (roll < 0) {
+                type = static_cast<MobType>(t);
+                break;
+            }
         }
 
         SpawnMob(type, {static_cast<float>(wx) + 0.5f, static_cast<float>(groundY),

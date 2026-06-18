@@ -66,6 +66,7 @@ BlockId StoneStairs = 0;
 BlockId CobbleStairs = 0;
 BlockId PlankStairs = 0;
 BlockId SandstoneStairs = 0;
+BlockId WhiteWool = 0;
 
 namespace {
 
@@ -418,6 +419,16 @@ void RegisterDefaults() {
     registerShapes(Cobblestone, CobbleSlab, CobbleStairs, "cobblestone");
     registerShapes(Planks, PlankSlab, PlankStairs, "plank");
     registerShapes(Sandstone, SandstoneSlab, SandstoneStairs, "sandstone");
+
+    // M34: white wool (tile 95, the first atlas layer after the M33 armor
+    // icons/empty-slot sprites) — a sheep drop + shearing yield. Full opaque
+    // cube, vanilla cloth material (hardness 0.8, no tool gating); colored
+    // wool + dyeing is a later farming milestone. Keep BOTH atlas scripts in
+    // sync (gen_textures.py placeholder + import_mc_assets.py real tile).
+    BlockDef wool = BlockDef::Uniform("white wool", 95);
+    wool.hardness = 0.8f;
+    wool.soundType = SoundType::Cloth;
+    WhiteWool = registry.Register(std::move(wool));
 
     // M18 drop table (vanilla-ish; cross-references resolve here, after
     // every id exists). Leaves/tall grass/dead bush already drop nothing.

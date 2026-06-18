@@ -137,6 +137,13 @@ public:
     // Damage a mob (player melee): health, red-flash, knockback away from
     // fromPos, hurt/death sound event; drops loot and removes it at <= 0.
     void DamageMob(size_t index, float amount, const glm::vec3& fromPos);
+    // M34: shear a sheep (player RMB with shears). Sets the sheared flag (hides
+    // the wool layer) and returns how many wool the harvest yields (1-3); the
+    // CALLER grants those straight to the inventory (active tool use — vanilla
+    // scatters entities, but a harvest the player triggered is friendlier
+    // collected) and wears the shears + plays the sound. Returns 0 for a
+    // non-sheep or an already-sheared sheep so RMB falls through.
+    int ShearMob(size_t index);
     // Mob sounds the sim wants played this tick (hurt/death). GameApp drains
     // and clears it after Tick, keeping the sim audio-free.
     std::vector<MobSound>& MobSoundEvents() { return m_mobSounds; }

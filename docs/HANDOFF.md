@@ -1,6 +1,12 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-13, written for a FRESH CONTEXT. M0-M20, M22 (AUDIO), and
+Updated: 2026-06-18, written for a FRESH CONTEXT. M34 (PASSIVE ROSTER — cow +
+sheep + chicken) is now CODE COMPLETE awaiting user verification — see the "M34"
+section for the full design + the user test checklist (debug spawn keys V = cow,
+N = sheep, M = chicken; re-run import_mc_assets.py first). It built on the M32 mob
+framework and did the two roadmap generalizations (data-driven spawning + a
+model-scale hook). The NEXT milestone is the EXPLOSION system → Creeper (+ TNT),
+roadmap step 3 — see "Mob & enemy roadmap". M0-M20, M22 (AUDIO), and
 M23 (MODEL-BLOCK STREAM) are all done and USER-VERIFIED (M22: "beautiful,
 it all works"; M23: "everything looks perfect and the torch cap is where
 it should be"). M21 (ORES + FURNACE/SMELTING + torches), M24 (BLOCK
@@ -2232,6 +2238,120 @@ drowning / starvation still hurt at full strength through armor (they bypass it)
 while lava/cactus/mob hits are reduced. Quit + re-enter → worn armor restored
 from the `armor2` line; an OLD world loads fine with nothing worn.
 
+## M34 — passive mob roster: cow + sheep + chicken (CODE COMPLETE)
+
+CODE COMPLETE 2026-06-18, awaiting user verification. The first step of the
+post-M32 "Mob & enemy roadmap" (step 2: passive roster). Builds entirely on the
+M32 mob framework — three passive animals, plus the TWO small framework
+generalizations the roadmap wanted slipped in here. Decisions confirmed with the
+user before coding: include ALL the signature behaviors (chicken slow-fall, sheep
+wool drop, sheep shearing, chicken egg-laying); sheep are WHITE ONLY (16-colour
+wool + dyeing is a later farming milestone). NO new world needed (gameplay only).
+RE-IMPORT REQUIRED on this machine: `python scripts/import_mc_assets.py` — M34
+added 8 atlas tiles (white wool 95 + beef/leather/mutton/chicken/feather/egg/
+shears 96..102), the cow/sheep(+fur)/chicken skins, and three mob sound families
+(189 sound files now). A clean clone with no overlay draws no cow/sheep/chicken
+and is silent for them, exactly like the M32 pig/zombie.
+
+- TWO FRAMEWORK GENERALIZATIONS (the roadmap's "slip these in during step 2"):
+  - `World::SpawnMobs` (entity/Mob.cpp) is now DATA-DRIVEN. `MobDef` grew
+    `SpawnRule` (SurfaceDay vs Dark) + `spawnWeight`; SpawnMobs decides which rule
+    a candidate spot satisfies (grass + sky-light≥9 + day, or block-light≤7 +
+    dark) then WEIGHTED-picks among the mobs sharing that rule (vanilla biome
+    SpawnListEntry weights: sheep 12, pig 10, chicken 10, cow 8; zombie owns Dark).
+    A new mob is now a table row, not an if-branch.
+  - The render path carries a per-mob `MobDef::modelScale` folded into the
+    upright-flip matrix around the feet (so a scaled mob still stands on the
+    ground). All 1.0 today — it's the hook baby animals / size-varied slimes will
+    multiply.
+- MODELS (`game/src/entity/`): a shared render contract `vc::IMobModel`
+  (MobModel.h: Ready / SetVariant / SetRotationAngles / Render) that every mob
+  model implements, so GameApp's mob pass + sounds drive any mob uniformly via a
+  `std::array<unique_ptr<IMobModel>, MobType::Count>` indexed by type (replaces
+  the old hardcoded pig-vs-zombie if/else). HumanoidModel + PigModel retrofitted
+  onto it. NEW models, all ported verbatim from the 1.12 model classes (looked up
+  in `D:\Minecraft source code`): `CowModel` (ModelCow — quadruped + horns +
+  udder, 64x32), `ChickenModel` (ModelChicken — head/bill/chin/body/2 legs/2
+  wings; legs trot, wings sine-flap off `age`), and `SheepModel` — TWO stacked
+  quadruped layers mirroring vanilla RenderSheep: the visible BODY is ModelSheep2
+  (sheep.png, full-height legs) and an inflated WOOL layer is ModelSheep1
+  (sheep_fur.png) drawn over it only when not sheared. `SetVariant(1)` hides the
+  wool (a sheared sheep). White wool is rendered untinted (colour/dyeing is later).
+  All five mobs' feet sit at model-y 24, so `modelOffsetPx` is 24 for every mob.
+- CONTENT (data, not new code paths): white wool BLOCK (Block.cpp, tile 95, cloth
+  material, drops self) + 7 items (Item.cpp, tiles 96..102): raw beef, leather
+  (`items::LeatherItem` — the bare name collides with the `ArmorMaterial::Leather`
+  enum), raw mutton, raw chicken, feather, egg, and shears (238-use damageable
+  tool, no dig bonus). Both atlas scripts grew the same 8 tiles in the same order
+  (gen_textures.py placeholders + import_mc_assets.py real art); texture array is
+  103 layers now.
+- DROPS: `MobDrops(type, sheared)` (entity/Mob.cpp) replaces the single-item
+  `MobDropItem` — returns a list of {item, min, max}: pig porkchop 1-3, zombie
+  rotten flesh 0-2, cow beef 1-3 + leather 0-2, sheep mutton 1-2 + (if not sheared)
+  1 white wool, chicken raw chicken 1 + feather 0-2. EmitMobDeath rolls each.
+- SPECIES BEHAVIOR (entity/Mob.cpp TickMobs):
+  - Chicken slow-fall: `MobDef::slowFall` damps descent to 60%/tick while airborne
+    (vanilla EntityChicken) and SKIPS fall damage.
+  - Chicken egg-laying: `MobDef::laysEggs` + a per-mob `eggTimer` (6000..11999
+    ticks = vanilla 5–10 min, runtime-only, restarts on load); on elapse it drops
+    an egg item at the feet + queues an egg "plop" sound (MobSound kind 2). NOTE:
+    real-tick timer (T fast-forward is world-time, not mob ticks), so don't wait
+    on it during a quick test.
+  - Sheep shearing: `EntityManager::ShearMob` sets the `sheared` flag (runtime
+    only — a reloaded sheep grows wool back) and RETURNS the wool count (1-3).
+    Player path: `GameApp::TryShearSheep` (RMB with shears in hand, mob nearer
+    than any block target → shear, ADD the wool straight to the inventory (toss
+    overflow), wear the shears one use, play the snip; mirrors TryUseBucket and
+    sits first in the RMB chain). Wool goes directly to the bag — unlike a
+    sheep-KILL (death drop scatters wool as a world item like all loot) — because
+    it's an active tool harvest the player triggered (the first cut scattered it
+    on the ground where it was easy to miss; the user asked for it in the bag).
+- AUDIO: GameSounds generalized from the M32 pig/zombie pair to a per-`MobType`
+  voice array (`MobVoice{say,hurt,death}` indexed by type; folder from
+  `MobSoundFolder`). Cow/sheep/chicken have no death/hurt clips in 1.12, so
+  PlayMobHurt/Death fall back to "say" (the existing pig pattern). Sheep `shear`
+  and chicken `plop` are UNNUMBERED files in 1.12 (the numbered LoadSet probe
+  misses them), so they're loaded by explicit name like splash. `PlaySheepShear` /
+  `PlayChickenEgg` added.
+- TESTABILITY: debug spawn keys — V = cow, N = sheep, M = chicken (alongside M32's
+  B = pig, C = zombie; new key codes added to engine KeyCodes.h). A NEW world's
+  legacy kit is unchanged; armor/etc come from the creative palette as before.
+- PERSISTENCE: unchanged mobs.dat format (type/pos/yaw/health) — new MobTypes are
+  just higher ints; sheared/eggTimer are runtime-only by design. savetest grew a
+  sheep (type 3) round-trip case.
+- CREATIVE PALETTE SCROLL (post-M34, user asked — the growing item count was
+  overflowing the screen): the palette is now a fixed-height WINDOW
+  (`kPaletteVisibleRows` = 6) that scrolls with the mouse wheel + a scrollbar
+  thumb on the right edge, instead of one grid that grew off-screen. `GameApp`
+  owns the offset (`m_paletteScroll`, rows; advanced from the wheel only while
+  `State::Inventory`), `InventoryScreen::Draw` clamps it + renders only the
+  visible window. Vanilla-style CATEGORY TABS (Blocks/Tools/Combat/Food/Misc)
+  are the agreed future step once the count justifies categories — the scroll
+  work is the foundation they'd build on (backlog).
+- KNOWN M34 LIMITS / decisions: sheep are white only (no colour/dye, no
+  grass-eating regrow — a sheared sheep stays sheared until you reload); chicken
+  egg cycle + sheep sheared state aren't persisted (restart resets them); chicken
+  wings do a constant gentle idle flap (no faster falling-flap — would need the
+  vanilla wingRotation sim); no cow milking (needs a bucket-on-mob interaction);
+  no baby animals / breeding (that's the food/eating milestone, roadmap step 5);
+  passive mobs share one cap of 8 within 64 blocks.
+
+WHAT THE USER SHOULD TEST (NO new world; re-run `import_mc_assets.py` first for
+the skins + sounds): press V / N / M to spawn a cow / sheep / chicken ahead of
+you — each should stand on the ground and amble in random directions with legs
+trotting (chicken wings flap, sheep is fluffy). LMB-kill one → it flashes red and
+drops its loot (cow: beef + maybe leather; sheep: mutton + 1 wool; chicken:
+chicken + maybe feathers) that you can pick up; killing a pig still drops
+porkchop. Grab SHEARS from the creative palette, hold them, RMB a sheep → snip
+sound, the sheep visibly loses its wool (gets thinner) and drops white wool;
+RMB it again → nothing (already sheared). Drop a chicken off a cliff → it flutters
+down slowly and takes NO fall damage (other mobs still take fall damage). Let the
+clock run / wander around → cow/sheep/chicken/pig should appear naturally on grass
+in daylight (mixed species), zombies still at night. Quit + re-enter → the animals
+you left are restored (sheared sheep come back woolly — expected). Egg-laying is on
+a 5–10 minute timer (you'll hear a "plop" and see an egg pop out) — not something
+to wait on during a quick pass.
+
 ## Planned arc — survival & mobs (M30–M33)
 
 Scoped with the user 2026-06-15. Goal: enemies, a health system, armor, and a
@@ -2325,28 +2445,39 @@ reuse):
 - Enderman → teleport + block-carry + look-to-aggro (mostly bespoke).
 
 RECOMMENDED ORDER:
-1. **M33 — armor + inventory player doll** (already the next planned-arc
-   milestone; finishes the survival loop now that enemies hit you).
-2. **Passive roster: cow + sheep + chicken** — cheap, high value. Do the two
-   small framework generalizations HERE (see below) so the roster scales.
-3. **Explosion system → Creeper (+ TNT)** — the iconic missing enemy; one
-   system, big payoff.
+1. **M33 — armor + inventory player doll** ✅ DONE.
+2. **M34 — passive roster: cow + sheep + chicken** ✅ CODE COMPLETE (see the M34
+   section above). Both small framework generalizations landed here: SpawnMobs is
+   now data-driven (per-MobDef SpawnRule + weight) and the render path carries a
+   per-mob modelScale (baby/variant hook).
+3. **Explosion system → Creeper (+ TNT)** ← NEXT. The iconic missing enemy; one
+   system, big payoff. (Build the sphere block-removal + damage falloff + fuse/
+   ignite once; it also unlocks TNT, ghast fireballs, beds, end crystals.)
 4. **Projectile system → Skeleton (+ player bow/arrows)**.
 5. **Food/eating → breeding + babies** (pairs with farming).
 6. **Bespoke movers** as desired: spider climbing, slime splitting, enderman
    teleport, bats.
 
-TWO SMALL GENERALIZATIONS to slip in during step 2 (cheap now, avoid churn
-later):
-- Make `World::SpawnMobs` (game/src/world/Mob.cpp) DATA-DRIVEN: it currently
-  hardcodes the pig-vs-zombie spawn rule in an if-chain — move the rule to a
-  per-`MobDef` "spawn category" (e.g. SurfaceDaylight vs Dark/anywhere) so a new
-  mob is just a table row.
-- Add a model SCALE factor to the mob render path (the box models already render
-  through one matrix) so baby animals (and size-varied slimes) are a multiplier,
-  not a new model.
+TWO SMALL GENERALIZATIONS to slip in during step 2 — both ✅ DONE in M34 (see the
+M34 section): `World::SpawnMobs` (now in game/src/entity/Mob.cpp) is data-driven
+via `MobDef::spawnRule` + `spawnWeight`, and the mob render path folds in
+`MobDef::modelScale` (the baby/slime size multiplier hook, all 1.0 today).
 
 ## Backlog (after M28)
+
+EATING FOOD (user-requested 2026-06-18 — noticed RMB on a held food item does
+nothing): wire up vanilla `ItemFood`. Tag the food items (`ItemDef` grows
+`foodPoints` + `saturation`, and an `eat`/`isFood` flag) — raw beef/porkchop/
+mutton/chicken + rotten flesh exist now (M32/M34 drops), apple/bread/cooked
+variants come with farming + smelting-food. RMB-HOLD a food when hunger isn't
+full → a ~1.6 s eat delay (vanilla `getMaxItemUseDuration` 32 ticks) with the
+eat sound + crumb particles, then consume one and restore
+`Player::Heal`/hunger+saturation (M30 already has the hunger/saturation fields
+and regen rules — this just feeds them; rotten flesh adds the hunger/poison
+debuff later). This is roadmap step 5's "food/eating" prerequisite and makes the
+existing mob drops actually useful; pairs with farming crops. RMB-hold plumbing
+is the new piece (place/use is press-edge today) — sits in GameApp::HandleInput
+next to the bucket/shear RMB branches, gated on the held item being food.
 
 With the M24 meta layer + M23 model stream + M28's partial collision all in
 place, the natural follow-ons are STAIR AUTO-CORNERS (inner/outer shapes when

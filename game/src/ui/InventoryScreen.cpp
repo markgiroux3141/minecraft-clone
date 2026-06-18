@@ -41,8 +41,10 @@ constexpr glm::vec2 kFurnaceOutputPos{116.0f, 35.0f};
 constexpr float kPanelGap = 4.0f; // between the palette and inventory panels
 
 constexpr int kPaletteColumns = 9;
+constexpr int kPaletteVisibleRows = 6;     // window height; the rest scrolls
 constexpr float kPaletteTitleBand = 17.0f; // title row above the entries
 constexpr float kPaletteBottomPad = 7.0f;
+constexpr float kScrollbarWidth = 4.0f; // thin thumb track on the right edge
 
 constexpr glm::vec4 kPanelFill{0.776f, 0.776f, 0.776f, 1.0f}; // vanilla 0xC6C6C6
 constexpr glm::vec4 kPanelFrame{0.12f, 0.12f, 0.12f, 0.95f};
@@ -141,20 +143,31 @@ std::vector<ItemId> PaletteIds() {
 void InventoryScreen::Draw(vox::UiRenderer& ui, glm::vec2 screen, glm::vec2 mouse, bool leftClick,
                            bool rightClick, Inventory& inv, std::span<ItemStack> craft,
                            int craftSize, ItemStack& carried, ItemStack& thrown,
-                           const GuiTextures& tex) {
+                           const GuiTextures& tex, int& paletteScroll) {
     const float s = GuiScale(screen);
     const bool table = craftSize == 3;
     const bool click = leftClick || rightClick;
     std::string tooltip;
 
     // The player screen carries the creative palette above the panel; the
-    // crafting table is just the panel. Center the stack either way.
+    // crafting table is just the panel. The palette is a fixed-height scrolling
+    // WINDOW (kPaletteVisibleRows) so it never overflows however many items
+    // exist; paletteScroll (rows, owned by GameApp + advanced by the wheel) is
+    // clamped here. Center the stack either way.
     const std::vector<ItemId> palette = table ? std::vector<ItemId>{} : PaletteIds();
-    const auto paletteRows = static_cast<float>(
-        (palette.size() + kPaletteColumns - 1) / kPaletteColumns);
+    const int totalRows =
+        static_cast<int>((palette.size() + kPaletteColumns - 1) / kPaletteColumns);
+    const int visibleRows = std::min(totalRows, kPaletteVisibleRows);
+    const int maxScroll = std::max(0, totalRows - visibleRows);
+    if (table) {
+        paletteScroll = 0;
+    } else {
+        paletteScroll = std::clamp(paletteScroll, 0, maxScroll);
+    }
     const glm::vec2 paletteSize{
         kPanelSize.x, table ? 0.0f
-                            : kPaletteTitleBand + paletteRows * kSlotPitch + kPaletteBottomPad};
+                            : kPaletteTitleBand + static_cast<float>(visibleRows) * kSlotPitch +
+                                  kPaletteBottomPad};
     const float aboveHeight = table ? 0.0f : (paletteSize.y + kPanelGap);
     const float totalHeight = (aboveHeight + kPanelSize.y) * s;
     const glm::vec2 paletteOrigin{std::floor((screen.x - kPanelSize.x * s) * 0.5f),
@@ -168,12 +181,17 @@ void InventoryScreen::Draw(vox::UiRenderer& ui, glm::vec2 screen, glm::vec2 mous
         ui.DrawRect(paletteOrigin, paletteSize * s, kPanelFill);
         ui.DrawText(paletteOrigin + glm::vec2(8.0f * s, 6.0f * s), "Blocks & items",
                     UiTextScale(ui, s), kTitleColor);
-        for (size_t i = 0; i < palette.size(); ++i) {
+        // Only the visible window of rows draws + hit-tests.
+        const size_t first = static_cast<size_t>(paletteScroll) * kPaletteColumns;
+        const size_t last = std::min(palette.size(),
+                                     first + static_cast<size_t>(visibleRows) * kPaletteColumns);
+        for (size_t i = first; i < last; ++i) {
+            const size_t vis = i - first; // index within the visible window
             const glm::vec2 pos =
                 paletteOrigin +
-                glm::vec2(kSlotsX + static_cast<float>(i % kPaletteColumns) * kSlotPitch,
+                glm::vec2(kSlotsX + static_cast<float>(vis % kPaletteColumns) * kSlotPitch,
                           kPaletteTitleBand +
-                              static_cast<float>(i / kPaletteColumns) * kSlotPitch) *
+                              static_cast<float>(vis / kPaletteColumns) * kSlotPitch) *
                     s;
             ui.DrawRect(pos, glm::vec2(16.0f * s), kSlotFill);
             DrawItemStack(ui, pos, s, {palette[i], 1}, tex.blockIcons);
@@ -194,6 +212,18 @@ void InventoryScreen::Draw(vox::UiRenderer& ui, glm::vec2 screen, glm::vec2 mous
                     }
                 }
             }
+        }
+        // Scrollbar thumb on the right edge (only when there's overflow).
+        if (maxScroll > 0) {
+            const float trackX = paletteOrigin.x + (kPanelSize.x - kScrollbarWidth - 1.0f) * s;
+            const float trackY = paletteOrigin.y + kPaletteTitleBand * s;
+            const float trackH = static_cast<float>(visibleRows) * kSlotPitch * s;
+            ui.DrawRect({trackX, trackY}, {kScrollbarWidth * s, trackH}, kSlotFill);
+            const float thumbH = trackH * static_cast<float>(visibleRows) /
+                                 static_cast<float>(totalRows);
+            const float thumbY = trackY + (trackH - thumbH) * static_cast<float>(paletteScroll) /
+                                              static_cast<float>(maxScroll);
+            ui.DrawRect({trackX, thumbY}, {kScrollbarWidth * s, thumbH}, kTitleColor);
         }
     }
 

@@ -264,12 +264,16 @@ void GameApp::OnInit() {
         vox::Shader::FromFiles("shaders/entity_model.vert", "shaders/entity_model.frag");
     m_humanoid = std::make_unique<vc::HumanoidModel>();
     m_playerDoll = std::make_unique<vc::PlayerDoll>(); // M33 inventory player doll
-    // M32 mob models: the zombie is the biped with the zombie skin + arms-out
-    // pose; the pig is a quadruped. Both silently skip drawing without the
-    // gitignored skin overlay (like the debug Steve), so a clean clone is fine.
-    m_zombieModel = std::make_unique<vc::HumanoidModel>(
+    // Mob models, indexed by MobType. The zombie is the biped with the zombie
+    // skin + arms-out pose; the rest are species models. Each silently skips
+    // drawing without its gitignored skin overlay (like the debug Steve), so a
+    // clean clone is fine. Adding a mob = one model + one line here.
+    m_mobModels[static_cast<size_t>(vc::MobType::Pig)] = std::make_unique<vc::PigModel>();
+    m_mobModels[static_cast<size_t>(vc::MobType::Zombie)] = std::make_unique<vc::HumanoidModel>(
         "mc/textures/entity/zombie/zombie.png", /*zombiePose=*/true);
-    m_pigModel = std::make_unique<vc::PigModel>();
+    m_mobModels[static_cast<size_t>(vc::MobType::Cow)] = std::make_unique<vc::CowModel>();
+    m_mobModels[static_cast<size_t>(vc::MobType::Sheep)] = std::make_unique<vc::SheepModel>();
+    m_mobModels[static_cast<size_t>(vc::MobType::Chicken)] = std::make_unique<vc::ChickenModel>();
 
     m_outlineShader = vox::Shader::FromFiles("shaders/outline.vert", "shaders/outline.frag");
     constexpr float corners[] = {
@@ -503,11 +507,11 @@ void GameApp::OnTick(double dt) {
             m_sounds.PlayHurt(); // a mob hit landed during the mob tick
         }
         for (const vc::MobSound& s : m_world->Entities().MobSoundEvents()) {
-            const bool hostile = vc::MobDefOf(s.type).hostile;
-            if (s.kind == 0) {
-                m_sounds.PlayMobHurt(hostile, s.pos);
-            } else {
-                m_sounds.PlayMobDeath(hostile, s.pos);
+            switch (s.kind) {
+            case 0: m_sounds.PlayMobHurt(s.type, s.pos); break;
+            case 1: m_sounds.PlayMobDeath(s.type, s.pos); break;
+            case 2: m_sounds.PlayChickenEgg(s.pos); break; // M34: egg plop
+            default: break;
             }
         }
         m_world->Entities().MobSoundEvents().clear();
@@ -646,8 +650,8 @@ void GameApp::SpawnMobAhead(vc::MobType type) {
     glm::vec3 ahead = m_player.Position() + m_camera.Forward() * 3.0f;
     ahead.y = m_player.Position().y + 1.0f;
     m_world->Entities().SpawnMob(type, ahead);
-    GAME_INFO("Spawned debug {} at ({:.1f}, {:.1f}, {:.1f})",
-              type == vc::MobType::Pig ? "pig" : "zombie", ahead.x, ahead.y, ahead.z);
+    GAME_INFO("Spawned debug {} at ({:.1f}, {:.1f}, {:.1f})", vc::MobSoundFolder(type), ahead.x,
+              ahead.y, ahead.z);
 }
 
 bool GameApp::IsNight() const {
@@ -809,6 +813,22 @@ void GameApp::HandleInput(double frameDt, int scroll) {
         SpawnMobAhead(vc::MobType::Zombie);
     }
     m_input.spawnZombieKeyWasDown = zombieKey;
+    // M34 passive roster: V = cow, N = sheep, M = chicken.
+    const bool cowKey = vox::Input::IsKeyDown(vox::Key::V);
+    if (cowKey && !m_input.spawnCowKeyWasDown) {
+        SpawnMobAhead(vc::MobType::Cow);
+    }
+    m_input.spawnCowKeyWasDown = cowKey;
+    const bool sheepKey = vox::Input::IsKeyDown(vox::Key::N);
+    if (sheepKey && !m_input.spawnSheepKeyWasDown) {
+        SpawnMobAhead(vc::MobType::Sheep);
+    }
+    m_input.spawnSheepKeyWasDown = sheepKey;
+    const bool chickenKey = vox::Input::IsKeyDown(vox::Key::M);
+    if (chickenKey && !m_input.spawnChickenKeyWasDown) {
+        SpawnMobAhead(vc::MobType::Chicken);
+    }
+    m_input.spawnChickenKeyWasDown = chickenKey;
 
     // 1..9 select the hotbar slot; the wheel cycles it (vanilla: scroll
     // up moves left, wrapping).
@@ -981,7 +1001,10 @@ void GameApp::HandleInput(double frameDt, int scroll) {
         const vc::BlockId targetId =
             m_target ? m_world->GetBlock(m_target->block.x, m_target->block.y, m_target->block.z)
                      : vc::blocks::Air;
-        if (m_target && targetId == vc::blocks::CraftingTable) {
+        if (TryShearSheep()) {
+            // Shears + sheep beats placing; it does its own mob raycast.
+            m_input.placeCooldown = kEditRepeatDelay;
+        } else if (m_target && targetId == vc::blocks::CraftingTable) {
             // Use beats place (vanilla, sans sneak): open the 3x3 grid.
             OpenContainer(State::Crafting);
             m_input.placeCooldown = kEditRepeatDelay;
@@ -1118,6 +1141,46 @@ bool GameApp::TryUseBucket() {
     return true;
 }
 
+bool GameApp::TryShearSheep() {
+    vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
+    if (hand.id != vc::items::Shears) {
+        return false; // not holding shears -> normal RMB place/use
+    }
+    float mobDist = 0.0f;
+    const auto mobHit = m_world->Entities().RaycastMob(m_camera.Position(), m_camera.Forward(),
+                                                       kReachDistance, mobDist);
+    if (!mobHit) {
+        return false;
+    }
+    // A block target nearer than the mob wins (you can still shear-place... no:
+    // shears never place, so just don't shear through a wall).
+    const float blockDist =
+        m_target ? glm::length(m_target->point - m_camera.Position()) : 1e9f;
+    if (mobDist > blockDist) {
+        return false;
+    }
+    const glm::vec3 mobPos = m_world->Entities().Mobs()[*mobHit].pos;
+    const int wool = m_world->Entities().ShearMob(*mobHit);
+    if (wool <= 0) {
+        return false; // not a sheep, or already sheared -> let RMB fall through
+    }
+    // Grant the wool straight to the bag (toss any overflow at the feet).
+    if (vc::ItemStack leftover = m_inventory.Add({vc::blocks::WhiteWool, wool});
+        !leftover.Empty()) {
+        ThrowItem(leftover);
+    }
+    m_sounds.PlaySheepShear(mobPos);
+    m_viewModel->TriggerSwing();
+    // Wear the shears one use (vanilla); break it at the durability limit.
+    if (const vc::ItemDef* def = vc::ItemRegistry::Get().Find(hand.id);
+        def && def->maxDamage > 0) {
+        if (++hand.damage >= def->maxDamage) {
+            hand = {};
+        }
+    }
+    return true;
+}
+
 const vc::BlockDef& GameApp::EyeLiquid() const {
     static const vc::BlockDef kAir; // air: liquid=false, liquidSource=0
     if (!m_world) {
@@ -1246,7 +1309,7 @@ void GameApp::DrawUi() {
                 vc::InventoryScreen::Draw(
                     *m_ui, screen, mouse, clicked, rightClicked, m_inventory,
                     std::span<vc::ItemStack>{m_craftGrid.data(), table ? size_t{9} : size_t{4}},
-                    table ? 3 : 2, m_carried, thrown, m_guiTextures);
+                    table ? 3 : 2, m_carried, thrown, m_guiTextures, m_paletteScroll);
             }
             if (!thrown.Empty()) {
                 ThrowItem(thrown);
@@ -1312,6 +1375,11 @@ void GameApp::OnRender(double alpha, double frameDt) {
     // Consume wheel input every frame so clicks made over menus don't
     // burst-apply to the hotbar on resume.
     const int scroll = static_cast<int>(GetWindow().TakeScrollY());
+    // While the inventory screen is open the wheel scrolls the creative palette
+    // (DrawUi clamps the offset to the row count). Wheel-up shows earlier rows.
+    if (m_state == State::Inventory && scroll != 0) {
+        m_paletteScroll -= scroll;
+    }
 
     if (m_world) {
         const bool playing = m_state == State::Playing;
@@ -1633,9 +1701,8 @@ void GameApp::OnRender(double alpha, double frameDt) {
             m_entityModelShader->SetFloat3("u_skyTint", dayNight.skyTint);
             vox::Renderer::SetCullFace(false);
             for (const vc::Mob& mob : mobs) {
-                const bool zombie = mob.type == vc::MobType::Zombie;
-                if (zombie ? (!m_zombieModel || !m_zombieModel->Ready())
-                           : (!m_pigModel || !m_pigModel->Ready())) {
+                vc::IMobModel* model = m_mobModels[static_cast<size_t>(mob.type)].get();
+                if (!model || !model->Ready()) {
                     continue; // no skin overlay -> draw nothing (like the bare arm)
                 }
                 const vc::MobDef& def = vc::MobDefOf(mob.type);
@@ -1656,20 +1723,19 @@ void GameApp::OnRender(double alpha, double frameDt) {
                 m_entityModelShader->SetFloat("u_hurt", mob.hurtTime > 0 ? 1.0f : 0.0f);
 
                 // Pixel/Y-down model -> world: feet at pos, facing travel/target,
-                // 1/16 scale, then the upright flip (Rx(pi) + the feet offset).
+                // 1/16 * modelScale, then the upright flip (Rx(pi) + the feet
+                // offset). modelScale folds in around the feet (offset is applied
+                // after the scale) so a scaled mob still stands on the ground —
+                // the hook baby/variant sizing will use (all 1.0 today).
                 glm::mat4 m = glm::translate(glm::mat4(1.0f), pos);
                 m = glm::rotate(m, kPi * 0.5f - yaw, {0.0f, 1.0f, 0.0f});
-                m = glm::scale(m, glm::vec3(1.0f / 16.0f));
+                m = glm::scale(m, glm::vec3(def.modelScale / 16.0f));
                 m = glm::translate(m, {0.0f, def.modelOffsetPx, 0.0f});
                 m = glm::rotate(m, kPi, {1.0f, 0.0f, 0.0f});
 
-                if (zombie) {
-                    m_zombieModel->SetRotationAngles(limbSwing, limbAmount, mob.age + a, 0.0f, 0.0f);
-                    m_zombieModel->Render(*m_entityModelShader, m);
-                } else {
-                    m_pigModel->SetRotationAngles(limbSwing, limbAmount, mob.age + a, 0.0f, 0.0f);
-                    m_pigModel->Render(*m_entityModelShader, m);
-                }
+                model->SetVariant(mob.sheared ? 1 : 0);
+                model->SetRotationAngles(limbSwing, limbAmount, mob.age + a, 0.0f, 0.0f);
+                model->Render(*m_entityModelShader, m);
             }
             vox::Renderer::SetCullFace(true);
             m_chunkShader->Bind();

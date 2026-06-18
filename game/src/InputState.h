@@ -22,6 +22,9 @@ struct InputState {
     bool debugMobKeyWasDown = false;   // G: debug Steve
     bool spawnPigKeyWasDown = false;   // B
     bool spawnZombieKeyWasDown = false; // C
+    bool spawnCowKeyWasDown = false;     // V
+    bool spawnSheepKeyWasDown = false;   // N
+    bool spawnChickenKeyWasDown = false; // M
 
     // Auto-repeat throttles (seconds remaining).
     double breakCooldown = 0.0; // fly repeat AND the walk-dig hit delay

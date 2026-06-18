@@ -194,20 +194,24 @@ int main() {
         Check(save.GetMobs().empty(), "pre-mob save reads as no mobs");
         vc::WorldSave::MobRecord a{1, {10.5f, 68.0f, -4.25f}, 1.57f, 18.0f}; // zombie
         vc::WorldSave::MobRecord b{0, {-30.0f, 70.0f, 12.0f}, -0.5f, 10.0f}; // pig
-        save.SetMobs({a, b});
+        vc::WorldSave::MobRecord c{3, {4.0f, 66.0f, 9.0f}, 2.0f, 8.0f};      // M34 sheep (type 3)
+        save.SetMobs({a, b, c});
         save.Flush(true);
     }
     {
         vc::WorldSave save(dir, 7);
         const auto& mobs = save.GetMobs();
-        Check(mobs.size() == 2, "mobs reload from the sidecar");
-        Check(mobs.size() == 2 && mobs[0].type == 1 && mobs[0].pos.x == 10.5f &&
+        Check(mobs.size() == 3, "mobs reload from the sidecar");
+        Check(mobs.size() == 3 && mobs[0].type == 1 && mobs[0].pos.x == 10.5f &&
                   mobs[0].pos.y == 68.0f && mobs[0].pos.z == -4.25f && mobs[0].yaw == 1.57f &&
                   mobs[0].health == 18.0f,
               "zombie record round-trips exactly");
-        Check(mobs.size() == 2 && mobs[1].type == 0 && mobs[1].pos.x == -30.0f &&
+        Check(mobs.size() == 3 && mobs[1].type == 0 && mobs[1].pos.x == -30.0f &&
                   mobs[1].health == 10.0f,
               "pig record round-trips");
+        Check(mobs.size() == 3 && mobs[2].type == 3 && mobs[2].pos.z == 9.0f &&
+                  mobs[2].health == 8.0f,
+              "M34 sheep record round-trips");
         save.SetMobs({});
         save.Flush(true);
     }

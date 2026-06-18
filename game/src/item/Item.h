@@ -103,6 +103,16 @@ extern ItemId LavaBucket;
 // M32 mob drops (sprite-only for now; eating/food value is backlog).
 extern ItemId RawPorkchop; // pig
 extern ItemId RottenFlesh;  // zombie
+// M34 passive-mob drops (sprite-only; food value is backlog). Egg is a plain
+// sprite for now — throwing it / spawning chicks is deferred. Shears is a
+// damageable tool used to shear sheep (no dig-speed bonus yet).
+extern ItemId RawBeef;     // cow
+extern ItemId LeatherItem; // cow (name avoids the ArmorMaterial::Leather enum)
+extern ItemId RawMutton;   // sheep
+extern ItemId RawChicken;  // chicken
+extern ItemId Feather;     // chicken
+extern ItemId Egg;         // chicken lays these
+extern ItemId Shears;      // shear a sheep for wool
 
 // M33 armor: the 20 pieces register contiguously, material-major then slot,
 // starting at FirstArmor (leather helmet). ArmorPiece() addresses one by

@@ -31,9 +31,14 @@ public:
     // result slot crafts into the cursor and consumes one from each grid
     // cell. A click outside the panels moves the carried stack into
     // `thrown` — the caller tosses it into the world.
+    // paletteScroll is the creative-palette scroll offset in ROWS (GameApp
+    // owns it, advances it from the mouse wheel); Draw clamps it to the valid
+    // range and renders only the visible window so the palette never overflows
+    // the screen however many items exist.
     static void Draw(vox::UiRenderer& ui, glm::vec2 screen, glm::vec2 mouse, bool leftClick,
                      bool rightClick, Inventory& inv, std::span<ItemStack> craft, int craftSize,
-                     ItemStack& carried, ItemStack& thrown, const GuiTextures& tex);
+                     ItemStack& carried, ItemStack& thrown, const GuiTextures& tex,
+                     int& paletteScroll);
 
     // The furnace screen (M21): vanilla ContainerFurnace layout — input
     // over fuel on the left, take-only output on the right, the flame and

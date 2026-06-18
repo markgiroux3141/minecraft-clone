@@ -16,9 +16,14 @@
 #include "vox/renderer/VertexArray.h"
 
 #include "InputState.h"
+#include "entity/ChickenModel.h"
+#include "entity/CowModel.h"
 #include "entity/Entity.h"
 #include "entity/HumanoidModel.h"
+#include "entity/Mob.h"
+#include "entity/MobModel.h"
 #include "entity/PigModel.h"
+#include "entity/SheepModel.h"
 #include "item/Inventory.h"
 #include "render/Particles.h"
 #include "render/PlayerDoll.h"
@@ -73,6 +78,10 @@ private:
     // M26: if the hand holds a bucket, do the fill/dump and return true so
     // RMB doesn't also try to place a block. False for any non-bucket item.
     bool TryUseBucket();
+    // M34: if the hand holds shears and a shearable sheep is in reach (nearer
+    // than any block target), shear it (wool drop + sound + shears wear) and
+    // return true so RMB doesn't also place. False otherwise.
+    bool TryShearSheep();
     // The block the camera eye sits in (air's def when none/no world).
     const vc::BlockDef& EyeLiquid() const;
     bool EyeInWater() const; // eye inside water (drives tint + fog)
@@ -137,12 +146,13 @@ private:
     void ToggleDebugMob();
     void TickDebugMob(double dt);
 
-    // M32 mobs: the zombie reuses the biped HumanoidModel with the zombie skin
-    // + arms-forward pose; the pig is a quadruped PigModel. GameApp owns them;
-    // the World owns the mob entities. Debug keys B/C spawn a pig/zombie ahead
-    // of the player so they're easy to test without waiting for natural spawns.
-    std::unique_ptr<vc::HumanoidModel> m_zombieModel;
-    std::unique_ptr<vc::PigModel> m_pigModel;
+    // Mob box-models, one per MobType, behind the shared vc::IMobModel
+    // interface so the render pass + sounds drive any mob uniformly (M34). The
+    // World owns the mob ENTITIES; GameApp owns their MODELS. Each silently
+    // skips drawing without its gitignored skin overlay (like the debug Steve).
+    // Debug keys spawn one ahead of the player (B pig, C zombie, V cow, N sheep,
+    // M chicken) so they're easy to test without waiting for natural spawns.
+    std::array<std::unique_ptr<vc::IMobModel>, static_cast<size_t>(vc::MobType::Count)> m_mobModels;
     void SpawnMobAhead(vc::MobType type);
     // True when the sun is down (drives hostile spawn light gating).
     bool IsNight() const;
@@ -178,6 +188,7 @@ private:
     vc::GuiTextures m_guiTextures; // null members = placeholder look
     size_t m_hotbarSlot = 0;
     glm::ivec3 m_openFurnace{0}; // which furnace State::Furnace is showing
+    int m_paletteScroll = 0;     // creative-palette scroll offset (rows); wheel-driven
 
     // Occlusion culling (cave culling) is on by default; O toggles it for
     // comparing drawn-chunk counts and spotting false culling.

@@ -5,6 +5,7 @@
 
 #include <glm/glm.hpp>
 
+#include "entity/MobModel.h"
 #include "vox/renderer/BoxModel.h"
 
 namespace vc {
@@ -15,7 +16,7 @@ namespace vc {
 // skin); M32's zombie reuses it with the zombie skin and the arms-forward pose
 // (vanilla ModelZombie). The animation is a port of ModelBiped.setRotationAngles
 // (limb swing while walking + the idle arm sway), so it reads like vanilla.
-class HumanoidModel {
+class HumanoidModel : public IMobModel {
 public:
     // skinRel is an asset-relative path (e.g. "mc/textures/entity/zombie/zombie.png").
     // zombiePose holds the arms out straight ahead (vanilla shambling zombie).
@@ -33,18 +34,18 @@ public:
 
     // True once the skin loaded (needs the gitignored mc asset overlay; a
     // clean clone without it skips drawing, like the first-person arm).
-    bool Ready() const { return m_model.HasSkin(); }
+    bool Ready() const override { return m_model.HasSkin(); }
 
     // Sets every part's rotation for this frame. limbSwing/limbSwingAmount are
     // the walk-cycle phase/intensity (vanilla EntityLivingBase fields); age is
     // the entity's age in ticks (drives the idle sway); head yaw/pitch are in
     // DEGREES relative to the body.
     void SetRotationAngles(float limbSwing, float limbSwingAmount, float age, float headYawDeg,
-                           float headPitchDeg);
+                           float headPitchDeg) override;
 
     // Draws via the bound entity_model shader. modelToWorld maps the Y-down
     // pixel model space to world space (feet on the ground, facing bodyYaw).
-    void Render(vox::Shader& shader, const glm::mat4& modelToWorld) const {
+    void Render(vox::Shader& shader, const glm::mat4& modelToWorld) const override {
         m_model.Render(shader, modelToWorld);
     }
 

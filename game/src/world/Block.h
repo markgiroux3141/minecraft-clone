@@ -236,6 +236,9 @@ extern BlockId StoneStairs;
 extern BlockId CobbleStairs;
 extern BlockId PlankStairs;
 extern BlockId SandstoneStairs;
+// M34: white wool — a sheep drop (and shearing yield). Full opaque cube, soft
+// "cloth" material; colored variants/dyeing are a later (farming) milestone.
+extern BlockId WhiteWool;
 
 // M18 crack overlay: destroy_stage_0..9 occupy ten consecutive texture
 // layers right after the block tiles — keep BOTH scripts/gen_textures.py

@@ -15,6 +15,7 @@
 namespace vc {
 
 class World;
+enum class MobType : uint8_t; // entity/Mob.h — used by the mob-voice API below
 
 // Owns every loaded sound clip and maps game events to vox::AudioEngine calls.
 // One instance lives on GameApp. All clips load from the gitignored
@@ -63,9 +64,11 @@ public:
     void ResetDigSound();
     void TickDigSound(SoundType type, const glm::vec3& blockCenter, double frameDt);
 
-    // --- M32 mobs (positional; hostile picks the zombie set, else pig) ------
-    void PlayMobHurt(bool hostile, const glm::vec3& pos);
-    void PlayMobDeath(bool hostile, const glm::vec3& pos);
+    // --- Mobs (positional; per-type voice sets, M32 + M34 roster) -----------
+    void PlayMobHurt(MobType type, const glm::vec3& pos);
+    void PlayMobDeath(MobType type, const glm::vec3& pos);
+    void PlaySheepShear(const glm::vec3& pos);  // M34: shears snip
+    void PlayChickenEgg(const glm::vec3& pos);  // M34: egg "plop"
 
     // --- Looping furnace crackle (one voice per lit furnace) ----------------
     // Reconciles the live voices against the world's currently-lit furnaces:
@@ -111,13 +114,18 @@ private:
     ClipSet m_bucketEmptyLava{}; // item/bucket/empty_lava*
     ClipSet m_caveAmbient{};// ambient/cave/cave*
     ClipSet m_hurt{};       // damage/hit* (player hurt)
-    // M32 mob voices (mob/pig, mob/zombie). Pig has no distinct hurt clip in
-    // 1.12 (it reuses "say"), so PlayMobHurt falls back to the say set.
-    ClipSet m_pigSay{};
-    ClipSet m_pigDeath{};
-    ClipSet m_zombieSay{};
-    ClipSet m_zombieHurt{};
-    ClipSet m_zombieDeath{};
+    // Per-MobType voices (mob/<folder>/{say,hurt,death}; folder from
+    // MobSoundFolder). Some mobs lack a distinct hurt clip in 1.12 (pig, cow,
+    // sheep, chicken reuse "say"), so PlayMobHurt falls back to the say set.
+    static constexpr int kMobVoiceCount = 5; // == MobType::Count (asserted in .cpp)
+    struct MobVoice {
+        ClipSet say;
+        ClipSet hurt;
+        ClipSet death;
+    };
+    std::array<MobVoice, kMobVoiceCount> m_mobVoices{};
+    ClipSet m_sheepShear{}; // mob/sheep/shear*
+    ClipSet m_chickenEgg{}; // mob/chicken/plop*
     vox::ClipHandle m_pop{};
     vox::ClipHandle m_fireLoop{};
     // Music is decoded on demand (one track at a time), so we keep paths, not
