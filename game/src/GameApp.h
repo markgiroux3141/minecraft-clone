@@ -89,6 +89,11 @@ private:
     // PrimedTnt entity) or ignite a creeper in reach, wearing the tool, and
     // return true so RMB doesn't also place. False otherwise.
     bool TryIgnite();
+    // M38: if the hand holds a breeding item and the matching animal is in reach
+    // (nearer than any block target), feed it (love mode for adults / faster
+    // growth for babies), consume one, and return true so RMB doesn't also place.
+    // False otherwise (wrong item / no animal / animal not receptive).
+    bool TryFeedMob();
     // The block the camera eye sits in (air's def when none/no world).
     const vc::BlockDef& EyeLiquid() const;
     bool EyeInWater() const; // eye inside water (drives tint + fog)
@@ -164,7 +169,7 @@ private:
     // bow held in the skeleton's hand.
     std::unique_ptr<vc::ArrowModel> m_arrowModel;
     std::unique_ptr<vc::HeldBowModel> m_heldBow;
-    void SpawnMobAhead(vc::MobType type);
+    void SpawnMobAhead(vc::MobType type, bool baby = false);
     // M36: RMB-hold a bow to draw it. m_bowDrawSeconds accumulates the hold; on
     // release HandleBowRelease fires a player-owned arrow scaled by the draw,
     // consuming one Arrow from the bag (free in fly/creative) and wearing the bow.

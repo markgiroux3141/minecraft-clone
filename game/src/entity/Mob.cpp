@@ -31,6 +31,16 @@ std::vector<MobDrop> MobDrops(MobType type, bool sheared) {
     }
 }
 
+bool IsBreedingFood(MobType type, ItemId item) {
+    switch (type) {
+    case MobType::Cow:
+    case MobType::Sheep: return item == items::Wheat;
+    case MobType::Pig: return item == items::Carrot;
+    case MobType::Chicken: return item == items::Seeds;
+    default: return false; // hostiles + anything else don't breed
+    }
+}
+
 const char* MobSoundFolder(MobType type) {
     switch (type) {
     case MobType::Pig: return "pig";
@@ -134,17 +144,42 @@ bool MoveMobAxis(const World& world, glm::vec3& pos, glm::vec3& vel, bool& onGro
 
 } // namespace
 
-void EntityManager::SpawnMob(MobType type, const glm::vec3& feetPos) {
+void EntityManager::SpawnMob(MobType type, const glm::vec3& feetPos, bool baby) {
     Mob mob;
     mob.type = type;
     mob.pos = feetPos;
     mob.prevPos = feetPos;
     mob.health = MobDefOf(type).maxHealth;
     mob.aiTimer = MobRandInt(40);
+    mob.baby = baby;
+    mob.growUpTimer = baby ? kBabyGrowUpTicks : 0;
     if (MobDefOf(type).laysEggs) {
         mob.eggTimer = 6000 + MobRandInt(6000); // vanilla EntityChicken: 6000..11999
     }
     m_mobs.push_back(mob);
+}
+
+bool EntityManager::FeedMob(size_t index, ItemId item) {
+    if (index >= m_mobs.size()) {
+        return false;
+    }
+    Mob& mob = m_mobs[index];
+    if (!IsBreedingFood(mob.type, item)) {
+        return false; // not this animal's breed food -> RMB falls through
+    }
+    if (mob.baby) {
+        // Vanilla ageUp: each feed advances growth by 10% of the remaining time.
+        mob.growUpTimer = std::max(0, mob.growUpTimer - kBabyGrowUpTicks / 10);
+        if (mob.growUpTimer == 0) {
+            mob.baby = false;
+        }
+        return true; // consumed
+    }
+    if (mob.loveTimer <= 0 && mob.breedCooldown <= 0) {
+        mob.loveTimer = kLoveTicks; // enter love mode, seek a partner
+        return true;                // consumed
+    }
+    return false; // already in love or on cooldown -> don't consume (vanilla)
 }
 
 void EntityManager::EmitMobDeath(const Mob& mob) {
@@ -175,6 +210,8 @@ void EntityManager::LoadMobs() {
         mob.yaw = r.yaw;
         mob.prevYaw = r.yaw;
         mob.health = std::clamp(r.health, 0.0f, MobDefOf(mob.type).maxHealth);
+        mob.baby = r.baby;
+        mob.growUpTimer = r.baby ? std::max(1, r.growUpTimer) : 0;
         if (MobDefOf(mob.type).laysEggs) {
             mob.eggTimer = 6000 + MobRandInt(6000); // egg cycle restarts on load
         }
@@ -188,7 +225,7 @@ void EntityManager::SaveMobs() {
     std::vector<WorldSave::MobRecord> records;
     records.reserve(m_mobs.size());
     for (const Mob& m : m_mobs) {
-        records.push_back({static_cast<int>(m.type), m.pos, m.yaw, m.health});
+        records.push_back({static_cast<int>(m.type), m.pos, m.yaw, m.health, m.baby, m.growUpTimer});
     }
     m_world.SaveStore().SetMobs(std::move(records));
 }
@@ -291,6 +328,9 @@ void EntityManager::TickMobs(const MobTickCtx& ctx) {
     // Creeper detonations are deferred to after the loop: Explode() erases dead
     // mobs (DamageMob), which would invalidate this loop's index. {center, radius}.
     std::vector<std::pair<glm::vec3, float>> pendingExplosions;
+    // M38 newborns are likewise deferred: SpawnMob push_backs into m_mobs, which
+    // could reallocate and invalidate the `mob&` reference held below. {type, pos}.
+    std::vector<std::pair<MobType, glm::vec3>> pendingBabies;
 
     for (size_t i = 0; i < m_mobs.size();) {
         Mob& mob = m_mobs[i];
@@ -306,6 +346,18 @@ void EntityManager::TickMobs(const MobTickCtx& ctx) {
         }
         if (mob.aiTimer > 0) {
             --mob.aiTimer;
+        }
+        // M38 breeding timers. A baby ages toward adulthood; love mode + the
+        // post-mating cooldown count down regardless of where the AI lands below.
+        if (mob.baby && --mob.growUpTimer <= 0) {
+            mob.baby = false;
+            mob.growUpTimer = 0;
+        }
+        if (mob.loveTimer > 0) {
+            --mob.loveTimer;
+        }
+        if (mob.breedCooldown > 0) {
+            --mob.breedCooldown;
         }
 
         // Freeze while the chunk underfoot has no data (don't fall through
@@ -369,6 +421,45 @@ void EntityManager::TickMobs(const MobTickCtx& ctx) {
             mob.moving = true;
             wish = glm::normalize(glm::vec2{toPlayer.x, toPlayer.z});
             mob.yaw = std::atan2(toPlayer.z, toPlayer.x);
+        } else if (!mob.baby && mob.loveTimer > 0) {
+            // M38 love mode (vanilla EntityAIMate): find the nearest same-species
+            // adult that is also in love, walk to it, and spawn a baby when they
+            // meet. Both parents drop out of love and onto a 5-min cooldown.
+            int partner = -1;
+            float bestSq = 8.0f * 8.0f; // within 8 blocks (vanilla mate range)
+            for (size_t j = 0; j < m_mobs.size(); ++j) {
+                if (j == i) {
+                    continue;
+                }
+                const Mob& o = m_mobs[j];
+                if (o.type != mob.type || o.baby || o.loveTimer <= 0 || o.breedCooldown > 0) {
+                    continue;
+                }
+                const glm::vec3 d = o.pos - mob.pos;
+                const float sq = d.x * d.x + d.z * d.z;
+                if (sq < bestSq) {
+                    bestSq = sq;
+                    partner = static_cast<int>(j);
+                }
+            }
+            if (partner >= 0 && mob.breedCooldown <= 0) {
+                Mob& mate = m_mobs[static_cast<size_t>(partner)];
+                const glm::vec3 toMate = mate.pos - mob.pos;
+                const float mateXZ = std::sqrt(toMate.x * toMate.x + toMate.z * toMate.z);
+                if (mateXZ <= 1.6f) {
+                    // Close enough — mate. Defer the spawn (push_back may realloc).
+                    pendingBabies.push_back({mob.type, (mob.pos + mate.pos) * 0.5f});
+                    mob.loveTimer = 0;
+                    mate.loveTimer = 0;
+                    mob.breedCooldown = kBreedCooldownTicks;
+                    mate.breedCooldown = kBreedCooldownTicks;
+                } else if (mateXZ > 1e-3f) {
+                    chasing = true; // close the gap at full speed
+                    mob.moving = true;
+                    wish = glm::vec2{toMate.x, toMate.z} / mateXZ;
+                    mob.yaw = std::atan2(toMate.z, toMate.x);
+                }
+            }
         } else {
             // Idle / wander: every so often start a stroll in a random
             // direction, otherwise stand still.
@@ -533,7 +624,7 @@ void EntityManager::TickMobs(const MobTickCtx& ctx) {
         // Vanilla EntityChicken: every 6000..11999 ticks an adult drops an egg
         // at its feet and queues the "plop". No baby/jockey system, so every
         // chicken qualifies.
-        if (def.laysEggs && --mob.eggTimer <= 0) {
+        if (def.laysEggs && !mob.baby && --mob.eggTimer <= 0) {
             const glm::ivec3 cell{static_cast<int>(std::floor(mob.pos.x)),
                                   static_cast<int>(std::floor(mob.pos.y)),
                                   static_cast<int>(std::floor(mob.pos.z))};
@@ -573,6 +664,12 @@ void EntityManager::TickMobs(const MobTickCtx& ctx) {
     // Creeper detonations, now that the iteration is done (Explode erases mobs).
     for (const auto& [center, radius] : pendingExplosions) {
         Explode(center, radius);
+    }
+
+    // M38 newborns, now that the iteration is done (SpawnMob push_backs into
+    // m_mobs). The baby spawns at its parents' midpoint with a full grow timer.
+    for (const auto& [type, pos] : pendingBabies) {
+        SpawnMob(type, pos, /*baby=*/true);
     }
 
     // Periodic natural spawn attempt (~ every 2 s).

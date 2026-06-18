@@ -27,6 +27,7 @@ struct InputState {
     bool spawnChickenKeyWasDown = false;  // M
     bool spawnCreeperKeyWasDown = false;  // K
     bool spawnSkeletonKeyWasDown = false; // J
+    bool spawnBabyKeyWasDown = false;     // H: debug baby cow (M38)
 
     // Auto-repeat throttles (seconds remaining).
     double breakCooldown = 0.0; // fly repeat AND the walk-dig hit delay

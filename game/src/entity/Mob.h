@@ -109,6 +109,14 @@ inline const MobDef& MobDefOf(MobType type) {
     return kMobDefs[static_cast<size_t>(type)];
 }
 
+// M38 breeding tuning (vanilla EntityAnimal): a baby grows up after this many
+// ticks; an adult stays in love mode this long looking for a mate; both parents
+// can't breed again for this long after a successful mating.
+inline constexpr int kBabyGrowUpTicks = 24000; // 20 min @ 20 TPS
+inline constexpr int kLoveTicks = 600;         // 30 s
+inline constexpr int kBreedCooldownTicks = 6000; // 5 min
+inline constexpr float kBabyModelScale = 0.5f;   // uniform half-size render
+
 // One entry in a mob's death loot: an item id and an inclusive count range.
 struct MobDrop {
     ItemId item;
@@ -119,6 +127,12 @@ struct MobDrop {
 // A mob's death loot (runtime ids, so a function rather than a table). `sheared`
 // suppresses the sheep's wool drop. Empty for mobs with no drop.
 std::vector<MobDrop> MobDrops(MobType type, bool sheared);
+
+// M38 breeding: is `item` the food that puts `type` into love mode? Runtime ids
+// (like MobDrops), so a function rather than a MobDef field. Vanilla pairings:
+// wheat -> cow + sheep, carrot -> pig, seeds -> chicken. Hostiles never breed,
+// so this is false for them (and any non-breed item).
+bool IsBreedingFood(MobType type, ItemId item);
 
 // The sound-family folder under assets/mc/sounds/mob/ for this mob type
 // ("pig", "zombie", "cow", "sheep", "chicken"). Drives GameSounds loading.
@@ -163,6 +177,18 @@ struct Mob : Body, LivingAnim {
     // `shootCooldown` counts down to the next shot.
     bool aiming = false;
     int shootCooldown = 0;
+
+    // M38 breeding / baby state. `baby` renders at half model scale and can't
+    // breed/lay eggs; `growUpTimer` counts down to adulthood (vanilla 24000
+    // ticks = 20 min, accelerated 10% per feed). `loveTimer` > 0 = an adult in
+    // love mode seeking a partner (vanilla 600 ticks = 30 s); `breedCooldown`
+    // blocks re-breeding right after a successful mating (vanilla 6000 ticks =
+    // 5 min). baby + growUpTimer are PERSISTED (mobs.dat); loveTimer +
+    // breedCooldown are runtime-only (a reloaded animal forgets it was courting).
+    bool baby = false;
+    int growUpTimer = 0;
+    int loveTimer = 0;
+    int breedCooldown = 0;
 };
 
 // A positional sound the mob sim wants played (drained by GameApp so World

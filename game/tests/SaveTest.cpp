@@ -197,29 +197,34 @@ int main() {
         vc::WorldSave::MobRecord c{3, {4.0f, 66.0f, 9.0f}, 2.0f, 8.0f};      // M34 sheep (type 3)
         vc::WorldSave::MobRecord d{5, {-7.0f, 64.0f, 20.0f}, 0.25f, 20.0f};  // M35 creeper (type 5)
         vc::WorldSave::MobRecord e{6, {2.0f, 65.0f, -11.0f}, -1.0f, 12.0f};  // M36 skeleton (type 6)
-        save.SetMobs({a, b, c, d, e});
+        // M38 baby cow (type 2): baby flag + grow-up timer round-trip too.
+        vc::WorldSave::MobRecord f{2, {1.0f, 67.0f, 1.0f}, 0.0f, 10.0f, true, 15000};
+        save.SetMobs({a, b, c, d, e, f});
         save.Flush(true);
     }
     {
         vc::WorldSave save(dir, 7);
         const auto& mobs = save.GetMobs();
-        Check(mobs.size() == 5, "mobs reload from the sidecar");
-        Check(mobs.size() == 5 && mobs[0].type == 1 && mobs[0].pos.x == 10.5f &&
+        Check(mobs.size() == 6, "mobs reload from the sidecar");
+        Check(mobs.size() == 6 && mobs[0].type == 1 && mobs[0].pos.x == 10.5f &&
                   mobs[0].pos.y == 68.0f && mobs[0].pos.z == -4.25f && mobs[0].yaw == 1.57f &&
                   mobs[0].health == 18.0f,
               "zombie record round-trips exactly");
-        Check(mobs.size() == 5 && mobs[1].type == 0 && mobs[1].pos.x == -30.0f &&
+        Check(mobs.size() == 6 && mobs[1].type == 0 && mobs[1].pos.x == -30.0f &&
                   mobs[1].health == 10.0f,
               "pig record round-trips");
-        Check(mobs.size() == 5 && mobs[2].type == 3 && mobs[2].pos.z == 9.0f &&
+        Check(mobs.size() == 6 && mobs[2].type == 3 && mobs[2].pos.z == 9.0f &&
                   mobs[2].health == 8.0f,
               "M34 sheep record round-trips");
-        Check(mobs.size() == 5 && mobs[3].type == 5 && mobs[3].pos.x == -7.0f &&
+        Check(mobs.size() == 6 && mobs[3].type == 5 && mobs[3].pos.x == -7.0f &&
                   mobs[3].pos.z == 20.0f && mobs[3].health == 20.0f,
               "M35 creeper record round-trips");
-        Check(mobs.size() == 5 && mobs[4].type == 6 && mobs[4].pos.x == 2.0f &&
+        Check(mobs.size() == 6 && mobs[4].type == 6 && mobs[4].pos.x == 2.0f &&
                   mobs[4].pos.z == -11.0f && mobs[4].health == 12.0f,
               "M36 skeleton record round-trips");
+        Check(mobs.size() == 6 && mobs[5].type == 2 && mobs[5].baby &&
+                  mobs[5].growUpTimer == 15000,
+              "M38 baby cow record round-trips (baby flag + grow timer)");
         save.SetMobs({});
         save.Flush(true);
     }
@@ -227,6 +232,21 @@ int main() {
         vc::WorldSave save(dir, 7);
         Check(save.GetMobs().empty(), "clearing mobs removes them");
         Check(!std::filesystem::exists(dir / "mobs.dat"), "empty mob set deletes the sidecar");
+    }
+    {
+        // M38 back-compat: a pre-M38 mobs.dat line (6 fields, no baby/grow timer)
+        // must still load, defaulting to an adult.
+        {
+            std::ofstream raw{dir / "mobs.dat", std::ios::trunc};
+            raw << "mob 0 5 66 5 0 10\n"; // old-format pig, no trailing fields
+        }
+        vc::WorldSave save(dir, 7);
+        const auto& mobs = save.GetMobs();
+        Check(mobs.size() == 1 && mobs[0].type == 0 && !mobs[0].baby &&
+                  mobs[0].growUpTimer == 0,
+              "pre-M38 mobs.dat line loads as an adult");
+        save.SetMobs({});
+        save.Flush(true);
     }
     {
         // M17/M18 saves wrote triples under the old "inventory" tag —

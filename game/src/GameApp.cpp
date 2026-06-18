@@ -685,16 +685,16 @@ void GameApp::TickDebugMob(double dt) {
     m.age += 1.0f;
 }
 
-void GameApp::SpawnMobAhead(vc::MobType type) {
+void GameApp::SpawnMobAhead(vc::MobType type, bool baby) {
     if (!m_world || m_state != State::Playing) {
         return;
     }
     // ~3 blocks ahead at eye-level x/z; it falls onto the ground via gravity.
     glm::vec3 ahead = m_player.Position() + m_camera.Forward() * 3.0f;
     ahead.y = m_player.Position().y + 1.0f;
-    m_world->Entities().SpawnMob(type, ahead);
-    GAME_INFO("Spawned debug {} at ({:.1f}, {:.1f}, {:.1f})", vc::MobSoundFolder(type), ahead.x,
-              ahead.y, ahead.z);
+    m_world->Entities().SpawnMob(type, ahead, baby);
+    GAME_INFO("Spawned debug {}{} at ({:.1f}, {:.1f}, {:.1f})", baby ? "baby " : "",
+              vc::MobSoundFolder(type), ahead.x, ahead.y, ahead.z);
 }
 
 float GameApp::BowDrawProgress() const {
@@ -974,6 +974,13 @@ void GameApp::HandleInput(double frameDt, int scroll) {
         SpawnMobAhead(vc::MobType::Skeleton);
     }
     m_input.spawnSkeletonKeyWasDown = skeletonKey;
+    // M38: H = a baby cow (test the half-scale render + grow-up; breeding itself
+    // is tested by RMB-feeding two adults their breed item).
+    const bool babyKey = vox::Input::IsKeyDown(vox::Key::H);
+    if (babyKey && !m_input.spawnBabyKeyWasDown) {
+        SpawnMobAhead(vc::MobType::Cow, /*baby=*/true);
+    }
+    m_input.spawnBabyKeyWasDown = babyKey;
 
     // 1..9 select the hotbar slot; the wheel cycles it (vanilla: scroll
     // up moves left, wrapping).
@@ -1218,6 +1225,10 @@ void GameApp::HandleInput(double frameDt, int scroll) {
         } else if (TryIgnite()) {
             // M35: flint & steel priming a TNT block / igniting a creeper beats
             // placing; it does its own mob + block-target checks (+ its cooldown).
+        } else if (TryFeedMob()) {
+            // M38: feeding an animal its breed item (wheat/carrot/seeds) beats
+            // placing; it does its own mob raycast + consume.
+            m_input.placeCooldown = kEditRepeatDelay;
         } else if (m_target && targetId == vc::blocks::CraftingTable) {
             // Use beats place (vanilla, sans sneak): open the 3x3 grid.
             OpenContainer(State::Crafting);
@@ -1444,6 +1455,42 @@ bool GameApp::TryIgnite() {
         }
     }
     return false;
+}
+
+bool GameApp::TryFeedMob() {
+    vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
+    if (hand.Empty()) {
+        return false;
+    }
+    // Fast out: only the three breed items can feed anything (mirrors how
+    // TryShearSheep/TryIgnite gate on the held tool before raycasting).
+    if (hand.id != vc::items::Wheat && hand.id != vc::items::Carrot &&
+        hand.id != vc::items::Seeds) {
+        return false;
+    }
+    float mobDist = 0.0f;
+    const auto mobHit = m_world->Entities().RaycastMob(m_camera.Position(), m_camera.Forward(),
+                                                       kReachDistance, mobDist);
+    if (!mobHit) {
+        return false;
+    }
+    // Don't feed through a wall: a nearer block target wins.
+    const float blockDist =
+        m_target ? glm::length(m_target->point - m_camera.Position()) : 1e9f;
+    if (mobDist > blockDist) {
+        return false;
+    }
+    const glm::vec3 mobPos = m_world->Entities().Mobs()[*mobHit].pos;
+    if (!m_world->Entities().FeedMob(*mobHit, hand.id)) {
+        return false; // wrong animal, or it's not receptive -> RMB falls through
+    }
+    // Accepted: consume one, swing, and play the eat munch at the animal.
+    m_sounds.PlayEat(mobPos);
+    m_viewModel->TriggerSwing();
+    if (--hand.count <= 0) {
+        hand = {};
+    }
+    return true;
 }
 
 const vc::BlockDef& GameApp::EyeLiquid() const {
@@ -2015,9 +2062,14 @@ void GameApp::OnRender(double alpha, double frameDt) {
                 // offset). modelScale folds in around the feet (offset is applied
                 // after the scale) so a scaled mob still stands on the ground —
                 // the hook baby/variant sizing will use (all 1.0 today).
+                // M38 babies render at half scale (folded into the same feet-
+                // anchored scale as modelScale, so the offset translate after it
+                // keeps the smaller body standing on the ground).
+                const float scale =
+                    def.modelScale * (mob.baby ? vc::kBabyModelScale : 1.0f);
                 glm::mat4 m = glm::translate(glm::mat4(1.0f), pos);
                 m = glm::rotate(m, kPi * 0.5f - yaw, {0.0f, 1.0f, 0.0f});
-                m = glm::scale(m, glm::vec3(def.modelScale / 16.0f));
+                m = glm::scale(m, glm::vec3(scale / 16.0f));
                 m = glm::translate(m, {0.0f, def.modelOffsetPx, 0.0f});
                 m = glm::rotate(m, kPi, {1.0f, 0.0f, 0.0f});
 

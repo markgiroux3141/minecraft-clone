@@ -167,6 +167,9 @@ ItemId CookedPorkchop = 0;
 ItemId CookedBeef = 0;
 ItemId CookedMutton = 0;
 ItemId CookedChicken = 0;
+ItemId Wheat = 0;
+ItemId Carrot = 0;
+ItemId Seeds = 0;
 ItemId FirstArmor = 0;
 
 namespace {
@@ -382,6 +385,15 @@ void RegisterDefaults() {
     CookedBeef = foodSprite("steak", 115, 8, 0.8f);
     CookedMutton = foodSprite("cooked mutton", 116, 6, 0.8f);
     CookedChicken = foodSprite("cooked chicken", 117, 6, 0.6f);
+
+    // M38 breeding items (sprite tiles 118..120 — appended after the M37 cooked
+    // foods; keep BOTH atlas scripts in sync). Plain non-food sprites used only
+    // to put animals in love mode (RMB-feed; see IsBreedingFood / FeedMob): wheat
+    // breeds cow + sheep, carrot breeds pig, seeds breed chicken (vanilla). The
+    // creative palette auto-lists them.
+    Wheat = sprite("wheat", 118);
+    Carrot = sprite("carrot", 119);
+    Seeds = sprite("seeds", 120);
 
     // Coal ore's drop is the coal item — its id only exists now, after
     // item registration (same late-patch pattern as stone -> cobblestone).

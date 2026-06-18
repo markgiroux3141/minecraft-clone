@@ -5,6 +5,7 @@
 #include <format>
 #include <fstream>
 #include <iomanip>
+#include <sstream>
 #include <string>
 #include <type_traits>
 
@@ -304,12 +305,29 @@ void WorldSave::ReadMobs() {
     if (!in) {
         return;
     }
-    std::string tag;
-    while (in >> tag && tag == "mob") {
+    // Parse line-by-line so the optional M38 baby fields (appended after the
+    // M32 fields) can be absent in older saves without desyncing the stream.
+    std::string line;
+    while (std::getline(in, line)) {
+        std::istringstream ss{line};
+        std::string tag;
+        if (!(ss >> tag)) {
+            continue; // blank line
+        }
+        if (tag != "mob") {
+            continue;
+        }
         MobRecord r;
-        if (!(in >> r.type >> r.pos.x >> r.pos.y >> r.pos.z >> r.yaw >> r.health)) {
-            GAME_ERROR("Save: malformed mobs.dat line; later mobs dropped");
-            return;
+        if (!(ss >> r.type >> r.pos.x >> r.pos.y >> r.pos.z >> r.yaw >> r.health)) {
+            GAME_ERROR("Save: malformed mobs.dat line; skipped");
+            continue;
+        }
+        // Optional trailing M38 fields: baby flag + grow-up timer. Pre-M38 lines
+        // stop after health, leaving these at their adult defaults.
+        int baby = 0;
+        if (ss >> baby) {
+            r.baby = baby != 0;
+            ss >> r.growUpTimer; // best-effort; defaults to 0 if absent
         }
         m_mobs.push_back(r);
     }
@@ -328,7 +346,8 @@ void WorldSave::WriteMobs() const {
         out << std::setprecision(9);
         for (const MobRecord& r : m_mobs) {
             out << "mob " << r.type << ' ' << r.pos.x << ' ' << r.pos.y << ' ' << r.pos.z << ' '
-                << r.yaw << ' ' << r.health << '\n';
+                << r.yaw << ' ' << r.health << ' ' << (r.baby ? 1 : 0) << ' ' << r.growUpTimer
+                << '\n';
         }
         if (!out) {
             GAME_ERROR("Save: failed writing {}", tmp.string());

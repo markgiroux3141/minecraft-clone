@@ -223,8 +223,10 @@ public:
     // spawning and far-mob despawn. Call from GameApp::OnTick.
     void TickMobs(const MobTickCtx& ctx);
     // Spawn a mob standing at feetPos (debug spawn key; natural spawns use it
-    // too). Clamped to nothing — caller picks a valid spot.
-    void SpawnMob(MobType type, const glm::vec3& feetPos);
+    // too). Clamped to nothing — caller picks a valid spot. baby = true starts it
+    // as a half-scale juvenile with a full grow-up timer (M38 breeding offspring +
+    // the debug baby key).
+    void SpawnMob(MobType type, const glm::vec3& feetPos, bool baby = false);
     const std::vector<Mob>& Mobs() const { return m_mobs; }
     // Ray vs mob AABBs (player melee). Returns the nearest hit mob's index and
     // its distance in outDist; nothing past maxDist.
@@ -245,6 +247,12 @@ public:
     // true if `index` was a creeper, false for any other mob (so RMB falls
     // through to the normal place/use path).
     bool IgniteMob(size_t index);
+    // M38: feed a mob its breeding item (player RMB with wheat/carrot/seeds).
+    // An adult enters love mode (seeks a mate); a baby's growth is sped up 10%.
+    // Returns true if the feed was accepted (the CALLER consumes one item + plays
+    // feedback); false for a wrong item, a hostile, or an adult already in love /
+    // on its post-mating cooldown — so RMB falls through.
+    bool FeedMob(size_t index, ItemId item);
     // Mob sounds the sim wants played this tick (hurt/death). GameApp drains
     // and clears it after Tick, keeping the sim audio-free.
     std::vector<MobSound>& MobSoundEvents() { return m_mobSounds; }

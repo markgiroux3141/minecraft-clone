@@ -136,6 +136,11 @@ public:
         glm::vec3 pos{0.0f};
         float yaw = 0.0f;
         float health = 0.0f;
+        // M38 breeding: a baby and its grow-up timer (ticks). Appended to the
+        // mobs.dat line; absent in pre-M38 saves (read back as adult, see
+        // ReadMobs). Love mode / breed cooldown are runtime-only, not stored.
+        bool baby = false;
+        int growUpTimer = 0;
     };
     const std::vector<MobRecord>& GetMobs() const { return m_mobs; }
     void SetMobs(std::vector<MobRecord> mobs);

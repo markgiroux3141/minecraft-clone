@@ -528,6 +528,34 @@ def shears_sprite(x, y):
     return (0, 0, 0, 0)
 
 
+# M38 breeding items (real art comes from import_mc_assets.py): a wheat bundle, a
+# carrot, and a small seed scatter.
+def wheat_sprite(x, y):
+    # A vertical golden bundle with a few stray stalks.
+    if 5 <= x <= 10 and 2 <= y <= 14:
+        return speckle((212, 180, 84), x, y, 118, 10)
+    if (x == 4 or x == 11) and 4 <= y <= 12 and (y % 2 == 0):
+        return speckle((196, 164, 72), x, y, 118, 8)
+    return (0, 0, 0, 0)
+
+
+def carrot_sprite(x, y):
+    # An orange tapered root (wider at top) with a green leafy crown.
+    if 3 <= y <= 5 and 6 <= x <= 9:
+        return speckle((86, 158, 64), x, y, 119, 8)  # leaves
+    half = (14 - y)  # taper toward the tip
+    if 6 <= y <= 14 and abs(x - 8) <= max(0, half - 5):
+        return speckle((222, 132, 48), x, y, 119, 10)
+    return (0, 0, 0, 0)
+
+
+def seeds_sprite(x, y):
+    # A scatter of small olive seeds.
+    if (x - 8) ** 2 + (y - 9) ** 2 <= 28 and hash01(x, y, 120) > 0.55:
+        return speckle((148, 160, 88), x, y, 120, 12)
+    return (0, 0, 0, 0)
+
+
 # M35 placeholders (real art comes from import_mc_assets.py): a TNT block (red
 # body with a white-on-dark band, lighter top/bottom caps) + gunpowder/flint &
 # steel item blobs.
@@ -702,7 +730,10 @@ TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top,
          _blob((150, 96, 56), 114),   # cooked porkchop
          _blob((120, 74, 44), 115),   # cooked beef (steak)
          _blob((158, 108, 64), 116),  # cooked mutton
-         _blob((176, 130, 78), 117)]  # cooked chicken
+         _blob((176, 130, 78), 117)] + [  # cooked chicken
+         # M38 breeding items (118 wheat / 119 carrot / 120 seeds) — matching
+         # Item.cpp RegisterDefaults.
+         wheat_sprite, carrot_sprite, seeds_sprite]
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:

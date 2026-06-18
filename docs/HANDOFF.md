@@ -1,6 +1,21 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-18, written for a FRESH CONTEXT. M37 (FOOD / EATING — vanilla
+Updated: 2026-06-18, written for a FRESH CONTEXT. M38 (BREEDING + BABY ANIMALS —
+roadmap step 5's PAYOFF) is now DONE and USER-VERIFIED ("that works") — see
+the "M38" section for the full design. It adds three
+breeding items (wheat / carrot / seeds, plain non-food sprites in the creative
+palette), an RMB-feed interaction (`GameApp::TryFeedMob`) that puts adult animals
+into love mode, a love-seeking `TickMobs` branch that spawns a half-scale baby
+when two in-love adults of the same species meet, and baby grow-up (the M34
+`modelScale` hook is the baby-size lever — uniform 0.5). baby + grow timer
+PERSIST in mobs.dat. Debug spawn key `H` = a baby cow. IMPORTANT after pulling:
+re-run `import_mc_assets.py` — M38 added 3 atlas item tiles (wheat 118 / carrot
+119 / seeds 120, atlas is 121 layers now), already imported on this machine. The
+NEXT milestone is open — see "Mob & enemy roadmap" step 6 (bespoke movers:
+spider climb / slime split / enderman teleport) or a FARMING milestone (would
+give wheat/carrot/seeds a real in-world source instead of the creative palette).
+
+M37 (FOOD / EATING — vanilla
 `ItemFood`, roadmap step 5's prerequisite) is now DONE and USER-VERIFIED (eating
 + furnace cooking both confirmed working) — see the "M37" section for the full
 design.
@@ -142,11 +157,14 @@ Quit. In game the cursor is captured: WASD move, mouse look, Space jump
 F toggles walk/fly, O toggles occlusion culling (debug), T fast-forwards
 world time (debug), G spawns/despawns the debug Steve (M31), B/C spawn a
 debug pig/zombie ~3 blocks ahead (M32), V/N/M spawn a debug cow/sheep/chicken
-(M34), K spawns a debug creeper (M35), J spawns a debug skeleton (M36), RMB-hold
+(M34), K spawns a debug creeper (M35), J spawns a debug skeleton (M36), H spawns
+a debug baby cow (M38), RMB-hold
 with a bow drawn from the hand charges + fires an arrow on release (M36, consumes
 an Arrow; full draw hits harder), RMB-hold a FOOD item (raw meat / rotten flesh)
 eats it over ~1.6 s when hunger isn't full (M37, restores hunger/saturation,
-consumes one), LMB hold-to-break in walk (crack overlay, drops pop
+consumes one), RMB an animal with its breed item in hand (wheat=cow/sheep,
+carrot=pig, seeds=chicken) feeds it (M38 — adults enter love mode + pair up into
+a baby, babies grow up faster; consumes one), LMB hold-to-break in walk (crack overlay, drops pop
 out as item entities and vacuum into the inventory; tools dig faster,
 stone needs a pickaxe to drop) / instant pop in fly (creative-style, no
 drops), RMB place (consumes one) or use a crafting table (opens its
@@ -2733,18 +2751,95 @@ RECOMMENDED ORDER:
    the M36 section above). The shared `EntityManager::Arrow` drives both the
    skeleton's ranged bow AI and the player's bow; ready to reuse for
    snowballs/eggs/fireballs/thrown potions.
-5. **Food/eating** (vanilla `ItemFood`) ✅ CODE COMPLETE (see the M37 section).
-   RMB-hold-to-eat restores the M30 hunger/saturation; the M32/M34 meat drops are
-   now edible. The **breeding + baby animals** payoff is the NEXT milestone — feed
-   two adults a food → love mode → a scaled-down child (the M34 `modelScale` hook
-   is the baby-size lever); pairs with farming. ← NEXT.
+5. **Food/eating** (vanilla `ItemFood`) ✅ DONE + USER-VERIFIED (M37 section).
+   **Breeding + baby animals** ✅ CODE COMPLETE (M38 section): feed two adults
+   their breed item → love mode → a half-scale child (the M34 `modelScale` hook is
+   the baby-size lever); baby grows up on a timer; baby state persists. Pairs with
+   a future farming milestone (which would give the breed items a real source).
 6. **Bespoke movers** as desired: spider climbing, slime splitting, enderman
-   teleport, bats.
+   teleport, bats. ← roughly NEXT (or a FARMING milestone — crops would give
+   wheat/carrot/seeds an in-world source beyond the creative palette).
 
 TWO SMALL GENERALIZATIONS to slip in during step 2 — both ✅ DONE in M34 (see the
 M34 section): `World::SpawnMobs` (now in game/src/entity/Mob.cpp) is data-driven
 via `MobDef::spawnRule` + `spawnWeight`, and the mob render path folds in
 `MobDef::modelScale` (the baby/slime size multiplier hook, all 1.0 today).
+
+## M38 — Breeding + baby animals (how it works)
+
+DONE and USER-VERIFIED 2026-06-18 ("that works"). Roadmap step 5's PAYOFF —
+feed two adult animals → love mode → a scaled-down child; the M34 `modelScale`
+hook is the baby-size lever. Decisions confirmed with the user before coding:
+vanilla per-species breed items (NOT a universal item), uniform half-scale babies
+(NOT vanilla big-head proportions), and PERSIST baby + grow state across reload.
+Built on the M37 food milestone + the M32/M34 mob framework. No new world needed.
+RE-IMPORT on this machine: `import_mc_assets.py` (3 new atlas tiles → 121 layers).
+
+- BREED ITEMS (`item/Item.h/.cpp`, sprite tiles 118 wheat / 119 carrot / 120
+  seeds — appended after the M37 cooked foods; BOTH atlas scripts grew the same 3
+  tiles, gen_textures.py placeholders + import_mc_assets.py real art:
+  `wheat.png`/`carrot.png`/`seeds_wheat.png`). Plain NON-FOOD sprites for now
+  (vanilla carrot edibility waits for farming; non-food also means RMB-feeding
+  never collides with the M37 hold-to-eat gate — that gate only fires on
+  `IsFood`). The creative palette auto-lists them. They have no in-world source
+  yet (farming milestone) — grab them from the palette.
+- WHICH ITEM BREEDS WHAT (`Mob.cpp` `IsBreedingFood(type, item)` — a runtime-id
+  switch like `MobDrops`, NOT a `MobDef` field since item ids are runtime):
+  wheat → cow + sheep, carrot → pig, seeds → chicken (vanilla 1.12). Hostiles +
+  any non-breed item return false → RMB falls through.
+- MOB STATE (`Mob.h`, runtime + persisted split): `baby` (renders at
+  `kBabyModelScale` 0.5, can't breed/lay eggs), `growUpTimer` (ticks to
+  adulthood, vanilla 24000 = 20 min), `loveTimer` (>0 = adult in love seeking a
+  mate, vanilla 600 = 30 s), `breedCooldown` (post-mating lockout, vanilla 6000 =
+  5 min). Tuning constants live in `Mob.h` (`kBabyGrowUpTicks` etc).
+- FEED (`GameApp::TryFeedMob`, in the RMB place chain right after `TryIgnite`,
+  mirrors `TryShearSheep`: gate on the held breed item → raycast a mob → reject if
+  a block target is nearer): calls `EntityManager::FeedMob(index, item)`, which —
+  for an ADULT not in love + off cooldown → sets `loveTimer` (love mode); for a
+  BABY → speeds growth 10% (`growUpTimer -= kBabyGrowUpTicks/10`); else returns
+  false (no consume, RMB falls through). On accept GameApp consumes one, swings,
+  and plays the eat munch (`Sounds::PlayEat`) at the animal.
+- MATING (`TickMobs`, a new AI branch between hostile-chase and wander): an adult
+  with `loveTimer > 0` scans for the nearest same-species adult also in love +
+  off cooldown within 8 blocks, walks to it (full chase speed), and when within
+  1.6 blocks queues a baby at the midpoint, zeroes both `loveTimer`s, and arms
+  both `breedCooldown`s. Babies are DEFERRED to after the loop (like creeper
+  detonations) because `SpawnMob` push_backs into `m_mobs` and could realloc the
+  `mob&`. Setting the partner's `loveTimer = 0` by index means the loop won't
+  double-breed it later the same tick.
+- BABY GROW-UP / RENDER: the per-mob timer decrements sit with the other tick
+  decrements (so they run even when the AI freezes on an unloaded chunk); at 0 the
+  baby flips to adult. The render path folds the baby 0.5 into the same
+  feet-anchored scale as `MobDef::modelScale` (offset translate is applied AFTER
+  the scale, so the smaller body still stands on the ground).
+- PERSISTENCE (`WorldSave` `MobRecord` + mobs.dat): `baby` + `growUpTimer` are
+  APPENDED to each mob line. `ReadMobs` now parses LINE-BY-LINE (getline +
+  istringstream) so a pre-M38 6-field line still loads, defaulting to an adult —
+  savetest covers both the baby round-trip AND the pre-M38 back-compat read.
+  love/cooldown are runtime-only by design (a reloaded animal forgets it was
+  courting), like the M34 sheared/egg state.
+- TESTABILITY: debug key `H` spawns a baby cow ahead (verify the half-scale render
+  + grow-up without breeding). Grab wheat/carrot/seeds (64-stacks) from the
+  creative palette. Grow a baby fast by feeding it ~10 times (10%/feed) rather
+  than waiting 20 min.
+- KNOWN M38 LIMITS / deferrals: NO heart particles / XP orbs on breeding (the
+  baby appearing + the eat sound are the feedback — hearts want a particle-sheet
+  tile, backlog); babies keep the ADULT collision/raycast AABB (the model is half
+  but the hitbox isn't — simpler, slightly generous to click); uniform half-scale,
+  not vanilla's big-head baby proportions; one passive cap of 8 still applies, so
+  a crowded pen won't breed past it.
+
+WHAT THE USER SHOULD TEST (NO new world; re-run `import_mc_assets.py` first for
+the breed-item sprites): press `H` → a tiny half-size baby cow drops in and ambles
+(verify it stands on the ground, legs trot). From the creative palette grab WHEAT,
+spawn two adult cows (`V` twice), hold wheat and RMB each cow → munch sound, item
+count drops; the two cows walk toward each other and a BABY cow pops out between
+them; feeding either again right away does nothing (5-min cooldown). RMB the baby
+with wheat ~10 times → it grows to full size. Repeat the pairing with SEEDS on two
+chickens (`M` spawns a chicken) and CARROT on two pigs (`B` spawns a pig). Feeding
+the WRONG item (seeds to a cow) does nothing + isn't consumed. Quit + re-enter → a
+baby you left is still a baby (and still aging). Eating still works normally for
+real food (cooked meat) since breed items aren't food.
 
 ## M37 — Food / eating (how it works)
 
@@ -2819,10 +2914,13 @@ polish). M32 deferrals: zombie daylight burning (sky-exposure check +
 per-mob fire timer + flame visuals on the model); hard player↔mob
 collision (M32 uses a soft mob-side push, so you can shove through a
 mob); smarter mob pathing (A*/jump-over-gap instead of straight-line +
-auto-step); more mobs (variants/babies, breeding — the next milestone). M37
-follow-ups: farmed foods (apple/bread/crops — pair with a farming milestone),
-and the rotten-flesh hunger / raw-chicken food-poison debuffs once a
-status-effect system exists.
+auto-step); more mobs (bespoke movers — spider climb / slime split / enderman
+teleport — roadmap step 6). M37/M38 follow-ups: farmed foods +
+crops (apple/bread/wheat/carrot/seeds growth — a FARMING milestone would give
+the M38 breed items a real in-world source instead of the creative palette);
+the rotten-flesh hunger / raw-chicken food-poison debuffs once a status-effect
+system exists; breeding hearts + XP orbs (need a particle-sheet tile);
+smaller baby hitboxes + vanilla big-head baby proportions.
 
 ## How to verify (working agreement — reinforced 2026-06-13)
 

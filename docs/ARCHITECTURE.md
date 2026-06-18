@@ -373,8 +373,21 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   only while actually eating (so blocks still use at full hunger), and is
   walk-only (fly is creative). New sounds: `random/eat1..3` + `random/burp`.
   Deferred: rotten-flesh hunger/poison + raw-chicken food poisoning (need a
-  status-effect system); farmed foods (apple/bread/crops — pair with farming);
-  baby animals + breeding (the next milestone, roadmap step 5's payoff).
+  status-effect system); farmed foods (apple/bread/crops — pair with farming).
+- **M38 — Breeding + baby animals (roadmap step 5's payoff)** ✅: three breeding
+  items (wheat tile 118 / carrot 119 / seeds 120 — plain non-food sprites, in the
+  creative palette; vanilla pairings via `IsBreedingFood`: wheat → cow/sheep,
+  carrot → pig, seeds → chicken). RMB-feeding (`GameApp::TryFeedMob`, in the place
+  chain next to `TryShearSheep`/`TryIgnite`) puts an adult into love mode
+  (`Mob::loveTimer`); two in-love adults of the same species seek each other (a
+  new `EntityAIMate`-style branch in `TickMobs`) and spawn a half-scale baby at
+  their midpoint, then drop onto a 5-min breed cooldown. Babies (`Mob::baby`)
+  render at `kBabyModelScale` (0.5, folded into the feet-anchored model scale next
+  to `MobDef::modelScale`), can't breed or lay eggs, and grow up after 24000 ticks
+  (`growUpTimer`, sped 10% per feed). baby + grow timer PERSIST in mobs.dat
+  (appended fields, back-compatible read); love/cooldown are runtime-only. Debug:
+  `H` spawns a baby cow. Deferred: heart particles + XP orbs on breeding; smaller
+  baby hitbox (babies keep the adult AABB); vanilla big-head baby proportions.
 - **Backlog**: creative-palette CATEGORY TABS (the palette scrolls now — tabs are the vanilla
   follow-up once the item count justifies categories), stair auto-corner shapes
   (inner/outer), per-face light sampling

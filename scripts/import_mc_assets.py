@@ -306,6 +306,11 @@ def build_atlas(mc: Path, out_path: Path) -> None:
         load_tile(items / "beef_cooked.png"),
         load_tile(items / "mutton_cooked.png"),
         load_tile(items / "chicken_cooked.png"),
+        # M38 breeding items (118 wheat / 119 carrot / 120 seeds) — matches
+        # Item.cpp RegisterDefaults.
+        load_tile(items / "wheat.png"),
+        load_tile(items / "carrot.png"),
+        load_tile(items / "seeds_wheat.png"),
     ]
 
     strip = Image.new("RGBA", (TILE * len(tiles), TILE))

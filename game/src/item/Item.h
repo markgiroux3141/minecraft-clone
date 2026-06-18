@@ -146,6 +146,15 @@ extern ItemId CookedPorkchop;
 extern ItemId CookedBeef; // "steak"
 extern ItemId CookedMutton;
 extern ItemId CookedChicken;
+// M38 breeding items (plain sprites — no farming source yet, grab them from the
+// creative palette). RMB-feeding two adult animals their breed item puts them in
+// love mode and spawns a baby (see IsBreedingFood in Mob.cpp): wheat breeds
+// cow/sheep, carrot breeds pig, seeds breed chicken (vanilla). Non-food for now
+// (vanilla carrot edibility waits for a farming milestone, and keeping them
+// non-food means RMB-feeding never collides with the M37 hold-to-eat gate).
+extern ItemId Wheat;
+extern ItemId Carrot;
+extern ItemId Seeds;
 
 // The three bow_pulling_0..2 draw-frame sprite tiles (atlas 109..111). The view
 // model swaps the held bow's tile among these by draw charge (vanilla ItemBow
