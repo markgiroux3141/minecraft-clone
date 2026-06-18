@@ -173,6 +173,16 @@ private:
     bool m_bowDrawing = false;
     float BowDrawProgress() const;
     void ReleaseBow();
+    // M37: RMB-hold a food item to eat it. m_eatSeconds accumulates the hold; at
+    // kEatSeconds EatHeldFood consumes one and refills hunger/saturation. While
+    // chewing, EmitEatChew fires a crunch sound + crumb particles every
+    // kEatChewInterval. EatProgress() (0..1) drives the view-model eat shake.
+    double m_eatSeconds = 0.0;
+    double m_eatChewAccum = 0.0;
+    bool m_eating = false;
+    float EatProgress() const;
+    void EatHeldFood();
+    void EmitEatChew(vc::ItemId food);
     // True when the sun is down (drives hostile spawn light gating).
     bool IsNight() const;
 

@@ -1,6 +1,24 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-18, written for a FRESH CONTEXT. M36 (PROJECTILE SYSTEM →
+Updated: 2026-06-18, written for a FRESH CONTEXT. M37 (FOOD / EATING — vanilla
+`ItemFood`, roadmap step 5's prerequisite) is now DONE and USER-VERIFIED (eating
++ furnace cooking both confirmed working) — see the "M37" section for the full
+design.
+It made the existing M32/M34 meat drops (raw porkchop/beef/mutton/chicken +
+rotten flesh) edible with vanilla 1.12 values, added COOKING (the four raw meats
+smelt in a furnace into cooked variants — cooked porkchop/steak/mutton/chicken,
+atlas tiles 114–117), and wired RMB-HOLD-to-eat: a 32-tick (1.6 s) eat with a
+chewing crunch + crumb particles, a burp on the last bite, the vanilla eat-shake
+view-model pose, and `Player::Eat` feeding the M30 hunger/saturation. The eat
+gate mirrors the M36 bow draw in `GameApp::HandleInput`. IMPORTANT after pulling:
+re-run `import_mc_assets.py` — M37 added `random/eat1..3` + `random/burp` sounds
+AND 4 atlas item tiles (cooked foods 114–117, atlas is 118 layers now),
+already imported on this machine. The NEXT milestone is the
+roadmap step 5 PAYOFF: BREEDING + BABY ANIMALS (the M34 `modelScale` hook is the
+baby-size lever; feed-with-food → love mode → spawn a scaled-down child) — see
+the "Mob & enemy roadmap" section.
+
+M36 (PROJECTILE SYSTEM →
 SKELETON + player bow/arrows, roadmap step 4) is now DONE and USER-VERIFIED
 (skeleton renders + aims + holds a visible bow, arrows fly/stick/hurt, the player
 bow draws + fires, the skeleton is catchable) — see the "M36" section for the
@@ -126,7 +144,9 @@ world time (debug), G spawns/despawns the debug Steve (M31), B/C spawn a
 debug pig/zombie ~3 blocks ahead (M32), V/N/M spawn a debug cow/sheep/chicken
 (M34), K spawns a debug creeper (M35), J spawns a debug skeleton (M36), RMB-hold
 with a bow drawn from the hand charges + fires an arrow on release (M36, consumes
-an Arrow; full draw hits harder), LMB hold-to-break in walk (crack overlay, drops pop
+an Arrow; full draw hits harder), RMB-hold a FOOD item (raw meat / rotten flesh)
+eats it over ~1.6 s when hunger isn't full (M37, restores hunger/saturation,
+consumes one), LMB hold-to-break in walk (crack overlay, drops pop
 out as item entities and vacuum into the inventory; tools dig faster,
 stone needs a pickaxe to drop) / instant pop in fly (creative-style, no
 drops), RMB place (consumes one) or use a crafting table (opens its
@@ -2713,7 +2733,11 @@ RECOMMENDED ORDER:
    the M36 section above). The shared `EntityManager::Arrow` drives both the
    skeleton's ranged bow AI and the player's bow; ready to reuse for
    snowballs/eggs/fireballs/thrown potions.
-5. **Food/eating → breeding + babies** (pairs with farming). ← NEXT.
+5. **Food/eating** (vanilla `ItemFood`) ✅ CODE COMPLETE (see the M37 section).
+   RMB-hold-to-eat restores the M30 hunger/saturation; the M32/M34 meat drops are
+   now edible. The **breeding + baby animals** payoff is the NEXT milestone — feed
+   two adults a food → love mode → a scaled-down child (the M34 `modelScale` hook
+   is the baby-size lever); pairs with farming. ← NEXT.
 6. **Bespoke movers** as desired: spider climbing, slime splitting, enderman
    teleport, bats.
 
@@ -2722,21 +2746,60 @@ M34 section): `World::SpawnMobs` (now in game/src/entity/Mob.cpp) is data-driven
 via `MobDef::spawnRule` + `spawnWeight`, and the mob render path folds in
 `MobDef::modelScale` (the baby/slime size multiplier hook, all 1.0 today).
 
-## Backlog (after M28)
+## M37 — Food / eating (how it works)
 
-EATING FOOD (user-requested 2026-06-18 — noticed RMB on a held food item does
-nothing): wire up vanilla `ItemFood`. Tag the food items (`ItemDef` grows
-`foodPoints` + `saturation`, and an `eat`/`isFood` flag) — raw beef/porkchop/
-mutton/chicken + rotten flesh exist now (M32/M34 drops), apple/bread/cooked
-variants come with farming + smelting-food. RMB-HOLD a food when hunger isn't
-full → a ~1.6 s eat delay (vanilla `getMaxItemUseDuration` 32 ticks) with the
-eat sound + crumb particles, then consume one and restore
-`Player::Heal`/hunger+saturation (M30 already has the hunger/saturation fields
-and regen rules — this just feeds them; rotten flesh adds the hunger/poison
-debuff later). This is roadmap step 5's "food/eating" prerequisite and makes the
-existing mob drops actually useful; pairs with farming crops. RMB-hold plumbing
-is the new piece (place/use is press-edge today) — sits in GameApp::HandleInput
-next to the bucket/shear RMB branches, gated on the held item being food.
+DONE and USER-VERIFIED 2026-06-18 (eating + furnace cooking both confirmed).
+Wires vanilla `ItemFood` onto the existing meat drops + furnace cooking. This is
+roadmap step 5's "food/eating" prerequisite; the breeding/baby payoff is the
+next milestone.
+
+- Data (`item/Item.h/.cpp`): `ItemDef` grew `food` + `foodPoints` +
+  `saturationModifier` + `alwaysEdible`. Queries `IsFood`/`FoodPoints`/
+  `FoodSaturation`/`AlwaysEdible` (FoodSaturation applies vanilla
+  `foodPoints * modifier * 2`). Tagged with 1.12 `ItemFood` values: raw
+  porkchop 3/0.3, raw beef 3/0.3, raw mutton 2/0.3, raw chicken 2/0.3, rotten
+  flesh 4/0.1 + alwaysEdible. DEFERRED (need a status-effect system): rotten
+  flesh's hunger/poison debuff, raw chicken's 30% food-poison chance.
+- Cooking (`world/Furnace.cpp`): four new `SmeltResult` rows turn each raw meat
+  into its cooked variant (cooked porkchop/steak/mutton/chicken, food values
+  8/0.8, 8/0.8, 6/0.8, 6/0.6). The cooked items are new registry items (tiles
+  114–117, appended after the M36 bone tile — added to BOTH `gen_textures.py`
+  placeholders and `import_mc_assets.py` real sprites: `*_cooked.png`). The
+  creative palette auto-lists them; any fuel cooks them like ore/sand.
+- Player (`entity/Player.h/.cpp`): `CanEat(alwaysEdible)` = not dead AND
+  (foodLevel<20 OR alwaysEdible); `Eat(points, saturation)` is vanilla
+  `FoodStats.addStats` — hunger up to 20, then saturation tops up clamped to the
+  new food level. Feeds the M30 fields directly; natural regen already runs off
+  them.
+- Input (`GameApp::HandleInput`): an eat gate right after the M36 bow gate. While
+  RMB is held on a food the player can eat (walk-only — fly is creative),
+  `m_eatSeconds` accumulates; at `kEatSeconds` (1.6 s = 32 ticks) `EatHeldFood`
+  consumes one, calls `Player::Eat`, and burps. Owns RMB (early `return`) ONLY
+  while actually eating, so right-clicking a block with food at full hunger still
+  uses the block (CanEat gates out → falls through to the place chain). Every
+  `kEatChewInterval` (0.30 s) `EmitEatChew` fires a crunch + crumb burst.
+  `EatProgress()` (0..1) feeds the view model via the shared `SetUseProgress`
+  (max of bow draw + eat — only one is ever non-zero).
+- Feedback: `Sounds::PlayEat` (`random/eat1..3`, per bite) + `PlayBurp`
+  (`random/burp`, last bite); `Particles::SpawnEatCrumbs(world, mouth, tile)` — a
+  5-crumb downward burst textured from the food's SPRITE tile (an atlas layer,
+  not a BlockId, so it bypasses the block-faced `Spawn`). The view model adds the
+  vanilla EAT transform (chewing bob + swing-to-mouth) keyed on
+  `IsFood(displayId)`. New sounds added to `import_mc_assets.py want_sound`
+  (`random/eat1..3`, `random/burp`) — already imported here.
+
+What the user should test: hold a raw meat / rotten flesh on the hotbar, take
+some damage or sprint to drop hunger below full, then RMB-HOLD → the food shakes
+up to the mouth, you hear chewing + see crumbs, ~1.6 s later a burp and the
+hunger bar refills + one item is consumed; releasing early cancels with no
+consume; at FULL hunger RMB does nothing for normal meat but rotten flesh still
+eats (alwaysEdible); right-clicking a crafting table with food in hand at full
+hunger still opens it; eating doesn't work in fly mode. Quit + re-enter → the
+restored hunger/food persists (M30 vitals save). COOKING: put raw meat in a
+furnace input slot + any fuel → after ~10 s out comes the cooked variant; the
+cooked meats restore more hunger than raw and appear in the creative palette.
+
+## Backlog (after M28)
 
 With the M24 meta layer + M23 model stream + M28's partial collision all in
 place, the natural follow-ons are STAIR AUTO-CORNERS (inner/outer shapes when
@@ -2756,8 +2819,10 @@ polish). M32 deferrals: zombie daylight burning (sky-exposure check +
 per-mob fire timer + flame visuals on the model); hard player↔mob
 collision (M32 uses a soft mob-side push, so you can shove through a
 mob); smarter mob pathing (A*/jump-over-gap instead of straight-line +
-auto-step); more mobs (variants/babies, breeding); food/eating so the
-porkchop/rotten-flesh drops (and farming crops) actually restore hunger.
+auto-step); more mobs (variants/babies, breeding — the next milestone). M37
+follow-ups: farmed foods (apple/bread/crops — pair with a farming milestone),
+and the rotten-flesh hunger / raw-chicken food-poison debuffs once a
+status-effect system exists.
 
 ## How to verify (working agreement — reinforced 2026-06-13)
 

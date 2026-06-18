@@ -407,6 +407,17 @@ void Player::Heal(float amount) {
     }
 }
 
+bool Player::CanEat(bool alwaysEdible) const {
+    return !m_dead && (m_foodLevel < 20 || alwaysEdible);
+}
+
+void Player::Eat(int foodPoints, float saturation) {
+    // Vanilla FoodStats.addStats: hunger up to 20, then saturation tops up but
+    // never exceeds the new food level.
+    m_foodLevel = std::min(m_foodLevel + foodPoints, 20);
+    m_saturation = std::min(m_saturation + saturation, static_cast<float>(m_foodLevel));
+}
+
 float Player::AbsorbArmor(float amount, bool bypassArmor) {
     if (bypassArmor || m_armorDefense <= 0.0f) {
         return amount;

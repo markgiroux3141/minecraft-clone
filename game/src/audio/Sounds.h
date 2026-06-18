@@ -72,6 +72,8 @@ public:
     void PlayExplosion(const glm::vec3& pos);    // M35: TNT/creeper boom
     void PlayCreeperPrime(const glm::vec3& pos); // M35: creeper fuse hiss
     void PlayBowShoot(const glm::vec3& pos);     // M36: bow release (player + skeleton)
+    void PlayEat(const glm::vec3& pos);          // M37: a chewing crunch (per bite)
+    void PlayBurp(const glm::vec3& pos);         // M37: the burp on the last bite
 
     // --- Looping furnace crackle (one voice per lit furnace) ----------------
     // Reconciles the live voices against the world's currently-lit furnaces:
@@ -132,6 +134,8 @@ private:
     ClipSet m_explode{};    // random/explode* (M35 TNT/creeper boom)
     ClipSet m_creeperFuse{}; // random/fuse (M35 creeper prime hiss)
     ClipSet m_bow{};         // random/bow (M36 bow release)
+    ClipSet m_eat{};         // random/eat1..3 (M37 chewing crunch)
+    vox::ClipHandle m_burp{};// random/burp (M37 finished eating)
     vox::ClipHandle m_pop{};
     vox::ClipHandle m_fireLoop{};
     // Music is decoded on demand (one track at a time), so we keep paths, not

@@ -14,6 +14,19 @@ ItemStack SmeltResult(ItemId id) {
     if (id == blocks::Cobblestone) {
         return {blocks::Stone, 1};
     }
+    // M37: smelt raw meat into its cooked variant.
+    if (id == items::RawPorkchop) {
+        return {items::CookedPorkchop, 1};
+    }
+    if (id == items::RawBeef) {
+        return {items::CookedBeef, 1};
+    }
+    if (id == items::RawMutton) {
+        return {items::CookedMutton, 1};
+    }
+    if (id == items::RawChicken) {
+        return {items::CookedChicken, 1};
+    }
     return {};
 }
 

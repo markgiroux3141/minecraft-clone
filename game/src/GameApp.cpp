@@ -30,6 +30,10 @@ namespace {
 constexpr int kWorldSeed = 1337; // default for saves whose manifest lacks one
 constexpr float kReachDistance = 5.0f;
 constexpr double kEditRepeatDelay = 0.25; // held-button repeat, seconds
+// M37: vanilla getMaxItemUseDuration is 32 ticks (1.6 s) to eat a food, with a
+// chewing crunch + crumb particles emitted every few ticks during the hold.
+constexpr double kEatSeconds = 1.6;
+constexpr double kEatChewInterval = 0.30;
 
 // M28: which half a slab/stair takes when placed (vanilla BlockSlab/
 // BlockStairs rule): top if you clicked a downward face, bottom if you
@@ -704,6 +708,13 @@ float GameApp::BowDrawProgress() const {
     return std::min(f, 1.0f);
 }
 
+float GameApp::EatProgress() const {
+    if (!m_eating) {
+        return 0.0f;
+    }
+    return std::min(static_cast<float>(m_eatSeconds / kEatSeconds), 1.0f);
+}
+
 void GameApp::ReleaseBow() {
     if (!m_world) {
         return;
@@ -749,6 +760,31 @@ void GameApp::ReleaseBow() {
     }
     m_sounds.PlayBowShoot(eye);
     m_viewModel->TriggerSwing();
+}
+
+void GameApp::EmitEatChew(vc::ItemId food) {
+    // Vanilla updateItemUse: a crunch + crumb burst every few ticks of chewing.
+    // Crumbs fall from the mouth (just below/ahead of the eye), textured from
+    // the food's sprite tile.
+    m_sounds.PlayEat(m_camera.Position());
+    if (m_particles && m_world) {
+        const glm::vec3 mouth =
+            m_camera.Position() + m_camera.Forward() * 0.4f + glm::vec3{0.0f, -0.25f, 0.0f};
+        m_particles->SpawnEatCrumbs(*m_world, mouth, vc::ItemIconTile(food));
+    }
+}
+
+void GameApp::EatHeldFood() {
+    vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
+    if (hand.Empty() || !vc::IsFood(hand.id)) {
+        return; // defensive: hand changed mid-bite
+    }
+    const vc::ItemId id = hand.id;
+    m_player.Eat(vc::FoodPoints(id), vc::FoodSaturation(id));
+    m_sounds.PlayBurp(m_camera.Position()); // vanilla entity.player.burp on the last bite
+    if (--hand.count <= 0) {
+        hand = {};
+    }
 }
 
 bool GameApp::IsNight() const {
@@ -1135,6 +1171,41 @@ void GameApp::HandleInput(double frameDt, int scroll) {
         // Switched off the bow mid-draw: cancel without firing.
         m_bowDrawing = false;
         m_bowDrawSeconds = 0.0;
+    }
+
+    // M37 eat: RMB-hold a food item to eat it (vanilla 32-tick use). Owns RMB
+    // only while actually eating, so right-clicking a block with food in hand
+    // at full hunger still uses the block (canEat gates it out, falls through).
+    // Walk-only — fly is creative, no hunger to refill.
+    {
+        const vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
+        const bool eating = !hand.Empty() && vc::IsFood(hand.id) &&
+                            m_player.GetMode() == Player::Mode::Walk &&
+                            m_player.CanEat(vc::AlwaysEdible(hand.id)) && placeDown;
+        if (eating) {
+            if (!m_eating) {
+                m_eating = true;
+                m_eatSeconds = 0.0;
+                m_eatChewAccum = 0.0;
+            }
+            m_eatSeconds += frameDt;
+            m_eatChewAccum += frameDt;
+            if (m_eatChewAccum >= kEatChewInterval) {
+                m_eatChewAccum -= kEatChewInterval;
+                EmitEatChew(hand.id); // crunch sound + crumb particles
+            }
+            if (m_eatSeconds >= kEatSeconds) {
+                EatHeldFood(); // consume one, restore hunger, burp
+                m_eating = false;
+                m_eatSeconds = 0.0;
+            }
+            m_input.placeWasDown = placeDown;
+            return; // eating owns RMB this frame; skip the place chain
+        }
+        // Released, switched away, or hunger full: cancel any in-progress eat.
+        m_eating = false;
+        m_eatSeconds = 0.0;
+        m_eatChewAccum = 0.0;
     }
 
     if (placeDown && (!m_input.placeWasDown || m_input.placeCooldown == 0.0)) {
@@ -2063,8 +2134,9 @@ void GameApp::OnRender(double alpha, double frameDt) {
                                  static_cast<int>(std::floor(eye.y)),
                                  static_cast<int>(std::floor(eye.z))};
         const uint8_t eyeLight = m_world->PackedLightAt(eyeCell);
-        // M36: feed the bow draw charge so the held bow shows its pulling frames.
-        m_viewModel->SetUseProgress(BowDrawProgress());
+        // M36/M37: feed the use charge — the bow draw shows pulling frames, a
+        // food's eat progress drives the chewing shake (only one is non-zero).
+        m_viewModel->SetUseProgress(std::max(BowDrawProgress(), EatProgress()));
         m_viewModel->Render(m_camera, m_state == State::Playing || ContainerOpen() ? alpha : 0.0,
                             {static_cast<float>(vc::ChunkLight::Sky(eyeLight)) / 15.0f,
                              static_cast<float>(vc::ChunkLight::Block(eyeLight)) / 15.0f},

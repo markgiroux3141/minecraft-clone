@@ -359,9 +359,23 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   un-enchanted), and the skeleton only backpedals when very close so a walking
   player can run it down. Debug spawn key J (skeleton). Stuck player arrows are
   collectable.
-- **Backlog**: eating food (vanilla `ItemFood` — RMB-hold to eat, restore the
-  M30 hunger/saturation; the M32/M34 meat drops exist but can't be eaten yet),
-  creative-palette CATEGORY TABS (the palette scrolls now — tabs are the vanilla
+- **M37 — Food / eating (vanilla `ItemFood`)** ✅: `ItemDef` grew
+  `food`/`foodPoints`/`saturationModifier`/`alwaysEdible`; the existing M32/M34
+  meat drops (raw porkchop/beef/mutton/chicken + rotten flesh) are now edible
+  with vanilla 1.12 values. Cooking: the four raw meats smelt in a furnace into
+  cooked variants (cooked porkchop/steak/mutton/chicken, atlas tiles 114–117,
+  bigger food values) via new `furnace::SmeltResult` rows. RMB-HOLD a food drives
+  a 32-tick (1.6 s) eat (`Player::CanEat`/`Eat` feeding the M30
+  hunger/saturation), with a per-bite chewing crunch + crumb particles
+  (`Particles::SpawnEatCrumbs`, textured from the food sprite) and a burp on the
+  last bite; the view model does the vanilla eat shake. The eat gate sits ahead
+  of the place chain in `GameApp::HandleInput` next to the bow gate, owns RMB
+  only while actually eating (so blocks still use at full hunger), and is
+  walk-only (fly is creative). New sounds: `random/eat1..3` + `random/burp`.
+  Deferred: rotten-flesh hunger/poison + raw-chicken food poisoning (need a
+  status-effect system); farmed foods (apple/bread/crops — pair with farming);
+  baby animals + breeding (the next milestone, roadmap step 5's payoff).
+- **Backlog**: creative-palette CATEGORY TABS (the palette scrolls now — tabs are the vanilla
   follow-up once the item count justifies categories), stair auto-corner shapes
   (inner/outer), per-face light sampling
   for model blocks (slab faces are flat-lit), tight selection/raycast box for

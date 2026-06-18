@@ -155,8 +155,11 @@ void ViewModel::Render(const vox::PerspectiveCamera& camera, double alpha, glm::
     const float a = static_cast<float>(alpha);
     // M36: while drawing a bow the hand steadies (no swing) so the aim reads.
     const bool drawingBow = m_displayId == items::Bow && m_useProgress > 0.0f;
-    const float sw =
-        (m_swingTicks >= 0 && !drawingBow) ? glm::mix(m_prevProgress, m_progress, a) : 0.0f;
+    // M37: while eating, the food shakes up to the mouth (vanilla EAT action).
+    const bool eating = IsFood(m_displayId) && m_useProgress > 0.0f;
+    const float sw = (m_swingTicks >= 0 && !drawingBow && !eating)
+                         ? glm::mix(m_prevProgress, m_progress, a)
+                         : 0.0f;
     const float lower = 1.0f - glm::mix(m_prevEquip, m_equip, a);
     const float sqrtSw = std::sqrt(sw);
 
@@ -202,6 +205,22 @@ void ViewModel::Render(const vox::PerspectiveCamera& camera, double alpha, glm::
         m = RotZ(m, f1 * -20.0f);
         m = RotX(m, f1 * -80.0f);
         m = RotY(m, -45.0f);
+
+        // M37 eat action (vanilla ItemRenderer.transformFirstPersonItem EAT):
+        // a vertical chewing bob plus a swing of the food up toward the mouth.
+        if (eating) {
+            const float rem = 1.0f - m_useProgress;  // vanilla count/maxDuration
+            const float f = rem * 32.0f;             // remaining ticks
+            if (m_useProgress > 0.2f) {              // vanilla f1 < 0.8
+                m = glm::translate(
+                    m, {0.0f, std::abs(std::cos(f / 4.0f * 2.0f * kPi) * 0.1f), 0.0f});
+            }
+            const float f3 = 1.0f - std::pow(rem, 27.0f);
+            m = glm::translate(m, {f3 * 0.6f, f3 * -0.5f, 0.0f});
+            m = RotY(m, f3 * 90.0f);
+            m = RotX(m, f3 * 10.0f);
+            m = RotZ(m, f3 * 30.0f);
+        }
 
         // Sprite-like blocks (plants, torches) draw as the flat
         // item/generated quad, like vanilla.

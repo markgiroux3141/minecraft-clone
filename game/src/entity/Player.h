@@ -62,6 +62,14 @@ public:
     // Extra hunger drain from actions GameApp drives (block breaking).
     void AddExhaustion(float amount);
 
+    // M37 food: true when this item can be eaten now (vanilla
+    // EntityPlayer.canEat) — hunger below full, or the food is always edible
+    // (rotten flesh). Eat applies vanilla FoodStats.addStats: refills hunger by
+    // `foodPoints` and tops up the hidden saturation buffer (clamped to the new
+    // food level). GameApp drives the RMB-hold eat timing + consumes the stack.
+    bool CanEat(bool alwaysEdible) const;
+    void Eat(int foodPoints, float saturation);
+
     // M30 hurt-camera tilt (vanilla EntityRenderer.hurtCameraEffect): the roll
     // in degrees to layer onto the camera this frame, interpolated by the
     // render alpha. Decays to 0 over the hurt window after each hit. M32 makes

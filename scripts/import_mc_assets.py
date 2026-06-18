@@ -300,6 +300,12 @@ def build_atlas(mc: Path, out_path: Path) -> None:
         load_tile(items / "bow_pulling_2.png"),
         load_tile(items / "arrow.png"),
         load_tile(items / "bone.png"),
+        # M37 cooked foods (114..117): smelt the raw meat drops in a furnace —
+        # matches Item.cpp RegisterDefaults.
+        load_tile(items / "porkchop_cooked.png"),
+        load_tile(items / "beef_cooked.png"),
+        load_tile(items / "mutton_cooked.png"),
+        load_tile(items / "chicken_cooked.png"),
     ]
 
     strip = Image.new("RGBA", (TILE * len(tiles), TILE))
@@ -342,7 +348,10 @@ def want_sound(rel: str) -> str | None:
                "random/explode1.ogg", "random/explode2.ogg", "random/explode3.ogg",
                "random/explode4.ogg", "random/fuse.ogg",
                # M36: bow release twang (player + skeleton).
-               "random/bow.ogg"):
+               "random/bow.ogg",
+               # M37: chewing crunch (eat1..3) + the burp on the last bite.
+               "random/eat1.ogg", "random/eat2.ogg", "random/eat3.ogg",
+               "random/burp.ogg"):
         return rel
     if rel.startswith("music/game/") and rel.count("/") == 2:
         return "music/" + rel.rsplit("/", 1)[1]

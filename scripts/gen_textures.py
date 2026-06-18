@@ -696,7 +696,13 @@ TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top,
          tnt_side, tnt_top, tnt_bottom, gunpowder_sprite, flint_and_steel_sprite] + [
          # M36: bow (108) + three draw frames (109..111, used by the view model) +
          # arrow (112) + bone (113), matching Item.cpp RegisterDefaults.
-         _bow(108, 4), _bow(109, 6), _bow(110, 8), _bow(111, 10), arrow_sprite, bone_sprite]
+         _bow(108, 4), _bow(109, 6), _bow(110, 8), _bow(111, 10), arrow_sprite, bone_sprite] + [
+         # M37: cooked foods (114..117) — browned blobs, smelted from the raw
+         # meat drops; matching Item.cpp RegisterDefaults.
+         _blob((150, 96, 56), 114),   # cooked porkchop
+         _blob((120, 74, 44), 115),   # cooked beef (steak)
+         _blob((158, 108, 64), 116),  # cooked mutton
+         _blob((176, 130, 78), 117)]  # cooked chicken
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:

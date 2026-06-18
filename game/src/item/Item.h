@@ -39,6 +39,15 @@ struct ItemDef {
     int defensePoints = 0;
     float armorToughness = 0.0f;
     std::string armorTexture;
+    // M37 food (vanilla 1.12 ItemFood): `food` flags an edible item; foodPoints
+    // refills hunger (2 = one drumstick), saturationModifier feeds the hidden
+    // saturation buffer (vanilla saturation gain = foodPoints * modifier * 2).
+    // alwaysEdible lets the item be eaten at full hunger (rotten flesh, the
+    // golden apple) — every other food is gated on hunger < 20.
+    bool food = false;
+    int foodPoints = 0;
+    float saturationModifier = 0.0f;
+    bool alwaysEdible = false;
 };
 
 class ItemRegistry {
@@ -65,6 +74,13 @@ bool ItemExists(ItemId id); // save-load validation
 const std::string& ItemName(ItemId id);
 uint16_t ItemIconTile(ItemId id); // sprite tile, or the block's side face
 int ItemMaxStack(ItemId id);
+
+// M37 food queries (all false/zero for non-food ids). FoodSaturation applies
+// vanilla's foodPoints * modifier * 2; AlwaysEdible gates eating at full hunger.
+bool IsFood(ItemId id);
+int FoodPoints(ItemId id);
+float FoodSaturation(ItemId id);
+bool AlwaysEdible(ItemId id);
 
 // M33 armor queries (all false/zero for non-armor ids).
 bool IsArmor(ItemId id);
@@ -124,6 +140,12 @@ extern ItemId FlintAndSteel;
 extern ItemId Bow;
 extern ItemId Arrow;
 extern ItemId Bone;
+// M37 cooked foods: smelt the raw meat drops in a furnace. Better food values
+// than the raw versions (vanilla 1.12 ItemFood).
+extern ItemId CookedPorkchop;
+extern ItemId CookedBeef; // "steak"
+extern ItemId CookedMutton;
+extern ItemId CookedChicken;
 
 // The three bow_pulling_0..2 draw-frame sprite tiles (atlas 109..111). The view
 // model swaps the held bow's tile among these by draw charge (vanilla ItemBow

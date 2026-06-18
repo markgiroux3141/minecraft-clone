@@ -61,6 +61,29 @@ int ItemMaxStack(ItemId id) {
     return 64;
 }
 
+bool IsFood(ItemId id) {
+    const ItemDef* item = ItemRegistry::Get().Find(id);
+    return item != nullptr && item->food;
+}
+
+int FoodPoints(ItemId id) {
+    const ItemDef* item = ItemRegistry::Get().Find(id);
+    return (item != nullptr && item->food) ? item->foodPoints : 0;
+}
+
+float FoodSaturation(ItemId id) {
+    const ItemDef* item = ItemRegistry::Get().Find(id);
+    if (item == nullptr || !item->food) {
+        return 0.0f;
+    }
+    return static_cast<float>(item->foodPoints) * item->saturationModifier * 2.0f;
+}
+
+bool AlwaysEdible(ItemId id) {
+    const ItemDef* item = ItemRegistry::Get().Find(id);
+    return item != nullptr && item->food && item->alwaysEdible;
+}
+
 bool IsArmor(ItemId id) {
     const ItemDef* item = ItemRegistry::Get().Find(id);
     return item != nullptr && item->armor;
@@ -140,6 +163,10 @@ ItemId FlintAndSteel = 0;
 ItemId Bow = 0;
 ItemId Arrow = 0;
 ItemId Bone = 0;
+ItemId CookedPorkchop = 0;
+ItemId CookedBeef = 0;
+ItemId CookedMutton = 0;
+ItemId CookedChicken = 0;
 ItemId FirstArmor = 0;
 
 namespace {
@@ -220,15 +247,25 @@ void RegisterDefaults() {
     LavaBucket = registry.Register(std::move(lavaBucket));
 
     // M32 mob drops (sprite tiles 69/70 — appended after the M26 bucket tiles;
-    // keep BOTH atlas scripts in sync). Sprite-only: no food value yet.
+    // keep BOTH atlas scripts in sync). M37 made these edible (vanilla 1.12
+    // ItemFood values): porkchop heals 3 / sat 0.3; rotten flesh heals 4 /
+    // sat 0.1 and is always edible (its vanilla hunger/poison debuff is
+    // deferred until a status-effect system exists).
     ItemDef porkchop;
     porkchop.name = "raw porkchop";
     porkchop.tile = 69;
+    porkchop.food = true;
+    porkchop.foodPoints = 3;
+    porkchop.saturationModifier = 0.3f;
     RawPorkchop = registry.Register(std::move(porkchop));
 
     ItemDef flesh;
     flesh.name = "rotten flesh";
     flesh.tile = 70;
+    flesh.food = true;
+    flesh.foodPoints = 4;
+    flesh.saturationModifier = 0.1f;
+    flesh.alwaysEdible = true;
     RottenFlesh = registry.Register(std::move(flesh));
 
     // M33 armor: 5 materials x 4 slots = 20 pieces (sprite tiles 71..90,
@@ -286,10 +323,21 @@ void RegisterDefaults() {
         d.tile = tile;
         return registry.Register(std::move(d));
     };
-    RawBeef = sprite("raw beef", 96);
+    // M37: edible meats (vanilla 1.12 ItemFood). Raw chicken's 30% food-poison
+    // chance is deferred until a status-effect system exists.
+    const auto foodSprite = [&](const char* name, uint16_t tile, int points, float satMod) {
+        ItemDef d;
+        d.name = name;
+        d.tile = tile;
+        d.food = true;
+        d.foodPoints = points;
+        d.saturationModifier = satMod;
+        return registry.Register(std::move(d));
+    };
+    RawBeef = foodSprite("raw beef", 96, 3, 0.3f);
     LeatherItem = sprite("leather", 97);
-    RawMutton = sprite("raw mutton", 98);
-    RawChicken = sprite("raw chicken", 99);
+    RawMutton = foodSprite("raw mutton", 98, 2, 0.3f);
+    RawChicken = foodSprite("raw chicken", 99, 2, 0.3f);
     Feather = sprite("feather", 100);
     Egg = sprite("egg", 101);
     ItemDef shears;
@@ -325,6 +373,15 @@ void RegisterDefaults() {
     Bow = registry.Register(std::move(bow));
     Arrow = sprite("arrow", 112);
     Bone = sprite("bone", 113);
+
+    // M37 cooked foods (sprite tiles 114..117 — appended after the M36 bone tile;
+    // keep BOTH atlas scripts in sync). Smelted from the raw meat drops; vanilla
+    // 1.12 ItemFood values (cooked beef/porkchop heal 8/0.8, mutton 6/0.8,
+    // chicken 6/0.6).
+    CookedPorkchop = foodSprite("cooked porkchop", 114, 8, 0.8f);
+    CookedBeef = foodSprite("steak", 115, 8, 0.8f);
+    CookedMutton = foodSprite("cooked mutton", 116, 6, 0.8f);
+    CookedChicken = foodSprite("cooked chicken", 117, 6, 0.6f);
 
     // Coal ore's drop is the coal item — its id only exists now, after
     // item registration (same late-patch pattern as stone -> cobblestone).

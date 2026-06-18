@@ -140,6 +140,35 @@ void ParticleSystem::SpawnExplosion(const World& world, const glm::vec3& center,
     }
 }
 
+void ParticleSystem::SpawnEatCrumbs(const World& world, const glm::vec3& pos, uint16_t tile) {
+    // Vanilla ItemRenderer.spawnItemParticles per bite: a handful of crumbs
+    // pushed out then nudged downward, textured from the food's sprite tile.
+    const glm::ivec3 lightCell{static_cast<int>(std::floor(pos.x)),
+                               static_cast<int>(std::floor(pos.y)),
+                               static_cast<int>(std::floor(pos.z))};
+    const uint8_t packed = world.PackedLightAt(lightCell);
+    const glm::vec2 light{static_cast<float>(ChunkLight::Sky(packed)) / 15.0f,
+                          static_cast<float>(ChunkLight::Block(packed)) / 15.0f};
+    for (int i = 0; i < 5; ++i) {
+        if (m_particles.size() >= kMaxParticles) {
+            return;
+        }
+        Particle p;
+        p.pos = pos;
+        p.prevPos = pos;
+        // Small scatter, biased downward so crumbs drop off the chin.
+        p.vel = glm::vec3{(Rand01() * 2.0f - 1.0f) * 1.5f, Rand01() * 1.0f - 1.5f,
+                          (Rand01() * 2.0f - 1.0f) * 1.5f};
+        p.size = 0.1f * (Rand01() * 0.5f + 0.5f);
+        p.u0 = Rand01() * 0.75f;
+        p.v0 = Rand01() * 0.75f;
+        p.tile = tile;
+        p.maxAge = static_cast<int>(4.0f / (Rand01() * 0.9f + 0.1f));
+        p.light = light;
+        m_particles.push_back(p);
+    }
+}
+
 void ParticleSystem::Tick(const World& world) {
     const auto moveAxis = [&](Particle& p, int axis, float delta) {
         if (delta == 0.0f) {

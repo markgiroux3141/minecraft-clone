@@ -36,6 +36,11 @@ public:
     // with the blast size. The boom sound is GameApp's; this is the visual puff.
     void SpawnExplosion(const World& world, const glm::vec3& center, float size);
 
+    // M37 eat crumbs: a small burst falling from the player's mouth while eating
+    // (vanilla ParticleItemPie), textured from the food's sprite tile (an atlas
+    // layer, not a block) — so it takes the tile directly rather than a BlockId.
+    void SpawnEatCrumbs(const World& world, const glm::vec3& pos, uint16_t tile);
+
     void Tick(const World& world); // 20 TPS, alongside the entity ticks
 
     void Render(const vox::PerspectiveCamera& camera, double alpha, float sunLight,

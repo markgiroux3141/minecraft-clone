@@ -103,6 +103,9 @@ void GameSounds::Load(vox::AudioEngine& audio) {
     }
     // M35: TNT/creeper boom (random/explode1..4).
     m_explode = LoadSet("random", "explode", 4);
+    // M37: chewing crunch (random/eat1..3, numbered) + the burp (unnumbered).
+    m_eat = LoadSet("random", "eat", 3);
+    m_burp = audio.LoadClip(vox::assets::Resolve("mc/sounds/random/burp.ogg"));
 
     m_pop = audio.LoadClip(vox::assets::Resolve("mc/sounds/random/pop.ogg"));
     m_fireLoop = audio.LoadClip(vox::assets::Resolve("mc/sounds/fire/fire.ogg"));
@@ -245,6 +248,18 @@ void GameSounds::PlayBowShoot(const glm::vec3& pos) {
     if (!m_audio || !m_bow.count) return;
     // Vanilla ENTITY_ARROW_SHOOT: the twang, pitched up a touch with jitter.
     m_audio->Play3D(Pick(m_bow), pos, vox::AudioBus::Sfx, 1.0f, Jitter(1.0f, 0.15f));
+}
+
+void GameSounds::PlayEat(const glm::vec3& pos) {
+    if (!m_audio || !m_eat.count) return;
+    // Vanilla ENTITY_GENERIC_EAT: a chewing crunch per bite, randomly pitched.
+    m_audio->Play3D(Pick(m_eat), pos, vox::AudioBus::Sfx, 0.5f, Jitter(1.0f, 0.2f));
+}
+
+void GameSounds::PlayBurp(const glm::vec3& pos) {
+    if (!m_audio || !m_burp) return;
+    // Vanilla ENTITY_PLAYER_BURP: pitch 0.9 + small jitter on the last bite.
+    m_audio->Play3D(m_burp, pos, vox::AudioBus::Sfx, 0.5f, Jitter(0.9f, 0.1f));
 }
 
 vox::VoiceHandle GameSounds::StartFurnaceLoop(const glm::vec3& blockCenter) {
