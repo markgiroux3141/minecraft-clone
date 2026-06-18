@@ -76,7 +76,17 @@ public:
     // state the caller set (the entity pass uses cull off).
     void Render(Shader& shader, const glm::mat4& modelToWorld, int skinUnit = 1) const;
 
+    // The accumulated world transform of one part (modelToWorld * the chain of
+    // pivot/rotation matrices up the parent tree) — used to hang a separate item
+    // on an animated joint, e.g. the bow in the skeleton's hand (M36). Returns
+    // modelToWorld for an invalid index.
+    glm::mat4 PartTransform(int part, const glm::mat4& modelToWorld) const;
+
 private:
+    // Forward pass computing every part's accumulated transform (parents precede
+    // children, so one pass suffices). Shared by Render + PartTransform.
+    std::vector<glm::mat4> AccumulateTransforms(const glm::mat4& modelToWorld) const;
+
     struct Part {
         std::string name;
         glm::vec3 pivot{0.0f};

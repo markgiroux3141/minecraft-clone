@@ -11,6 +11,7 @@ void EntityManager::Tick() {
     TickFallingBlocks();
     TickItemEntities();
     TickPrimedTnt();
+    TickArrows();
 }
 
 void EntityManager::SettleFallingBlocks() {

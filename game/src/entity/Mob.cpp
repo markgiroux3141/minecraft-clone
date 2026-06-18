@@ -26,6 +26,7 @@ std::vector<MobDrop> MobDrops(MobType type, bool sheared) {
     }
     case MobType::Chicken: return {{items::RawChicken, 1, 1}, {items::Feather, 0, 2}};
     case MobType::Creeper: return {{items::Gunpowder, 0, 2}}; // only if killed before it blows
+    case MobType::Skeleton: return {{items::Arrow, 0, 2}, {items::Bone, 0, 2}};
     default: return {};
     }
 }
@@ -38,6 +39,7 @@ const char* MobSoundFolder(MobType type) {
     case MobType::Sheep: return "sheep";
     case MobType::Chicken: return "chicken";
     case MobType::Creeper: return "creeper";
+    case MobType::Skeleton: return "skeleton";
     default: return "pig";
     }
 }
@@ -323,7 +325,44 @@ void EntityManager::TickMobs(const MobTickCtx& ctx) {
         const glm::vec3 toPlayer = playerFeet - mob.pos;
         const float distXZ = std::sqrt(toPlayer.x * toPlayer.x + toPlayer.z * toPlayer.z);
         bool chasing = false;
-        if (def.hostile && distXZ <= def.followRange) {
+        bool rangedRetreat = false; // skeleton backpedalling (slower than its approach)
+        mob.aiming = false;
+        if (def.ranged && distXZ <= def.followRange && distXZ > 1e-3f) {
+            // M36 skeleton: keep distance + shoot. Face the player, approach to
+            // within bowRange, back away when much closer, hold otherwise; fire a
+            // player-targeting arrow every shootInterval ticks when there's a
+            // clear line of sight (vanilla EntityAIAttackRangedBow).
+            chasing = true; // chase speed for the approach
+            const glm::vec2 toXZ = glm::normalize(glm::vec2{toPlayer.x, toPlayer.z});
+            mob.yaw = std::atan2(toPlayer.z, toPlayer.x);
+            // Vanilla EntityAIAttackRangedBow: approach when beyond bow range,
+            // only back away when the player gets very close (~25% of range),
+            // hold/strafe otherwise. Backpedal at a reduced speed so a walking
+            // player (4.3 b/s vs the skeleton's 3.4) can run it down.
+            if (distXZ > def.bowRange) {
+                mob.moving = true;
+                wish = toXZ;
+            } else if (distXZ < def.bowRange * 0.3f) {
+                mob.moving = true;
+                wish = -toXZ;
+                rangedRetreat = true;
+            }
+            const glm::vec3 eye = mob.pos + glm::vec3{0.0f, def.height * 0.9f, 0.0f};
+            const glm::vec3 aim =
+                playerFeet + glm::vec3{0.0f, ctx.playerHeight * 0.33f, 0.0f};
+            const glm::vec3 los = aim - eye;
+            const float losLen = glm::length(los);
+            const bool clear =
+                losLen < 1e-3f || !m_world.RaycastBlocks(eye, los / losLen, losLen).has_value();
+            mob.aiming = clear;
+            if (mob.shootCooldown > 0) {
+                --mob.shootCooldown;
+            }
+            if (clear && mob.shootCooldown <= 0) {
+                ShootArrowAt(eye, aim);
+                mob.shootCooldown = def.shootInterval;
+            }
+        } else if (def.hostile && distXZ <= def.followRange) {
             // Walk straight at the player (simple ground pathing; auto-step
             // handles 1-block rises).
             chasing = true;
@@ -351,7 +390,9 @@ void EntityManager::TickMobs(const MobTickCtx& ctx) {
         }
 
         // --- Physics: gravity + axis-separated collision with auto-step ----
-        const float speed = chasing ? def.speed : def.speed * 0.55f;
+        const float speed = rangedRetreat ? def.speed * 0.6f
+                            : chasing      ? def.speed
+                                           : def.speed * 0.55f;
         mob.vel.y = std::max(mob.vel.y - kGravity * kTickDt, -kTerminal);
         // Chicken flutter: damp the descent to 60%/tick while airborne (vanilla
         // EntityChicken.onLivingUpdate) so it drifts down instead of plummeting.
@@ -460,7 +501,7 @@ void EntityManager::TickMobs(const MobTickCtx& ctx) {
         if (def.attackDamage > 0.0f && chasing && mob.attackCooldown <= 0 &&
             distXZ <= def.halfWidth + ctx.playerHalfWidth + 0.7f &&
             std::abs(toPlayer.y) < 2.0f && ctx.damagePlayer) {
-            ctx.damagePlayer(def.attackDamage, mob.pos);
+            ctx.damagePlayer(def.attackDamage, mob.pos, 1.0f); // full melee knockback
             mob.attackCooldown = 20; // ~1 s between swings
         }
 
@@ -630,6 +671,26 @@ void EntityManager::SpawnMobs(const MobTickCtx& ctx) {
                         static_cast<float>(wz) + 0.5f});
         return; // one spawn per sweep
     }
+}
+
+void EntityManager::ShootArrowAt(const glm::vec3& from, const glm::vec3& target) {
+    // Vanilla EntitySkeleton.attackEntityWithRangedAttack: aim at the target with
+    // an upward arc (+ horizontalDist * 0.2) so the arrow drops onto the player,
+    // plus a little inaccuracy.
+    const glm::vec3 d = target - from;
+    const float horiz = std::sqrt(d.x * d.x + d.z * d.z);
+    glm::vec3 dir{d.x, d.y + horiz * 0.2f, d.z};
+    const float len = glm::length(dir);
+    if (len < 1e-4f) {
+        return;
+    }
+    dir /= len;
+    dir += glm::vec3{(MobRand01() - 0.5f) * 0.06f, (MobRand01() - 0.5f) * 0.06f,
+                     (MobRand01() - 0.5f) * 0.06f};
+    dir = glm::normalize(dir);
+    constexpr float kArrowSpeed = 1.6f * 20.0f; // vanilla 1.6 b/tick -> b/s
+    SpawnArrow(from, dir * kArrowSpeed, ArrowOwner::Mob, 2.0f, false);
+    m_mobSounds.push_back({MobType::Skeleton, from, 4}); // bow shoot
 }
 
 } // namespace vc

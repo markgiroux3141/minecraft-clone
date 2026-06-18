@@ -15,9 +15,9 @@ constexpr float kPi = glm::pi<float>();
 constexpr float kDegToRad = kPi / 180.0f;
 } // namespace
 
-HumanoidModel::HumanoidModel(std::string skinRel, bool zombiePose, float inflate, float texW,
-                             float texH, bool includeHat)
-    : m_zombiePose(zombiePose) {
+HumanoidModel::HumanoidModel(std::string skinRel, Pose pose, float inflate, float texW, float texH,
+                             bool includeHat, bool thinArms)
+    : m_pose(pose) {
     using Box = vox::BoxModel::Box;
     // Vanilla ModelBiped boxes (pixels, Y-down model space). The origin is
     // part-local (relative to the pivot/rotationPoint). Pivots and texture
@@ -31,14 +31,26 @@ HumanoidModel::HumanoidModel(std::string skinRel, bool zombiePose, float inflate
     m_head = m_model.AddPart("head", {0.0f, 0.0f, 0.0f}, headBoxes);
     m_body = m_model.AddPart("body", {0.0f, 0.0f, 0.0f},
                              {Box{{-4, 0, -2}, {8, 12, 4}, {16, 16}, inflate, false}});
-    m_rightArm = m_model.AddPart("rightArm", {-5.0f, 2.0f, 0.0f},
-                                 {Box{{-3, -2, -2}, {4, 12, 4}, {40, 16}, inflate, false}});
-    m_leftArm = m_model.AddPart("leftArm", {5.0f, 2.0f, 0.0f},
-                                {Box{{-1, -2, -2}, {4, 12, 4}, {40, 16}, inflate, true}});
-    m_rightLeg = m_model.AddPart("rightLeg", {-1.9f, 12.0f, 0.0f},
-                                 {Box{{-2, 0, -2}, {4, 12, 4}, {0, 16}, inflate, false}});
-    m_leftLeg = m_model.AddPart("leftLeg", {1.9f, 12.0f, 0.0f},
-                                {Box{{-2, 0, -2}, {4, 12, 4}, {0, 16}, inflate, true}});
+    if (thinArms) {
+        // Vanilla ModelSkeleton: 2px-thick arms/legs (the brittle bones look).
+        m_rightArm = m_model.AddPart("rightArm", {-5.0f, 2.0f, 0.0f},
+                                     {Box{{-1, -2, -1}, {2, 12, 2}, {40, 16}, inflate, false}});
+        m_leftArm = m_model.AddPart("leftArm", {5.0f, 2.0f, 0.0f},
+                                    {Box{{-1, -2, -1}, {2, 12, 2}, {40, 16}, inflate, true}});
+        m_rightLeg = m_model.AddPart("rightLeg", {-2.0f, 12.0f, 0.0f},
+                                     {Box{{-1, 0, -1}, {2, 12, 2}, {0, 16}, inflate, false}});
+        m_leftLeg = m_model.AddPart("leftLeg", {2.0f, 12.0f, 0.0f},
+                                    {Box{{-1, 0, -1}, {2, 12, 2}, {0, 16}, inflate, true}});
+    } else {
+        m_rightArm = m_model.AddPart("rightArm", {-5.0f, 2.0f, 0.0f},
+                                     {Box{{-3, -2, -2}, {4, 12, 4}, {40, 16}, inflate, false}});
+        m_leftArm = m_model.AddPart("leftArm", {5.0f, 2.0f, 0.0f},
+                                    {Box{{-1, -2, -2}, {4, 12, 4}, {40, 16}, inflate, true}});
+        m_rightLeg = m_model.AddPart("rightLeg", {-1.9f, 12.0f, 0.0f},
+                                     {Box{{-2, 0, -2}, {4, 12, 4}, {0, 16}, inflate, false}});
+        m_leftLeg = m_model.AddPart("leftLeg", {1.9f, 12.0f, 0.0f},
+                                    {Box{{-2, 0, -2}, {4, 12, 4}, {0, 16}, inflate, true}});
+    }
 
     if (std::filesystem::exists(vox::assets::Resolve(skinRel))) {
         m_model.SetSkin(vox::Texture2D::FromFile(skinRel), texW, texH);
@@ -73,7 +85,16 @@ void HumanoidModel::SetRotationAngles(float limbSwing, float limbSwingAmount, fl
     const float leftArmX = std::cos(swing) * 2.0f * limbSwingAmount * 0.5f;
     const float idleZ = std::cos(age * 0.09f) * 0.05f + 0.05f;
     const float idleX = std::sin(age * 0.067f) * 0.05f;
-    if (m_zombiePose) {
+    if (m_pose == Pose::BowAim && m_aiming) {
+        // Vanilla ModelBiped bow-aim pose: both arms raised straight ahead
+        // (rotateAngleX ~ -pi/2), toed in toward the bow held across the body,
+        // tracking the head. Shown only while drawing (m_aiming); otherwise the
+        // skeleton falls through to the normal swing below.
+        const float headY = headYawDeg * kDegToRad;
+        const float headX = headPitchDeg * kDegToRad;
+        m_model.SetRotation(m_rightArm, {-kPi / 2.0f + headX, -0.1f + headY, 0.0f});
+        m_model.SetRotation(m_leftArm, {-kPi / 2.0f + headX, -0.4f + headY, 0.0f});
+    } else if (m_pose == Pose::Zombie) {
         // Vanilla ModelZombie: arms held straight out (rotateAngleX ~ -pi/2),
         // toed slightly inward, bobbing as it walks — the classic shamble.
         const float arm = -kPi / 2.0f + std::sin(age * 0.067f) * 0.05f;

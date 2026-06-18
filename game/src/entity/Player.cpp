@@ -465,12 +465,13 @@ float Player::ConsumeArmorWear() {
     return wear;
 }
 
-void Player::Hurt(float amount, const glm::vec3& fromPos) {
+void Player::Hurt(float amount, const glm::vec3& fromPos, float knockbackScale) {
     if (!ApplyDamage(amount)) {
         return; // dead, no-damage, or absorbed by the resist window — no knockback
     }
     // Knockback away from the source (vanilla EntityLivingBase.knockBack);
     // horizontal direction from the attacker to us, with a small upward pop.
+    // knockbackScale lets arrows hit with much less shove than melee.
     glm::vec3 away = m_position - fromPos;
     away.y = 0.0f;
     if (glm::length(away) > 1e-4f) {
@@ -478,9 +479,9 @@ void Player::Hurt(float amount, const glm::vec3& fromPos) {
     } else {
         away = {0.0f, 0.0f, 1.0f};
     }
-    m_knockback = away * kKnockback;
+    m_knockback = away * (kKnockback * knockbackScale);
     if (m_grounded) {
-        m_velocity.y = kKnockbackUp;
+        m_velocity.y = kKnockbackUp * knockbackScale;
     }
     // Directional hurt tilt: lean by which side the hit came from (sign of the
     // shove projected onto the look-right axis).

@@ -153,7 +153,10 @@ void ViewModel::Render(const vox::PerspectiveCamera& camera, double alpha, glm::
         return; // no imported skin: bare hand draws nothing (placeholder)
     }
     const float a = static_cast<float>(alpha);
-    const float sw = m_swingTicks >= 0 ? glm::mix(m_prevProgress, m_progress, a) : 0.0f;
+    // M36: while drawing a bow the hand steadies (no swing) so the aim reads.
+    const bool drawingBow = m_displayId == items::Bow && m_useProgress > 0.0f;
+    const float sw =
+        (m_swingTicks >= 0 && !drawingBow) ? glm::mix(m_prevProgress, m_progress, a) : 0.0f;
     const float lower = 1.0f - glm::mix(m_prevEquip, m_equip, a);
     const float sqrtSw = std::sqrt(sw);
 
@@ -214,12 +217,21 @@ void ViewModel::Render(const vox::PerspectiveCamera& camera, double alpha, glm::
             m = RotY(m, -90.0f);
             m = RotZ(m, 25.0f);
             m = glm::scale(m, glm::vec3{0.68f});
+            if (drawingBow) {
+                // Pull the nocked bow back toward the eye as the draw charges
+                // (the pulling_* frames carry the string animation).
+                m = glm::translate(m, glm::vec3{0.0f, 0.0f, m_useProgress * 0.30f});
+            }
         }
         m = glm::translate(m, glm::vec3{-0.5f}); // model spans 0..1, center it
 
         std::array<uint16_t, 6> tiles;
         if (block) {
             tiles = BlockRegistry::Get().Def(m_displayId).faceTiles;
+        } else if (drawingBow) {
+            // Swap to bow_pulling_0..2 by draw charge (vanilla ItemBow model).
+            const int stage = m_useProgress >= 0.9f ? 2 : (m_useProgress >= 0.65f ? 1 : 0);
+            tiles.fill(items::kBowPullingTiles[stage]);
         } else {
             tiles.fill(ItemIconTile(m_displayId));
         }

@@ -150,14 +150,10 @@ void BoxModel::Build() {
     }
 }
 
-void BoxModel::Render(Shader& shader, const glm::mat4& modelToWorld, int skinUnit) const {
-    if (m_skin) {
-        m_skin->Bind(static_cast<uint32_t>(skinUnit));
-    }
-    // Accumulate each part's transform. A part's local matrix is
-    // T(pivot) * Rz * Ry * Rx (vanilla glRotate order); children compose onto
-    // the parent's accumulated matrix. Parents precede children, so a single
-    // forward pass suffices.
+std::vector<glm::mat4> BoxModel::AccumulateTransforms(const glm::mat4& modelToWorld) const {
+    // A part's local matrix is T(pivot) * Rz * Ry * Rx (vanilla glRotate order);
+    // children compose onto the parent's accumulated matrix. Parents precede
+    // children, so a single forward pass suffices.
     std::vector<glm::mat4> full(m_parts.size());
     for (size_t i = 0; i < m_parts.size(); ++i) {
         const Part& part = m_parts[i];
@@ -168,6 +164,24 @@ void BoxModel::Render(Shader& shader, const glm::mat4& modelToWorld, int skinUni
         const glm::mat4 parent =
             part.parent < 0 ? modelToWorld : full[static_cast<size_t>(part.parent)];
         full[i] = parent * local;
+    }
+    return full;
+}
+
+glm::mat4 BoxModel::PartTransform(int part, const glm::mat4& modelToWorld) const {
+    if (part < 0 || part >= static_cast<int>(m_parts.size())) {
+        return modelToWorld;
+    }
+    return AccumulateTransforms(modelToWorld)[static_cast<size_t>(part)];
+}
+
+void BoxModel::Render(Shader& shader, const glm::mat4& modelToWorld, int skinUnit) const {
+    if (m_skin) {
+        m_skin->Bind(static_cast<uint32_t>(skinUnit));
+    }
+    const std::vector<glm::mat4> full = AccumulateTransforms(modelToWorld);
+    for (size_t i = 0; i < m_parts.size(); ++i) {
+        const Part& part = m_parts[i];
         if (part.indexCount == 0 || !part.visible) {
             continue;
         }

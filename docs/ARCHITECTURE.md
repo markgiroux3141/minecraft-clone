@@ -343,6 +343,22 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   TNT (gunpowder+sand) and flint&steel (iron+coal) recipes (atlas tiles 103–107).
   Debug spawn key K (creeper). World stays Player/audio/particle-agnostic — the
   player-damage callback + explosion/sound events are injected/drained by GameApp.
+- **M36 — Projectile system → Skeleton (+ player bow & arrows)** ✅: a shared
+  arrow entity (`EntityManager::Arrow`, game/src/entity/Projectile.cpp) ported
+  from 1.12 `EntityArrow` — gravity/drag + a per-tick swept block/entity test;
+  an `ArrowOwner` gates whom it hits (player arrows → mobs, mob arrows → the
+  player) and impact damage scales with speed. Skeleton (a new `MobDef` row with
+  `ranged` bow AI — keep distance + line-of-sight + fire on a cooldown; a thin-
+  limbed `HumanoidModel` with the new `Pose::BowAim`) drives mob arrows; the
+  player bow drives player arrows via RMB-hold-to-draw (vanilla charge curve,
+  consumes an Arrow, wears the bow, first-person pull-back frames). New content:
+  bow / arrow / bone, palette + skeleton drops only (no recipes — string/flint
+  don't exist yet), atlas tiles 108–113. `ArrowModel` + a skeleton aim pose
+  render via the entity_model shader (the skeleton holds a visible bow via
+  `HeldBowModel` at the right-arm joint). Arrows apply a small knockback (vanilla
+  un-enchanted), and the skeleton only backpedals when very close so a walking
+  player can run it down. Debug spawn key J (skeleton). Stuck player arrows are
+  collectable.
 - **Backlog**: eating food (vanilla `ItemFood` — RMB-hold to eat, restore the
   M30 hunger/saturation; the M32/M34 meat drops exist but can't be eaten yet),
   creative-palette CATEGORY TABS (the palette scrolls now — tabs are the vanilla

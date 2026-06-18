@@ -49,10 +49,12 @@ PlayerDoll::ArmorModels& PlayerDoll::Models(const std::string& material) {
     if (!m.layer1) {
         const std::string base = "mc/textures/models/armor/" + material;
         // Layer textures are 64x32 and carry no head overlay (includeHat=false).
-        m.layer1 = std::make_unique<HumanoidModel>(base + "_layer_1.png", false, 1.0f, 64.0f,
-                                                   32.0f, false);
-        m.layer2 = std::make_unique<HumanoidModel>(base + "_layer_2.png", false, 0.5f, 64.0f,
-                                                   32.0f, false);
+        m.layer1 = std::make_unique<HumanoidModel>(base + "_layer_1.png",
+                                                   HumanoidModel::Pose::Default, 1.0f, 64.0f, 32.0f,
+                                                   false);
+        m.layer2 = std::make_unique<HumanoidModel>(base + "_layer_2.png",
+                                                   HumanoidModel::Pose::Default, 0.5f, 64.0f, 32.0f,
+                                                   false);
     }
     return m;
 }

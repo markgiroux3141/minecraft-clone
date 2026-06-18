@@ -71,6 +71,7 @@ public:
     void PlayChickenEgg(const glm::vec3& pos);  // M34: egg "plop"
     void PlayExplosion(const glm::vec3& pos);    // M35: TNT/creeper boom
     void PlayCreeperPrime(const glm::vec3& pos); // M35: creeper fuse hiss
+    void PlayBowShoot(const glm::vec3& pos);     // M36: bow release (player + skeleton)
 
     // --- Looping furnace crackle (one voice per lit furnace) ----------------
     // Reconciles the live voices against the world's currently-lit furnaces:
@@ -119,7 +120,7 @@ private:
     // Per-MobType voices (mob/<folder>/{say,hurt,death}; folder from
     // MobSoundFolder). Some mobs lack a distinct hurt clip in 1.12 (pig, cow,
     // sheep, chicken reuse "say"), so PlayMobHurt falls back to the say set.
-    static constexpr int kMobVoiceCount = 6; // == MobType::Count (asserted in .cpp)
+    static constexpr int kMobVoiceCount = 7; // == MobType::Count (asserted in .cpp)
     struct MobVoice {
         ClipSet say;
         ClipSet hurt;
@@ -130,6 +131,7 @@ private:
     ClipSet m_chickenEgg{}; // mob/chicken/plop*
     ClipSet m_explode{};    // random/explode* (M35 TNT/creeper boom)
     ClipSet m_creeperFuse{}; // random/fuse (M35 creeper prime hiss)
+    ClipSet m_bow{};         // random/bow (M36 bow release)
     vox::ClipHandle m_pop{};
     vox::ClipHandle m_fireLoop{};
     // Music is decoded on demand (one track at a time), so we keep paths, not

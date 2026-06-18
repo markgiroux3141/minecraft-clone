@@ -16,7 +16,9 @@
 #include "vox/renderer/VertexArray.h"
 
 #include "InputState.h"
+#include "entity/ArrowModel.h"
 #include "entity/ChickenModel.h"
+#include "entity/HeldBowModel.h"
 #include "entity/CowModel.h"
 #include "entity/CreeperModel.h"
 #include "entity/Entity.h"
@@ -158,7 +160,19 @@ private:
     // Debug keys spawn one ahead of the player (B pig, C zombie, V cow, N sheep,
     // M chicken) so they're easy to test without waiting for natural spawns.
     std::array<std::unique_ptr<vc::IMobModel>, static_cast<size_t>(vc::MobType::Count)> m_mobModels;
+    // M36: the flying-arrow render model (shared by every arrow in flight) + the
+    // bow held in the skeleton's hand.
+    std::unique_ptr<vc::ArrowModel> m_arrowModel;
+    std::unique_ptr<vc::HeldBowModel> m_heldBow;
     void SpawnMobAhead(vc::MobType type);
+    // M36: RMB-hold a bow to draw it. m_bowDrawSeconds accumulates the hold; on
+    // release HandleBowRelease fires a player-owned arrow scaled by the draw,
+    // consuming one Arrow from the bag (free in fly/creative) and wearing the bow.
+    // BowDrawProgress() maps the hold to vanilla's 0..1 pull for the view model.
+    double m_bowDrawSeconds = 0.0;
+    bool m_bowDrawing = false;
+    float BowDrawProgress() const;
+    void ReleaseBow();
     // True when the sun is down (drives hostile spawn light gating).
     bool IsNight() const;
 

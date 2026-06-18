@@ -60,6 +60,13 @@ COPIES = [
     ("textures/entity/chicken.png", "textures/entity/chicken/chicken.png"),
     # M35 creeper skin (64x32).
     ("textures/entity/creeper/creeper.png", "textures/entity/creeper/creeper.png"),
+    # M36 skeleton skin (64x64, reuses the biped model with thin limbs) + the
+    # arrow projectile texture (32x32, sampled by the in-flight ArrowModel).
+    ("textures/entity/skeleton/skeleton.png", "textures/entity/skeleton/skeleton.png"),
+    ("textures/entity/projectiles/arrow.png", "textures/entity/projectiles/arrow.png"),
+    # The bow item sprite, copied raw so it can skin the flat bow the skeleton
+    # holds in its hand (entity_model shader, like the arrow / mob skins).
+    ("textures/items/bow_standby.png", "textures/items/bow_standby.png"),
     # Fire overlay (M30): the first-person "on fire" flames — vanilla's
     # ItemRenderer.renderFireInFirstPerson uses fire_layer_1. 16x512 vertical
     # animation strip (32 frames of 16x16); the HUD tiles a frame across the
@@ -285,6 +292,14 @@ def build_atlas(mc: Path, out_path: Path) -> None:
         load_tile(blocks / "tnt_bottom.png"),
         load_tile(items / "gunpowder.png"),
         load_tile(items / "flint_and_steel.png"),
+        # M36: bow (108 = standby art) + the three draw frames (109..111, used by
+        # the view model) + arrow (112) + bone (113) — matches Item.cpp.
+        load_tile(items / "bow_standby.png"),
+        load_tile(items / "bow_pulling_0.png"),
+        load_tile(items / "bow_pulling_1.png"),
+        load_tile(items / "bow_pulling_2.png"),
+        load_tile(items / "arrow.png"),
+        load_tile(items / "bone.png"),
     ]
 
     strip = Image.new("RGBA", (TILE * len(tiles), TILE))
@@ -318,14 +333,16 @@ def want_sound(rel: str) -> str | None:
     # music/game/<name>.ogg to music/<name>.ogg (the game loads it flat).
     for family in ("dig/", "step/", "ambient/cave/", "liquid/", "fire/", "item/bucket/",
                    "damage/", "mob/pig/", "mob/zombie/", "mob/cow/", "mob/sheep/",
-                   "mob/chicken/", "mob/creeper/"):
+                   "mob/chicken/", "mob/creeper/", "mob/skeleton/"):
         if rel.startswith(family):
             return rel
     if rel in ("random/pop.ogg", "random/glass1.ogg", "random/glass2.ogg",
                "random/glass3.ogg",
                # M35: TNT/creeper boom + the creeper fuse hiss.
                "random/explode1.ogg", "random/explode2.ogg", "random/explode3.ogg",
-               "random/explode4.ogg", "random/fuse.ogg"):
+               "random/explode4.ogg", "random/fuse.ogg",
+               # M36: bow release twang (player + skeleton).
+               "random/bow.ogg"):
         return rel
     if rel.startswith("music/game/") and rel.count("/") == 2:
         return "music/" + rel.rsplit("/", 1)[1]

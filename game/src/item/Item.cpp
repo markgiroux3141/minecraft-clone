@@ -137,6 +137,9 @@ ItemId Egg = 0;
 ItemId Shears = 0;
 ItemId Gunpowder = 0;
 ItemId FlintAndSteel = 0;
+ItemId Bow = 0;
+ItemId Arrow = 0;
+ItemId Bone = 0;
 ItemId FirstArmor = 0;
 
 namespace {
@@ -307,6 +310,21 @@ void RegisterDefaults() {
     flintAndSteel.maxStack = 1;
     flintAndSteel.maxDamage = 64; // vanilla Items.FLINT_AND_STEEL (65 uses)
     FlintAndSteel = registry.Register(std::move(flintAndSteel));
+
+    // M36 projectiles: the bow (a 384-use damageable launcher), arrow (ammo +
+    // skeleton drop), and bone (skeleton drop). Sprite tiles 108 bow / 112 arrow
+    // / 113 bone — appended after the M35 flint & steel tile (107); tiles 109..111
+    // are the bow_pulling_0..2 draw frames the view model swaps in while charging
+    // (kBowPullingTiles, NOT registered as items). Keep BOTH atlas scripts in
+    // sync. The creative palette auto-lists all three.
+    ItemDef bow;
+    bow.name = "bow";
+    bow.tile = 108;
+    bow.maxStack = 1;
+    bow.maxDamage = 384; // vanilla Items.BOW
+    Bow = registry.Register(std::move(bow));
+    Arrow = sprite("arrow", 112);
+    Bone = sprite("bone", 113);
 
     // Coal ore's drop is the coal item — its id only exists now, after
     // item registration (same late-patch pattern as stone -> cobblestone).

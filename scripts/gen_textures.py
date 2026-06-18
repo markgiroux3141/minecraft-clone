@@ -561,6 +561,38 @@ def flint_and_steel_sprite(x, y):
     return (0, 0, 0, 0)
 
 
+# M36 placeholders (real art comes from import_mc_assets.py): a bow (108) with
+# three draw frames (109..111), an arrow (112), and a bone (113).
+def _bow(salt, string_x):
+    def pixel(x, y):
+        d = (x - 12) ** 2 + (y - 8) ** 2
+        if 20 <= d <= 44 and x >= 5:  # the wooden arc
+            return speckle((120, 80, 40), x, y, salt, 8)
+        if x == string_x and 2 <= y <= 13:  # the string
+            return (210, 210, 210, 255)
+        if salt != 108 and y == 8 and string_x <= x <= 12:  # nocked shaft (pulling frames)
+            return (170, 150, 110, 255)
+        return (0, 0, 0, 0)
+
+    return pixel
+
+
+def arrow_sprite(x, y):
+    # A pale diagonal shaft tipped at the top-right.
+    if abs((x) - (15 - y)) <= 1 and 2 <= y <= 13:
+        return speckle((184, 184, 188), x, y, 112, 6)
+    return (0, 0, 0, 0)
+
+
+def bone_sprite(x, y):
+    # A white diagonal shaft with knobby ends.
+    if abs(x - y) <= 1 and 3 <= x <= 12:
+        return speckle((234, 234, 226), x, y, 113, 4)
+    if x in (2, 3, 12, 13) and y in (2, 3, 12, 13) and abs(x - y) >= 9:
+        return (234, 234, 226, 255)
+    return (0, 0, 0, 0)
+
+
 # M33 armor placeholder silhouettes (the real icons come from
 # import_mc_assets.py). Each shape is a flat material-colored stencil; the
 # four shapes mirror the equip order helmet/chestplate/leggings/boots.
@@ -661,7 +693,10 @@ TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top,
          shears_sprite] + [           # shears (102)
          # M35: TNT block (103 side / 104 top / 105 bottom) + gunpowder (106) +
          # flint & steel (107), matching Block.cpp / Item.cpp RegisterDefaults.
-         tnt_side, tnt_top, tnt_bottom, gunpowder_sprite, flint_and_steel_sprite]
+         tnt_side, tnt_top, tnt_bottom, gunpowder_sprite, flint_and_steel_sprite] + [
+         # M36: bow (108) + three draw frames (109..111, used by the view model) +
+         # arrow (112) + bone (113), matching Item.cpp RegisterDefaults.
+         _bow(108, 4), _bow(109, 6), _bow(110, 8), _bow(111, 10), arrow_sprite, bone_sprite]
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:

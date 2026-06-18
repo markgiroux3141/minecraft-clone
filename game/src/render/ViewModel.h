@@ -30,6 +30,11 @@ public:
     // (digging calls this every frame -> continuous swinging).
     void TriggerSwing() { m_swingQueued = true; }
 
+    // M36: the bow draw charge (0 = not drawing .. 1 = full pull). GameApp feeds
+    // it each frame while RMB-holding a bow; the held bow swaps to its
+    // pulling_0..2 frames and steadies (no swing) while drawing.
+    void SetUseProgress(float progress) { m_useProgress = progress; }
+
     // 20 TPS: advances swing/equip; held drives the equip-change dip.
     void Tick(const ItemStack& held);
 
@@ -52,6 +57,7 @@ private:
     // item swaps at the bottom of the dip.
     float m_equip = 0.0f, m_prevEquip = 0.0f;
     ItemId m_displayId = 0;
+    float m_useProgress = 0.0f; // M36 bow draw charge (0..1)
 };
 
 } // namespace vc

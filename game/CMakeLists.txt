@@ -8,6 +8,8 @@ add_executable(game
     src/audio/Sounds.cpp
     src/audio/Sounds.h
     # Entities (simulated bodies + their box-models)
+    src/entity/ArrowModel.cpp
+    src/entity/ArrowModel.h
     src/entity/ChickenModel.cpp
     src/entity/ChickenModel.h
     src/entity/CowModel.cpp
@@ -18,6 +20,8 @@ add_executable(game
     src/entity/EntityManager.cpp
     src/entity/EntityManager.h
     src/entity/Explosion.cpp
+    src/entity/HeldBowModel.cpp
+    src/entity/HeldBowModel.h
     src/entity/HumanoidModel.cpp
     src/entity/HumanoidModel.h
     src/entity/Mob.cpp
@@ -27,6 +31,7 @@ add_executable(game
     src/entity/PigModel.h
     src/entity/Player.cpp
     src/entity/Player.h
+    src/entity/Projectile.cpp
     src/entity/SheepModel.cpp
     src/entity/SheepModel.h
     # Items / inventory / crafting

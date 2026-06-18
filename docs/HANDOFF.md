@@ -1,11 +1,26 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-18, written for a FRESH CONTEXT. M35 (EXPLOSION SYSTEM →
+Updated: 2026-06-18, written for a FRESH CONTEXT. M36 (PROJECTILE SYSTEM →
+SKELETON + player bow/arrows, roadmap step 4) is now DONE and USER-VERIFIED
+(skeleton renders + aims + holds a visible bow, arrows fly/stick/hurt, the player
+bow draws + fires, the skeleton is catchable) — see the "M36" section for the
+full design (debug spawn key J = skeleton; grab a bow + arrows from the creative
+palette, RMB-hold to draw). It built the shared arrow entity
+(`EntityManager::Arrow` in game/src/entity/Projectile.cpp) and drives it from
+both a Skeleton mob's ranged bow AI and the player's bow. POST-VERIFY FIXES
+(2026-06-18, from the user's first look): the skeleton skin is 64x32 not 64x64
+(it was rendering as a grey blob — see the M36 section); the skeleton now holds a
+visible bow in its hand (`HeldBowModel` at the right-arm joint via
+`HumanoidModel::RightArmTransform`); and the kiting was retuned — arrows apply a
+much smaller knockback than melee (vanilla un-enchanted arrows barely shove) and
+the skeleton only backpedals when the player is very close (~30% of bow range),
+at reduced speed, so a walking player can run it down. The NEXT milestone is
+roadmap step 5: FOOD/EATING → breeding + babies — see "Mob & enemy roadmap" +
+the "Backlog" eating note. M35 (EXPLOSION SYSTEM →
 CREEPER + TNT, roadmap step 3) is now DONE and USER-VERIFIED ("it all works") —
 see the "M35" section for the full design. It built the shared
 `EntityManager::Explode` routine and drives it from both a Creeper mob and a
-primed-TNT entity. The NEXT milestone is the PROJECTILE system → Skeleton
-(+ player bow/arrows), roadmap step 4 — see "Mob & enemy roadmap". M34 (PASSIVE
+primed-TNT entity. M34 (PASSIVE
 ROSTER — cow +
 sheep + chicken) is CODE COMPLETE awaiting user verification — see the "M34"
 section for the full design + the user test checklist (debug spawn keys V = cow,
@@ -67,6 +82,12 @@ flesh 70), the pig/zombie entity skins (`entity/pig/pig.png`,
 `entity/zombie/zombie.png`), and two sound families (`mob/pig/`, `mob/zombie/`),
 so re-importing is needed for mobs to render + sound (161 sound files now). A
 clean clone with no overlay draws no mob and is silent, like the debug Steve.
+M36 added 6 atlas item tiles (bow 108, bow_pulling_0..2 109–111, arrow 112,
+bone 113 → atlas is 114 layers now), the skeleton skin
+(`entity/skeleton/skeleton.png`), the arrow projectile texture
+(`entity/projectiles/arrow.png`), the `mob/skeleton/` sound family, and the
+`random/bow.ogg` shoot twang — so the same re-import pulls those (a clean clone
+with no overlay draws no skeleton / no arrow and is silent for the bow).
 
 IMPORTANT RESOURCE: the user has Minecraft's Java source (MCP 9.40 =
 1.12) at `D:\Minecraft source code` — look up exact game dynamics there
@@ -103,7 +124,9 @@ Quit. In game the cursor is captured: WASD move, mouse look, Space jump
 F toggles walk/fly, O toggles occlusion culling (debug), T fast-forwards
 world time (debug), G spawns/despawns the debug Steve (M31), B/C spawn a
 debug pig/zombie ~3 blocks ahead (M32), V/N/M spawn a debug cow/sheep/chicken
-(M34), K spawns a debug creeper (M35), LMB hold-to-break in walk (crack overlay, drops pop
+(M34), K spawns a debug creeper (M35), J spawns a debug skeleton (M36), RMB-hold
+with a bow drawn from the hand charges + fires an arrow on release (M36, consumes
+an Arrow; full draw hits harder), LMB hold-to-break in walk (crack overlay, drops pop
 out as item entities and vacuum into the inventory; tools dig faster,
 stone needs a pickaxe to drop) / instant pop in fly (creative-style, no
 drops), RMB place (consumes one) or use a crafting table (opens its
@@ -2345,6 +2368,129 @@ coal) at a table. Confirm armor reduces the blast damage, and that drops from
 carved blocks pop out + can be picked up. Quit + re-enter → creepers you left are
 restored (their fuse resets); primed TNT is gone (expected).
 
+## M36 — projectile system → Skeleton (+ player bow/arrows) (DONE & USER-VERIFIED)
+
+DONE & USER-VERIFIED 2026-06-18. Roadmap step 4: build the
+shared PROJECTILE system once (an arrow entity), then drive it from a Skeleton's
+ranged bow AI and the player's bow — the foundation later reused for
+snowballs/eggs/fireballs/thrown potions. Decisions confirmed with the user before
+coding: content = creative palette + skeleton drops ONLY (no crafting recipes —
+vanilla bow needs string, arrows need flint, neither exists yet, same gap M35
+hit); FULL visual polish (first-person bow pull-back frames + the skeleton's
+bow-aim pose). Mechanics ported from 1.12 (`EntityArrow`, `EntitySkeleton` /
+`EntityAIAttackRangedBow`, `RenderArrow`, `ModelSkeleton`, `ItemBow`). NO new
+world. RE-IMPORT REQUIRED on this machine (see the top re-import note: 6 atlas
+tiles 108–113, the skeleton skin, the arrow texture, `mob/skeleton/` +
+`random/bow.ogg`).
+
+- THE SHARED ROUTINE (`EntityManager::Arrow` + `SpawnArrow`/`TickArrows`, split
+  into game/src/entity/Projectile.cpp like Explosion.cpp): a vanilla EntityArrow
+  port — `Arrow : Body` carries flight yaw/pitch (+prev for interpolation), an
+  `ArrowOwner {Player, Mob}`, base damage, a despawn `life` (1200 ticks), a
+  `stuck` flag, and `playerPickup`. Per tick: gravity 0.05 b/tick² (20 b/s²) +
+  drag ×0.99 (×0.6 in liquid); the segment travelled this tick is swept-tested —
+  ENTITY first (Player arrows → `RaycastMob` → `DamageMob`; Mob arrows →
+  segment-vs-player-AABB slab test → the injected `m_damagePlayer`), then BLOCK
+  (`World::RaycastBlocks`; on hit it snaps to the surface + sticks). Impact damage
+  = vanilla `ceil(speedPerTick × baseDamage)`. NOT persisted (vanishes on quit,
+  like PrimedTnt / dropped items). Ticked from `EntityManager::Tick()` where
+  m_mobs is idle, so a Player arrow's DamageMob (which erases the mob) is safe.
+- PLAYER-TARGET PLUMBING: the M35 `SetExplosionTargets` was renamed/extended to
+  `SetEntityTargets(playerFeet, halfWidth, height, damagePlayer)` so mob arrows
+  can hit the player while World stays Player-agnostic; GameApp injects it before
+  `World::Tick()`. Arrow pickup: `PickupArrows(box, give)` mirrors PickupItems —
+  GameApp collects stuck player-fired arrows into the bag next to its item vacuum.
+- ARROW RENDER (`entity/ArrowModel.{h,cpp}`): a verbatim RenderArrow port — a
+  cross-prism shaft + a fletching cross, skinned from the 32×32
+  `entity/projectiles/arrow.png`, drawn with the entity_model shader in its own
+  pass (after the mob pass) oriented by the interpolated yaw/pitch (rotate yaw−90
+  about Y, pitch about Z, the 45° cross offset about X, scale 0.05625). Skips
+  without the skin (clean-clone rule).
+- SKELETON (a data row + a ranged AI branch + a model): `MobType::Skeleton` (=6)
+  appended; `MobDef` grew `ranged` + `bowRange` (15) + `shootInterval` (30).
+  Row: 0.3×1.99, 20 hp, ~3.4 b/s, hostile, attackDamage 0 (never bites),
+  followRange 16, SpawnRule::Dark weight 100 (shares the night roster with
+  zombie/creeper). Runtime-only `Mob` fields `aiming` + `shootCooldown` (not
+  persisted). TickMobs ranged branch: face the player, approach when beyond
+  bowRange, only BACKPEDAL when very close (< 0.3×bowRange ≈ 4.5 blocks) and at a
+  reduced 0.6× speed (so the player's 4.3 walk runs down the 3.4 skeleton — the
+  earlier 0.5×-range full-speed retreat made it uncatchable), hold otherwise; on
+  a clear line of sight (a
+  RaycastBlocks eye→player check) fire every shootInterval ticks via
+  `ShootArrowAt` (vanilla arc dy + horiz·0.2, speed 1.6 b/tick, slight
+  inaccuracy, ArrowOwner::Mob, + a `MobSound` kind 4 = bow shoot). Drops arrows
+  0–2 + bones 0–2.
+- SKELETON MODEL: reuses `HumanoidModel` with the skeleton skin, the new
+  `thinArms` (2px limbs) and `Pose::BowAim`. The `bool zombiePose` ctor arg
+  became a `Pose {Default, Zombie, BowAim}` enum (zombie ctor + PlayerDoll
+  updated). `SetVariant` toggles the aim pose (both arms raised straight ahead,
+  vanilla ModelBiped bow-aim), driven each frame from the mob's `aiming` flag in
+  the render pass. CRITICAL SKIN GOTCHA: the 1.12 skeleton skin is 64x32 (vanilla
+  `ModelSkeleton` calls `super(.., 64, 32)`), NOT 64x64 like the zombie — the
+  `HumanoidModel` is constructed with `texH=32` or every UV island samples the
+  wrong rows and the whole figure renders as a featureless grey blob (the bug the
+  user caught first). The HELD BOW is rendered by `HeldBowModel`
+  (entity/HeldBowModel.{h,cpp}) — a flat two-sided quad skinned from a raw-copied
+  `items/bow_standby.png`, drawn with the entity_model shader at
+  `HumanoidModel::RightArmTransform` (which exposes the arm joint's world frame
+  via `BoxModel::PartTransform`, refactored out of Render). The mob pass reads
+  ONLY the hand WORLD POSITION from that transform (arm-local (0,9,0)), then
+  builds the bow's orientation as a world-space basis (reasoning it through the
+  Y-down + upright-flip + arm-rotation chain produced an oversized, skewed bow):
+  the bow sits in the skeleton's SAGITTAL plane (up × aim), flat face sideways,
+  so it reads edge-on when aiming at the player and shows the full profile from
+  the side (vanilla). The `bow_standby` sprite runs grip→tip on its diagonal, so
+  the basis is rolled 45° (`bx=(fwd+up)·k`, `by=(up−fwd)·k`, normal=`right`) to
+  stand grip→tip vertical with the curve depth along the aim. `bs` (0.7/16 ≈ 0.7
+  block) sizes it; user-verified 2026-06-18.
+- PLAYER BOW (items + RMB-hold draw): `items::Bow` (108, 384-use, maxStack 1),
+  `Arrow` (112), `Bone` (113); `kBowPullingTiles[3] = {109,110,111}` are the
+  draw-frame tiles (view-model only, not items). All auto-listed in the creative
+  palette. RMB-hold plumbing (the new piece — everything else is press-edge):
+  GameApp::HandleInput intercepts RMB ahead of the place chain when the held item
+  is a bow — `m_bowDrawSeconds` accumulates while held + an Arrow is in the bag
+  (free in fly/creative); on RELEASE, `ReleaseBow` fires if the draw ≥ vanilla
+  0.1. `BowDrawProgress()` = vanilla `(f²+2f)/3` clamp 1 (full at ~1 s); velocity
+  = f·3.0 b/tick, damage 2.0 (2.5 at full = crit feel), consumes one Arrow
+  (skipped in fly), wears the bow one use, plays `random/bow`. The view model
+  steadies (no swing) and swaps the held bow to bow_pulling_0..2 by charge with a
+  small pull-back nudge.
+- AUDIO: `GameSounds` per-MobType voice array grew to 7 (skeleton say/hurt/death
+  from `mob/skeleton/`); `PlayBowShoot` (random/bow) added; GameApp maps MobSound
+  kind 4 → PlayBowShoot, and ReleaseBow plays it for the player.
+- TESTABILITY: debug key `J` (KeyCodes grew `Key::J = 74`) spawns a skeleton ~3
+  blocks ahead. Bow + arrows + bone are all in the creative palette. savetest grew
+  a skeleton (type 6) mobs.dat round-trip case.
+- ARROW KNOCKBACK: the player-damage callback gained a `knockbackScale`
+  (Player::Hurt's 3rd arg) — mob melee + explosions pass 1.0, arrows pass 0.25
+  (vanilla un-enchanted arrows barely knock back; full melee knockback made a
+  kiting skeleton impossible to chase). Threaded through MobTickCtx.damagePlayer
+  + EntityManager's injected callback.
+- KNOWN M36 LIMITS / decisions: no crafting recipes (palette + drops only, by
+  decision); the skeleton's held-bow hand placement is an eyeballed best-effort
+  (tweak the GameApp constants if it sits oddly); arrows aren't persisted
+  (in-flight + stuck arrows vanish on quit, like TNT);
+  the arrow's block-stick uses RaycastBlocks (no sub-cell offset poke-out, no
+  pop-out when the host block is broken); no critical-hit particles, no flaming/
+  enchanted arrows, no tipped/spectral arrows; mob arrows can't hit other mobs
+  (only the player) and player arrows only hit mobs (no friendly-fire either way);
+  blast/arrow share the cheap single-ray LOS like M35.
+
+WHAT THE USER SHOULD TEST (NO new world; re-run `import_mc_assets.py` first for
+the skeleton skin, arrow texture, and sounds): press `J` for a skeleton — it
+should turn toward you, keep its distance (back off if you close in), raise its
+arms in the bow-aim pose, and fire arrows that ARC, STICK in blocks/ground, and
+HURT you with knockback (armor should reduce it). Grab a Bow + Arrows from the
+creative palette (E → palette); RMB-HOLD to draw — the first-person bow should
+pull back through its frames — and RELEASE to fire: the arrow flies, one arrow is
+spent, the bow wears a use; a fuller charge flies faster + hits harder. Walk over
+your own stuck arrows to pick them back up. LMB-kill a skeleton → it drops arrows
++ bones you can collect. Let night fall (T to fast-forward) → skeletons spawn
+alongside zombies/creepers. Quit + re-enter → skeletons you left are restored from
+mobs.dat; in-flight/stuck arrows are gone (expected). The skeleton should hold a
+visible bow in its hand — if it sits oddly (wrong angle/offset), say so and the
+GameApp hand-placement constants can be nudged.
+
 ## M34 — passive mob roster: cow + sheep + chicken (CODE COMPLETE)
 
 CODE COMPLETE 2026-06-18, awaiting user verification. The first step of the
@@ -2545,8 +2691,9 @@ reuse):
   ignite). ✅ DONE in M35 (see the M35 section): the shared
   `EntityManager::Explode` also powers TNT now and is ready for ghast fireballs,
   beds, end crystals.
-- Skeleton → a PROJECTILE/arrow entity + ranged AI. Also unlocks the player
-  bow & arrows, snowballs, eggs, fireballs, thrown potions.
+- Skeleton → a PROJECTILE/arrow entity + ranged AI. ✅ DONE in M36 (see the M36
+  section): the shared `EntityManager::Arrow` also powers the player bow & arrows
+  now and is ready for snowballs, eggs, fireballs, thrown potions.
 - Breeding / baby animals → a FOOD/EATING system (+ a model SCALE factor for
   babies). Also makes the M32 porkchop/rotten-flesh drops actually useful;
   pairs with a farming milestone.
@@ -2562,8 +2709,11 @@ RECOMMENDED ORDER:
 3. **Explosion system → Creeper (+ TNT)** ✅ CODE COMPLETE (see the M35 section
    above). The shared `EntityManager::Explode` drives both the creeper and a
    primed-TNT entity; ready to reuse for ghast fireballs, beds, end crystals.
-4. **Projectile system → Skeleton (+ player bow/arrows)** ← NEXT.
-5. **Food/eating → breeding + babies** (pairs with farming).
+4. **Projectile system → Skeleton (+ player bow/arrows)** ✅ CODE COMPLETE (see
+   the M36 section above). The shared `EntityManager::Arrow` drives both the
+   skeleton's ranged bow AI and the player's bow; ready to reuse for
+   snowballs/eggs/fireballs/thrown potions.
+5. **Food/eating → breeding + babies** (pairs with farming). ← NEXT.
 6. **Bespoke movers** as desired: spider climbing, slime splitting, enderman
    teleport, bats.
 

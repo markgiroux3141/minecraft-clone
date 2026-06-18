@@ -122,6 +122,56 @@ public:
     // Spawn a primed TNT at `pos` (cube bottom-center) with the given fuse.
     void SpawnPrimedTnt(const glm::vec3& pos, int fuse);
 
+    // --- M36 projectiles (arrows) ------------------------------------------
+    // An arrow in flight (vanilla EntityArrow): gravity 0.05 b/tick^2, drag
+    // x0.99 (x0.6 in liquid), no collision box of its own — each tick it
+    // raycasts the segment it travelled, sticking into the first solid block or
+    // damaging the first entity it crosses. `owner` gates targets (a Player
+    // arrow hits mobs, a Mob arrow hits the player) so a shooter never hits
+    // itself. Player-fired arrows are pickupable once stuck. Render-interpolated
+    // (Body) + a flight yaw/pitch for orientation. NOT persisted (vanishes on
+    // quit, like PrimedTnt / dropped items).
+    enum class ArrowOwner { Player, Mob };
+    struct Arrow : Body {
+        float yaw = 0.0f, prevYaw = 0.0f;     // flight heading (radians, world)
+        float pitch = 0.0f, prevPitch = 0.0f; // flight pitch (radians)
+        ArrowOwner owner = ArrowOwner::Mob;
+        float damage = 2.0f; // base; the hit scales it by impact speed
+        int life = 0;        // ticks alive; despawns at kArrowDespawnAge
+        bool stuck = false;  // lodged in a block (stops moving, can be collected)
+        bool playerPickup = false; // a player-fired arrow can be picked back up
+        void BeginTickArrow() {
+            BeginTick();
+            prevYaw = yaw;
+            prevPitch = pitch;
+        }
+    };
+    const std::vector<Arrow>& Arrows() const { return m_arrows; }
+    // Launch an arrow from `pos` with `velocity` (blocks/second). damage is the
+    // vanilla base (2.0); the impact scales it by speed.
+    void SpawnArrow(const glm::vec3& pos, const glm::vec3& velocity, ArrowOwner owner,
+                    float damage, bool playerPickup);
+    // Collect stuck player-fired arrows overlapping the (grown) player box —
+    // mirrors PickupItems. give(count) returns how many were accepted; a fully
+    // collected arrow is removed.
+    template <typename Fn>
+    void PickupArrows(const glm::vec3& boxMin, const glm::vec3& boxMax, Fn&& give) {
+        for (size_t i = 0; i < m_arrows.size();) {
+            Arrow& a = m_arrows[i];
+            const glm::vec3 c = a.pos;
+            if (!a.stuck || !a.playerPickup || c.x < boxMin.x || c.x > boxMax.x ||
+                c.z < boxMin.z || c.z > boxMax.z || c.y < boxMin.y || c.y > boxMax.y) {
+                ++i;
+                continue;
+            }
+            if (give(1) > 0) {
+                m_arrows.erase(m_arrows.begin() + static_cast<ptrdiff_t>(i));
+            } else {
+                ++i;
+            }
+        }
+    }
+
     // The shared explosion (vanilla Explosion.doExplosionA/B): casts the 16x16
     // surface rays from `center`, removing blocks whose blast resistance the ray
     // can punch through (skipping unbreakable + liquid), spawning a fraction of
@@ -140,13 +190,17 @@ public:
     };
     std::vector<ExplosionEvent>& ExplosionEvents() { return m_explosions; }
 
-    // GameApp injects the player's feet + a damage callback (with knockback)
-    // before the tick, so both explosion triggers (creeper in TickMobs, TNT in
-    // Tick) can hurt the player while World stays Player-agnostic. Same shape as
-    // MobTickCtx's damagePlayer (already gated on Walk mode by GameApp).
-    void SetExplosionTargets(const glm::vec3& playerFeet,
-                             std::function<void(float dmg, const glm::vec3& fromPos)> damagePlayer) {
+    // GameApp injects the player's feet + AABB half-extents + a damage callback
+    // (with knockback) before the tick, so the explosion triggers (creeper in
+    // TickMobs, TNT in Tick) AND mob-fired arrows (TickArrows in Tick) can hurt
+    // the player while World stays Player-agnostic. Same damagePlayer shape as
+    // MobTickCtx (already gated on Walk mode by GameApp).
+    void SetEntityTargets(
+        const glm::vec3& playerFeet, float playerHalfWidth, float playerHeight,
+        std::function<void(float dmg, const glm::vec3& fromPos, float knockbackScale)> damagePlayer) {
         m_playerFeet = playerFeet;
+        m_playerHalfWidth = playerHalfWidth;
+        m_playerHeight = playerHeight;
         m_damagePlayer = std::move(damagePlayer);
     }
 
@@ -160,7 +214,7 @@ public:
         float playerHalfWidth = 0.3f;
         float playerHeight = 1.8f;
         bool isNight = false;
-        std::function<void(float dmg, const glm::vec3& fromPos)> damagePlayer;
+        std::function<void(float dmg, const glm::vec3& fromPos, float knockbackScale)> damagePlayer;
         std::function<void(float dx, float dz)> pushPlayer;
     };
     // One 20-TPS step of every mob: AI -> ground physics (gravity + axis-
@@ -216,6 +270,11 @@ private:
     // One tick of every primed TNT (gravity + drag + collision, fuse countdown,
     // detonate at 0). Detonation runs Explode() — safe here, m_mobs is idle.
     void TickPrimedTnt();
+    // M36: one tick of every arrow (gravity + drag + segment block/entity
+    // collision). Runs from Tick() where m_mobs is idle, so a Player arrow's
+    // DamageMob (which erases the mob) is safe. Mob arrows hurt the player via
+    // the injected m_damagePlayer + player box (see SetEntityTargets).
+    void TickArrows();
     // M35: line-of-sight blast exposure of `target` from `center` — 1.0 if a
     // single ray reaches it unobstructed, ~0.4 if a block blocks it (vanilla
     // samples the whole AABB; this is the cheap approximation).
@@ -224,11 +283,15 @@ private:
     void SpawnMobs(const MobTickCtx& ctx);
     // Drop a dead mob's loot and queue its death sound (caller erases it).
     void EmitMobDeath(const Mob& mob);
+    // M36: a skeleton fires a Mob-owned arrow from `from` toward `target` with
+    // the vanilla arc + inaccuracy, and queues the bow-shoot sound.
+    void ShootArrowAt(const glm::vec3& from, const glm::vec3& target);
 
     World& m_world; // block/collision queries (public API only); outlives this
     std::vector<FallingBlock> m_fallingBlocks; // settled back into blocks on dtor
     std::vector<ItemEntity> m_itemEntities;    // not persisted (see ItemEntity)
     std::vector<PrimedTnt> m_primedTnt;        // not persisted (see PrimedTnt)
+    std::vector<Arrow> m_arrows;               // not persisted (see Arrow)
     std::vector<Mob> m_mobs;                   // persisted to mobs.dat
     std::vector<MobSound> m_mobSounds;         // drained by GameApp each tick
     std::vector<ExplosionEvent> m_explosions;  // drained by GameApp each tick
@@ -237,7 +300,9 @@ private:
     // SetExplosionTargets) so explosions can hurt the player without World
     // knowing about Player.
     glm::vec3 m_playerFeet{0.0f};
-    std::function<void(float dmg, const glm::vec3& fromPos)> m_damagePlayer;
+    float m_playerHalfWidth = 0.3f; // for arrow-vs-player collision (M36)
+    float m_playerHeight = 1.8f;
+    std::function<void(float dmg, const glm::vec3& fromPos, float knockbackScale)> m_damagePlayer;
 };
 
 } // namespace vc

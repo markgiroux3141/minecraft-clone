@@ -270,11 +270,21 @@ void GameApp::OnInit() {
     // clean clone is fine. Adding a mob = one model + one line here.
     m_mobModels[static_cast<size_t>(vc::MobType::Pig)] = std::make_unique<vc::PigModel>();
     m_mobModels[static_cast<size_t>(vc::MobType::Zombie)] = std::make_unique<vc::HumanoidModel>(
-        "mc/textures/entity/zombie/zombie.png", /*zombiePose=*/true);
+        "mc/textures/entity/zombie/zombie.png", vc::HumanoidModel::Pose::Zombie);
     m_mobModels[static_cast<size_t>(vc::MobType::Cow)] = std::make_unique<vc::CowModel>();
     m_mobModels[static_cast<size_t>(vc::MobType::Sheep)] = std::make_unique<vc::SheepModel>();
     m_mobModels[static_cast<size_t>(vc::MobType::Chicken)] = std::make_unique<vc::ChickenModel>();
     m_mobModels[static_cast<size_t>(vc::MobType::Creeper)] = std::make_unique<vc::CreeperModel>();
+    // M36 skeleton: the biped with the skeleton skin, thin (2px) limbs, and the
+    // bow-aim pose (shown only while it's drawing — see the mob render pass).
+    // The 1.12 skeleton skin is 64x32 (ModelSkeleton: super(.., 64, 32)), NOT
+    // 64x64 like the zombie — pass texH=32 or every UV island samples the wrong
+    // rows and the model renders as a featureless grey blob.
+    m_mobModels[static_cast<size_t>(vc::MobType::Skeleton)] = std::make_unique<vc::HumanoidModel>(
+        "mc/textures/entity/skeleton/skeleton.png", vc::HumanoidModel::Pose::BowAim, 0.0f, 64.0f,
+        32.0f, true, /*thinArms=*/true);
+    m_arrowModel = std::make_unique<vc::ArrowModel>(); // M36 flying-arrow renderer
+    m_heldBow = std::make_unique<vc::HeldBowModel>();  // M36 bow in the skeleton's hand
 
     m_outlineShader = vox::Shader::FromFiles("shaders/outline.vert", "shaders/outline.frag");
     constexpr float corners[] = {
@@ -488,15 +498,17 @@ void GameApp::OnTick(double dt) {
 
         // Fly is creative (M30): no damage. Reused by the mob melee AND the M35
         // explosions (TNT in World::Tick, creeper in TickMobs).
-        const auto damagePlayer = [this](float dmg, const glm::vec3& from) {
+        const auto damagePlayer = [this](float dmg, const glm::vec3& from, float kb) {
             if (m_player.GetMode() == Player::Mode::Walk) {
-                m_player.Hurt(dmg, from);
+                m_player.Hurt(dmg, from, kb);
             }
         };
-        // M35: inject the player target before the world tick so a TNT
-        // detonation (ticked in World::Tick) can hurt the player; World stays
-        // Player-agnostic (the callback carries the dependency).
-        m_world->Entities().SetExplosionTargets(m_player.Position(), damagePlayer);
+        // M35/M36: inject the player target (feet + AABB + damage callback)
+        // before the world tick so a TNT detonation OR a mob-fired arrow (both
+        // ticked in World::Tick) can hurt the player; World stays Player-agnostic
+        // (the callback carries the dependency).
+        m_world->Entities().SetEntityTargets(m_player.Position(), Player::kHalfWidth,
+                                             Player::kHeight, damagePlayer);
         m_world->Tick(); // scheduled block updates (falling sand, water flow)
 
         // M32: tick mobs (AI/physics/combat/spawning). World stays Player- and
@@ -519,6 +531,7 @@ void GameApp::OnTick(double dt) {
             case 1: m_sounds.PlayMobDeath(s.type, s.pos); break;
             case 2: m_sounds.PlayChickenEgg(s.pos); break;    // M34: egg plop
             case 3: m_sounds.PlayCreeperPrime(s.pos); break;  // M35: creeper fuse hiss
+            case 4: m_sounds.PlayBowShoot(s.pos); break;      // M36: skeleton bow shot
             default: break;
             }
         }
@@ -563,6 +576,14 @@ void GameApp::OnTick(double dt) {
             feet - reach, feet + glm::vec3{0.0f, Player::kHeight, 0.0f} + reach,
             [&](uint16_t id, int count, int damage) {
                 const vc::ItemStack leftover = m_inventory.Add({id, count, damage});
+                const int taken = count - leftover.count;
+                if (taken > 0) pickedUp = true;
+                return taken;
+            });
+        // M36: collect stuck player-fired arrows (same grown pickup box).
+        m_world->Entities().PickupArrows(
+            feet - reach, feet + glm::vec3{0.0f, Player::kHeight, 0.0f} + reach, [&](int count) {
+                const vc::ItemStack leftover = m_inventory.Add({vc::items::Arrow, count, 0});
                 const int taken = count - leftover.count;
                 if (taken > 0) pickedUp = true;
                 return taken;
@@ -670,6 +691,64 @@ void GameApp::SpawnMobAhead(vc::MobType type) {
     m_world->Entities().SpawnMob(type, ahead);
     GAME_INFO("Spawned debug {} at ({:.1f}, {:.1f}, {:.1f})", vc::MobSoundFolder(type), ahead.x,
               ahead.y, ahead.z);
+}
+
+float GameApp::BowDrawProgress() const {
+    if (!m_bowDrawing) {
+        return 0.0f;
+    }
+    // Vanilla ItemBow.getArrowVelocity: f = ticksHeld/20 (= seconds held), then
+    // shaped (f*f + 2f)/3, clamped to 1 (full draw at ~1 s).
+    float f = static_cast<float>(m_bowDrawSeconds);
+    f = (f * f + 2.0f * f) / 3.0f;
+    return std::min(f, 1.0f);
+}
+
+void GameApp::ReleaseBow() {
+    if (!m_world) {
+        return;
+    }
+    const float f = BowDrawProgress();
+    if (f < 0.1f) {
+        return; // vanilla: too short a draw fires nothing
+    }
+    const bool creative = m_player.GetMode() == Player::Mode::Fly;
+    if (!creative) {
+        // Spend one arrow from the bag (first match, hotbar-first like Add).
+        bool consumed = false;
+        for (size_t i = 0; i < vc::Inventory::kSize; ++i) {
+            vc::ItemStack& s = m_inventory.Slot(i);
+            if (!s.Empty() && s.id == vc::items::Arrow) {
+                if (--s.count <= 0) {
+                    s = {};
+                }
+                consumed = true;
+                break;
+            }
+        }
+        if (!consumed) {
+            return; // no arrow (draw was gated on having one — defensive)
+        }
+    }
+
+    const glm::vec3 eye = m_camera.Position();
+    const glm::vec3 dir = m_camera.Forward();
+    const float speed = f * 3.0f * 20.0f; // vanilla f*3.0 b/tick -> b/s
+    const bool crit = f >= 1.0f;
+    m_world->Entities().SpawnArrow(eye + dir * 0.3f, dir * speed,
+                                   vc::EntityManager::ArrowOwner::Player, crit ? 2.5f : 2.0f,
+                                   /*playerPickup=*/!creative);
+
+    // Wear the bow one use (vanilla durability); creative doesn't wear.
+    vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
+    if (!creative && hand.id == vc::items::Bow) {
+        const vc::ItemDef* def = vc::ItemRegistry::Get().Find(hand.id);
+        if (def && def->maxDamage > 0 && ++hand.damage >= def->maxDamage) {
+            hand = {};
+        }
+    }
+    m_sounds.PlayBowShoot(eye);
+    m_viewModel->TriggerSwing();
 }
 
 bool GameApp::IsNight() const {
@@ -853,6 +932,12 @@ void GameApp::HandleInput(double frameDt, int scroll) {
         SpawnMobAhead(vc::MobType::Creeper);
     }
     m_input.spawnCreeperKeyWasDown = creeperKey;
+    // M36: J = skeleton.
+    const bool skeletonKey = vox::Input::IsKeyDown(vox::Key::J);
+    if (skeletonKey && !m_input.spawnSkeletonKeyWasDown) {
+        SpawnMobAhead(vc::MobType::Skeleton);
+    }
+    m_input.spawnSkeletonKeyWasDown = skeletonKey;
 
     // 1..9 select the hotbar slot; the wheel cycles it (vanilla: scroll
     // up moves left, wrapping).
@@ -1021,6 +1106,37 @@ void GameApp::HandleInput(double frameDt, int scroll) {
     m_input.dropKeyWasDown = dropKey;
 
     const bool placeDown = vox::Input::IsMouseButtonDown(vox::MouseButton::Right);
+
+    // M36 bow: RMB-hold draws (charges) instead of placing; release fires. Gated
+    // ahead of the place chain — a drawn bow consumes RMB entirely. Drawing needs
+    // an arrow in the bag (free in fly/creative).
+    {
+        const vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
+        if (!hand.Empty() && hand.id == vc::items::Bow) {
+            const bool creative = m_player.GetMode() == Player::Mode::Fly;
+            bool hasArrow = creative;
+            for (size_t i = 0; i < vc::Inventory::kSize && !hasArrow; ++i) {
+                const vc::ItemStack& s = m_inventory.Slot(i);
+                hasArrow = !s.Empty() && s.id == vc::items::Arrow;
+            }
+            if (placeDown && hasArrow) {
+                m_bowDrawing = true;
+                m_bowDrawSeconds += frameDt;
+            } else {
+                if (m_bowDrawing && !placeDown) {
+                    ReleaseBow(); // fire on release (scaled by how long it charged)
+                }
+                m_bowDrawing = false;
+                m_bowDrawSeconds = 0.0;
+            }
+            m_input.placeWasDown = placeDown;
+            return; // bow owns RMB this frame; skip the place chain
+        }
+        // Switched off the bow mid-draw: cancel without firing.
+        m_bowDrawing = false;
+        m_bowDrawSeconds = 0.0;
+    }
+
     if (placeDown && (!m_input.placeWasDown || m_input.placeCooldown == 0.0)) {
         const vc::BlockId targetId =
             m_target ? m_world->GetBlock(m_target->block.x, m_target->block.y, m_target->block.z)
@@ -1834,9 +1950,90 @@ void GameApp::OnRender(double alpha, double frameDt) {
                 m = glm::translate(m, {0.0f, def.modelOffsetPx, 0.0f});
                 m = glm::rotate(m, kPi, {1.0f, 0.0f, 0.0f});
 
-                model->SetVariant(mob.sheared ? 1 : 0);
+                // Per-mob render variant: sheep toggle their wool (sheared),
+                // skeletons raise the bow-aim arms while drawing (M36 aiming).
+                int variant = 0;
+                if (mob.type == vc::MobType::Sheep) {
+                    variant = mob.sheared ? 1 : 0;
+                } else if (mob.type == vc::MobType::Skeleton) {
+                    variant = mob.aiming ? 1 : 0;
+                }
+                model->SetVariant(variant);
                 model->SetRotationAngles(limbSwing, limbAmount, mob.age + a, 0.0f, 0.0f);
                 model->Render(*m_entityModelShader, m);
+
+                // M36: the bow in the skeleton's right hand. RightArmTransform
+                // gives the arm joint's world frame, so (0,9,0) in arm-local
+                // pixels is the hand — we read just that world POSITION from it
+                // (it tracks the pose), then build the bow's orientation directly
+                // in world space: a vertical quad facing the aim direction, a
+                // little under a block tall. Reasoning the orientation out through
+                // the Y-down + upright-flip + arm-rotation chain is error-prone;
+                // a world-space basis is predictable and reads correctly.
+                if (mob.type == vc::MobType::Skeleton && m_heldBow && m_heldBow->Ready()) {
+                    auto* biped = static_cast<vc::HumanoidModel*>(model);
+                    const glm::vec3 hand =
+                        glm::vec3(biped->RightArmTransform(m) * glm::vec4(0.0f, 9.0f, 0.0f, 1.0f));
+                    const glm::vec3 fwd{std::cos(yaw), 0.0f, std::sin(yaw)}; // aim direction
+                    const glm::vec3 up{0.0f, 1.0f, 0.0f};
+                    const glm::vec3 right{fwd.z, 0.0f, -fwd.x};
+                    // The bow sits in the skeleton's sagittal (up x aim) plane —
+                    // its flat face points sideways, so aiming at the player you
+                    // see it edge-on (vanilla), the full profile from the side.
+                    // The bow_standby sprite runs grip (bottom-left) -> tips
+                    // (top-right), so the 45deg-rolled basis maps grip->tip to
+                    // vertical and the curve depth to the aim direction.
+                    constexpr float k = 0.70710678f; // cos/sin 45
+                    constexpr float bs = 0.7f / 16.0f;
+                    const glm::vec3 bx = (fwd + up) * k; // local +X (rolled, in the sagittal plane)
+                    const glm::vec3 by = (up - fwd) * k; // local +Y
+                    glm::mat4 bowM{1.0f};
+                    bowM[0] = glm::vec4(bx * bs, 0.0f);
+                    bowM[1] = glm::vec4(by * bs, 0.0f);
+                    bowM[2] = glm::vec4(right * bs, 0.0f); // normal -> sideways (edge-on toward aim)
+                    bowM[3] = glm::vec4(hand, 1.0f);
+                    m_heldBow->Render(*m_entityModelShader, bowM);
+                }
+            }
+            vox::Renderer::SetCullFace(true);
+            m_chunkShader->Bind();
+        }
+
+        // M36: arrows in flight + stuck arrows. Same box-model shader/slot as the
+        // mobs; one bind, then per-arrow orientation from its flight yaw/pitch
+        // (verbatim RenderArrow transform).
+        const auto& arrows = m_world->Entities().Arrows();
+        if (m_arrowModel && m_arrowModel->Ready() && !arrows.empty()) {
+            constexpr float kPi = 3.14159265358979323846f;
+            const float a = static_cast<float>(alpha);
+            m_entityModelShader->Bind();
+            m_entityModelShader->SetMat4("u_viewProj", viewProj);
+            m_entityModelShader->SetInt("u_skin", 1);
+            m_entityModelShader->SetFloat3("u_sunDir", dayNight.lightDir);
+            m_entityModelShader->SetFloat("u_sunLight", dayNight.sunLight);
+            m_entityModelShader->SetFloat3("u_skyTint", dayNight.skyTint);
+            m_entityModelShader->SetFloat("u_hurt", 0.0f);
+            vox::Renderer::SetCullFace(false);
+            for (const auto& arrow : arrows) {
+                const glm::vec3 pos = glm::mix(arrow.prevPos, arrow.pos, a);
+                const float yaw = glm::mix(arrow.prevYaw, arrow.yaw, a);
+                const float pitch = glm::mix(arrow.prevPitch, arrow.pitch, a);
+                const glm::ivec3 cell{static_cast<int>(std::floor(pos.x)),
+                                      static_cast<int>(std::floor(pos.y)),
+                                      static_cast<int>(std::floor(pos.z))};
+                const uint8_t packed = m_world->PackedLightAt(cell);
+                m_entityModelShader->SetFloat2(
+                    "u_light", {static_cast<float>(vc::ChunkLight::Sky(packed)) / 15.0f,
+                                static_cast<float>(vc::ChunkLight::Block(packed)) / 15.0f});
+                // Vanilla RenderArrow: yaw-90 about Y, pitch about Z, a 45 deg
+                // cross offset about X, scale 0.05625, then translate(-4,0,0).
+                glm::mat4 m = glm::translate(glm::mat4(1.0f), pos);
+                m = glm::rotate(m, yaw - kPi * 0.5f, {0.0f, 1.0f, 0.0f});
+                m = glm::rotate(m, pitch, {0.0f, 0.0f, 1.0f});
+                m = glm::rotate(m, kPi * 0.25f, {1.0f, 0.0f, 0.0f});
+                m = glm::scale(m, glm::vec3(0.05625f));
+                m = glm::translate(m, {-4.0f, 0.0f, 0.0f});
+                m_arrowModel->Render(*m_entityModelShader, m);
             }
             vox::Renderer::SetCullFace(true);
             m_chunkShader->Bind();
@@ -1866,6 +2063,8 @@ void GameApp::OnRender(double alpha, double frameDt) {
                                  static_cast<int>(std::floor(eye.y)),
                                  static_cast<int>(std::floor(eye.z))};
         const uint8_t eyeLight = m_world->PackedLightAt(eyeCell);
+        // M36: feed the bow draw charge so the held bow shows its pulling frames.
+        m_viewModel->SetUseProgress(BowDrawProgress());
         m_viewModel->Render(m_camera, m_state == State::Playing || ContainerOpen() ? alpha : 0.0,
                             {static_cast<float>(vc::ChunkLight::Sky(eyeLight)) / 15.0f,
                              static_cast<float>(vc::ChunkLight::Block(eyeLight)) / 15.0f},

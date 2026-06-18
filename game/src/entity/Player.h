@@ -74,7 +74,10 @@ public:
     // adds horizontal knockback away from the source (+ a small upward pop) and
     // makes the hurt-tilt directional. Wraps M30's ApplyDamage (which left
     // directional knockback for this milestone).
-    void Hurt(float amount, const glm::vec3& fromPos);
+    // knockbackScale tunes the shove: 1.0 = full (mob melee, explosions), small
+    // for arrows (vanilla un-enchanted arrows barely knock back — full melee
+    // knockback made a kiting skeleton impossible to chase down).
+    void Hurt(float amount, const glm::vec3& fromPos, float knockbackScale = 1.0f);
     // M32: a soft external shove (a mob pushing the player out of its body),
     // resolved against blocks so it can't push you into a wall. No-op in fly.
     void ExternalPush(const vc::World& world, float dx, float dz);

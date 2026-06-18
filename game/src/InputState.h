@@ -26,6 +26,7 @@ struct InputState {
     bool spawnSheepKeyWasDown = false;    // N
     bool spawnChickenKeyWasDown = false;  // M
     bool spawnCreeperKeyWasDown = false;  // K
+    bool spawnSkeletonKeyWasDown = false; // J
 
     // Auto-repeat throttles (seconds remaining).
     double breakCooldown = 0.0; // fly repeat AND the walk-dig hit delay

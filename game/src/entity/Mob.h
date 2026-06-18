@@ -23,6 +23,7 @@ enum class MobType : uint8_t {
     Sheep = 3,
     Chicken = 4,
     Creeper = 5, // M35: appended (mobs.dat ids stay stable)
+    Skeleton = 6, // M36: appended
     Count
 };
 
@@ -57,6 +58,12 @@ struct MobDef {
     // length in ticks before detonation (vanilla EntityCreeper: 3.0 / 30).
     float explodeRadius; // 0 = not a bomber
     int fuseTime;        // ticks of swell before it blows
+    // M36 skeleton: `ranged` swaps melee for bow AI — the mob keeps its distance
+    // (approaches toward bowRange, backs off if much closer), faces the player,
+    // and fires a player-targeting arrow every shootInterval ticks.
+    bool ranged;       // true = ranged attacker (fires arrows)
+    float bowRange;    // preferred firing distance, blocks
+    int shootInterval; // ticks between shots
 };
 
 inline constexpr MobDef kMobDefs[] = {
@@ -64,30 +71,37 @@ inline constexpr MobDef kMobDefs[] = {
     // every mob; modelScale 1.0 until baby/variant sizing lands. Speeds are the
     // vanilla movementSpeed attribute scaled to the pig's existing 3.4 b/s
     // (0.25 attr) so passives amble at comparable feel.
-    // Trailing fields per row: ..., slowFall, laysEggs, explodeRadius, fuseTime.
+    // Trailing fields per row: ..., slowFall, laysEggs, explodeRadius, fuseTime,
+    // ranged, bowRange, shootInterval.
     // Pig: 0.9x0.9, 10 hp, drops porkchops. (spawnWeight 10, vanilla)
     {0.45f, 0.9f, 10.0f, 3.4f, false, 0.0f, 0.0f, 24.0f, 1.0f, SpawnRule::SurfaceDay, 10, false,
-     false, 0.0f, 0},
+     false, 0.0f, 0, false, 0.0f, 0},
     // Zombie: 0.6x1.95, 20 hp, hits for 3. Chase 4.0 b/s is just under the
     // player's 4.3 walk (vanilla 0.23): walk away slowly, sprint to escape.
     {0.3f, 1.95f, 20.0f, 4.0f, true, 3.0f, 16.0f, 24.0f, 1.0f, SpawnRule::Dark, 100, false, false,
-     0.0f, 0},
+     0.0f, 0, false, 0.0f, 0},
     // Cow: 0.9x1.4, 10 hp, slow amble (vanilla 0.20 -> 2.7 b/s); beef + leather.
     {0.45f, 1.4f, 10.0f, 2.7f, false, 0.0f, 0.0f, 24.0f, 1.0f, SpawnRule::SurfaceDay, 8, false,
-     false, 0.0f, 0},
+     false, 0.0f, 0, false, 0.0f, 0},
     // Sheep: 0.9x1.3, 8 hp (vanilla 0.23 -> 3.1 b/s); mutton + (un-sheared) wool.
     {0.45f, 1.3f, 8.0f, 3.1f, false, 0.0f, 0.0f, 24.0f, 1.0f, SpawnRule::SurfaceDay, 12, false,
-     false, 0.0f, 0},
+     false, 0.0f, 0, false, 0.0f, 0},
     // Chicken: 0.4x0.7, 4 hp (vanilla 0.25 -> 3.4 b/s); chicken + feathers, lays
     // eggs, takes no fall damage (flutters down).
     {0.2f, 0.7f, 4.0f, 3.4f, false, 0.0f, 0.0f, 24.0f, 1.0f, SpawnRule::SurfaceDay, 10, true, true,
-     0.0f, 0},
+     0.0f, 0, false, 0.0f, 0},
     // Creeper: 0.6x1.7, 20 hp, chases at vanilla 0.25 -> 3.4 b/s. attackDamage 0
     // (it explodes, never bites); explodeRadius 3 / fuseTime 30 (vanilla). Owns
     // the Dark rule alongside the zombie (weight 100 -> ~50/50 at night). Drops
     // gunpowder only when KILLED before it blows (see MobDrops / TickMobs).
     {0.3f, 1.7f, 20.0f, 3.4f, true, 0.0f, 16.0f, 24.0f, 1.0f, SpawnRule::Dark, 100, false, false,
-     3.0f, 30},
+     3.0f, 30, false, 0.0f, 0},
+    // Skeleton: 0.6x1.99, 20 hp, ~3.4 b/s (vanilla 0.25). attackDamage 0 (ranged
+    // — it never bites); ranged with bowRange 15 / shootInterval 30 ticks. Shares
+    // the Dark rule (weight 100 -> roughly even with zombie/creeper at night).
+    // Drops arrows + bones (see MobDrops).
+    {0.3f, 1.99f, 20.0f, 3.4f, true, 0.0f, 16.0f, 24.0f, 1.0f, SpawnRule::Dark, 100, false, false,
+     0.0f, 0, true, 15.0f, 30},
 };
 static_assert(sizeof(kMobDefs) / sizeof(kMobDefs[0]) == static_cast<size_t>(MobType::Count));
 
@@ -143,11 +157,17 @@ struct Mob : Body, LivingAnim {
     int fuse = 0;
     int prevFuse = 0;
     bool fuseLit = false;
+
+    // M36 skeleton bow state (runtime only — not persisted). `aiming` holds the
+    // raised bow-aim arm pose this tick (drives the render pose + the held bow);
+    // `shootCooldown` counts down to the next shot.
+    bool aiming = false;
+    int shootCooldown = 0;
 };
 
 // A positional sound the mob sim wants played (drained by GameApp so World
 // stays audio-free, like ForEachLitFurnace). kind: 0 = hurt, 1 = death,
-// 2 = egg-lay (chicken plop).
+// 2 = egg-lay (chicken plop), 3 = creeper prime hiss, 4 = skeleton bow shoot.
 struct MobSound {
     MobType type;
     glm::vec3 pos;

@@ -118,6 +118,17 @@ extern ItemId Shears;      // shear a sheep for wool
 // it). Flint & steel substitutes coal for vanilla's flint (no gravel/flint yet).
 extern ItemId Gunpowder;
 extern ItemId FlintAndSteel;
+// M36 projectiles: the bow (a 384-use launcher; RMB-hold to draw), arrow (ammo +
+// skeleton drop), and bone (skeleton drop). The bow draws ammo from any Arrow
+// stack in the inventory and fires a player-owned Arrow entity.
+extern ItemId Bow;
+extern ItemId Arrow;
+extern ItemId Bone;
+
+// The three bow_pulling_0..2 draw-frame sprite tiles (atlas 109..111). The view
+// model swaps the held bow's tile among these by draw charge (vanilla ItemBow
+// model overrides). NOT registered as items — see Item.cpp.
+inline constexpr uint16_t kBowPullingTiles[3] = {109, 110, 111};
 
 // M33 armor: the 20 pieces register contiguously, material-major then slot,
 // starting at FirstArmor (leather helmet). ArmorPiece() addresses one by

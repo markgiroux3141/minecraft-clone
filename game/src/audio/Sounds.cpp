@@ -95,7 +95,8 @@ void GameSounds::Load(vox::AudioEngine& audio) {
     // LoadSet misses them — load by explicit name (like splash/death).
     for (auto [set, rel] : {std::pair{&m_sheepShear, "mc/sounds/mob/sheep/shear.ogg"},
                             std::pair{&m_chickenEgg, "mc/sounds/mob/chicken/plop.ogg"},
-                            std::pair{&m_creeperFuse, "mc/sounds/random/fuse.ogg"}}) {
+                            std::pair{&m_creeperFuse, "mc/sounds/random/fuse.ogg"},
+                            std::pair{&m_bow, "mc/sounds/random/bow.ogg"}}) {
         if (vox::ClipHandle h = audio.LoadClip(vox::assets::Resolve(rel)); h) {
             set->clips[set->count++] = h;
         }
@@ -238,6 +239,12 @@ void GameSounds::PlayCreeperPrime(const glm::vec3& pos) {
     if (!m_audio || !m_creeperFuse.count) return;
     // Vanilla ENTITY_CREEPER_PRIMED: volume 1.0, pitch 0.5 (the long hiss).
     m_audio->Play3D(Pick(m_creeperFuse), pos, vox::AudioBus::Sfx, 0.8f, 0.5f);
+}
+
+void GameSounds::PlayBowShoot(const glm::vec3& pos) {
+    if (!m_audio || !m_bow.count) return;
+    // Vanilla ENTITY_ARROW_SHOOT: the twang, pitched up a touch with jitter.
+    m_audio->Play3D(Pick(m_bow), pos, vox::AudioBus::Sfx, 1.0f, Jitter(1.0f, 0.15f));
 }
 
 vox::VoiceHandle GameSounds::StartFurnaceLoop(const glm::vec3& blockCenter) {

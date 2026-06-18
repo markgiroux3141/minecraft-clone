@@ -195,7 +195,7 @@ void EntityManager::Explode(const glm::vec3& center, float size) {
             const float d = (1.0f - dist / radius) * density;
             const int dmg = static_cast<int>((d * d + d) / 2.0f * 7.0f * radius + 1.0f);
             if (dmg > 0) {
-                m_damagePlayer(static_cast<float>(dmg), center);
+                m_damagePlayer(static_cast<float>(dmg), center, 1.0f); // full blast knockback
             }
         }
     }
