@@ -48,6 +48,10 @@ struct ChunkEntry {
     uint32_t indexCountM = 0;
     VisibilityBits visibility = 0; // face connectivity, valid once meshedVersion != 0
     bool edited = false; // diverges from the save store — persist before unload
+    // Set by a player edit; routes the remesh onto the pool's High lane and
+    // past the in-flight cap so a broken block updates immediately even while
+    // the world is still streaming in. Cleared when that mesh is accepted.
+    bool urgentMesh = false;
 };
 
 // One LOD column: two stacked half-res chunks (world height 4 chunks /
@@ -82,6 +86,10 @@ struct ColumnEntry {
     uint32_t dirtySeq = 1;    // bumped when blocks change within light range
     uint32_t litSeq = 0;      // dirtySeq the stored light was computed at
     uint32_t lightingSeq = 0; // dirtySeq the in-flight light job targets (0 = none)
+    // Set by a player edit; routes the relight onto the High lane past the
+    // cap, and makes the remesh cascade it triggers urgent too. Cleared when
+    // that light is accepted. See ChunkEntry::urgentMesh.
+    bool urgent = false;
 };
 
 // Owns all loaded chunks and streams them around the camera. Workers
@@ -292,8 +300,8 @@ private:
     // backlog (the bug where a broken block lingered ~0.5 s during load).
     void DrainCompletedJobs(int centerX, int centerZ);
     void SubmitGenerate(const glm::ivec3& coord);
-    void SubmitLight(const glm::ivec2& column);
-    void SubmitMesh(const glm::ivec3& coord);
+    void SubmitLight(const glm::ivec2& column, bool priority = false);
+    void SubmitMesh(const glm::ivec3& coord, bool priority = false);
     // LOD jobs: generate downsamples the 16 real chunks under the LOD
     // column; mesh greedy-meshes its two LOD chunks from the 3x3 LOD
     // neighborhood (gated on LodNeighborsReady) with full-bright light.

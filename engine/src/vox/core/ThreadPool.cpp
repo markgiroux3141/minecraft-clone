@@ -25,10 +25,10 @@ ThreadPool::~ThreadPool() {
     m_signal.notify_all();
 }
 
-void ThreadPool::Submit(std::move_only_function<void()> job) {
+void ThreadPool::Submit(std::move_only_function<void()> job, Priority priority) {
     {
         std::lock_guard lock(m_mutex);
-        m_jobs.push_back(std::move(job));
+        (priority == Priority::High ? m_priorityJobs : m_jobs).push_back(std::move(job));
     }
     m_signal.notify_one();
 }
@@ -38,12 +38,15 @@ void ThreadPool::WorkerMain(std::stop_token stopToken) {
         std::move_only_function<void()> job;
         {
             std::unique_lock lock(m_mutex);
-            m_signal.wait(lock, stopToken, [this] { return !m_jobs.empty(); });
+            m_signal.wait(lock, stopToken,
+                          [this] { return !m_priorityJobs.empty() || !m_jobs.empty(); });
             if (stopToken.stop_requested()) {
                 return; // discard any still-queued jobs
             }
-            job = std::move(m_jobs.front());
-            m_jobs.pop_front();
+            // High lane first; a Normal job only runs when no High job waits.
+            auto& lane = m_priorityJobs.empty() ? m_jobs : m_priorityJobs;
+            job = std::move(lane.front());
+            lane.pop_front();
         }
         job();
     }

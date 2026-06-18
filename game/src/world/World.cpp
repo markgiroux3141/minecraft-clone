@@ -277,6 +277,7 @@ void World::SetBlock(const glm::ivec3& worldPos, BlockId id, uint8_t meta) {
     entry.blocks = std::move(edited);
     ++entry.dataVersion;
     entry.edited = true;
+    entry.urgentMesh = true; // player edit — remesh on the High lane, past the cap
 
     // Immediate single-cell light estimate, so the remesh this edit just
     // triggered doesn't render newly exposed faces pitch black while the
@@ -321,6 +322,7 @@ void World::SetBlock(const glm::ivec3& worldPos, BlockId id, uint8_t meta) {
         const auto neighborIt = m_chunks.find(cc + d);
         if (neighborIt != m_chunks.end() && neighborIt->second.blocks) {
             ++neighborIt->second.dataVersion;
+            neighborIt->second.urgentMesh = true; // border face went stale too
         }
     }
 
@@ -338,6 +340,7 @@ void World::SetBlock(const glm::ivec3& worldPos, BlockId id, uint8_t meta) {
             const auto colIt = m_columns.find(glm::ivec2{cc.x + dx, cc.z + dz});
             if (colIt != m_columns.end()) {
                 ++colIt->second.dirtySeq;
+                colIt->second.urgent = true; // relight this edit on the High lane
             }
         }
     }
@@ -880,7 +883,7 @@ void World::SubmitGenerate(const glm::ivec3& coord) {
     });
 }
 
-void World::SubmitLight(const glm::ivec2& column) {
+void World::SubmitLight(const glm::ivec2& column, bool priority) {
     ColumnEntry& entry = m_columns.at(column);
     entry.lightingSeq = entry.dirtySeq;
 
@@ -897,22 +900,26 @@ void World::SubmitLight(const glm::ivec2& column) {
     }
 
     ++m_jobsInFlight;
-    m_pool.Submit([this, column, version = entry.dirtySeq, input = std::move(input)] {
-        LightResult result{column, version, LightEngine::ComputeColumn(input)};
-        std::lock_guard lock(m_completedMutex);
-        m_completedLight.push_back(std::move(result));
-    });
+    m_pool.Submit(
+        [this, column, version = entry.dirtySeq, input = std::move(input)] {
+            LightResult result{column, version, LightEngine::ComputeColumn(input)};
+            std::lock_guard lock(m_completedMutex);
+            m_completedLight.push_back(std::move(result));
+        },
+        priority ? vox::ThreadPool::Priority::High : vox::ThreadPool::Priority::Normal);
 }
 
-void World::SubmitMesh(const glm::ivec3& coord) {
+void World::SubmitMesh(const glm::ivec3& coord, bool priority) {
     ChunkEntry& entry = m_chunks.at(coord);
     entry.meshingVersion = entry.dataVersion;
     ++m_jobsInFlight;
-    m_pool.Submit([this, coord, version = entry.dataVersion, snapshot = SnapshotFor(coord)] {
-        MeshResult result{coord, version, ChunkMesher::Build(snapshot)};
-        std::lock_guard lock(m_completedMutex);
-        m_completedMesh.push_back(std::move(result));
-    });
+    m_pool.Submit(
+        [this, coord, version = entry.dataVersion, snapshot = SnapshotFor(coord)] {
+            MeshResult result{coord, version, ChunkMesher::Build(snapshot)};
+            std::lock_guard lock(m_completedMutex);
+            m_completedMesh.push_back(std::move(result));
+        },
+        priority ? vox::ThreadPool::Priority::High : vox::ThreadPool::Priority::Normal);
 }
 
 void World::UploadMesh(vox::MeshPool::MeshHandle& handle, uint32_t& indexCount,
@@ -1106,6 +1113,9 @@ void World::DrainCompletedJobs(int centerX, int centerZ) {
         }
         ColumnEntry& column = colIt->second;
         if (lit.version == column.dirtySeq) {
+            // An edit-triggered relight: carry urgency into the remeshes its
+            // light change cascades, so the glow lands as fast as the block did.
+            const bool urgent = column.urgent;
             for (int cy = 0; cy < kHeightChunks; ++cy) {
                 const auto it = m_chunks.find(glm::ivec3{lit.column.x, cy, lit.column.y});
                 if (it == m_chunks.end()) {
@@ -1129,6 +1139,7 @@ void World::DrainCompletedJobs(int centerX, int centerZ) {
                 }
                 entry.light = lit.light[cy];
                 ++entry.dataVersion; // own mesh always resamples
+                entry.urgentMesh = entry.urgentMesh || urgent;
 
                 const auto seesChange = [&](const glm::ivec3& d) {
                     // A diagonal neighbor only reads the shared edge/corner
@@ -1149,12 +1160,14 @@ void World::DrainCompletedJobs(int centerX, int centerZ) {
                                 glm::ivec3{lit.column.x + dx, cy + dy, lit.column.y + dz});
                             if (nIt != m_chunks.end()) {
                                 ++nIt->second.dataVersion;
+                                nIt->second.urgentMesh = nIt->second.urgentMesh || urgent;
                             }
                         }
                     }
                 }
             }
             column.litSeq = lit.version;
+            column.urgent = false; // this edit's glow is computed — back to Normal
         }
         // Stale or accepted, the job is resolved — allow resubmission.
         if (column.lightingSeq == lit.version) {
@@ -1185,6 +1198,7 @@ void World::DrainCompletedJobs(int centerX, int centerZ) {
             UploadModelMesh(entry.meshM, entry.indexCountM, meshed.mesh.modelVertices);
             entry.meshedVersion = meshed.version;
             entry.visibility = meshed.mesh.visibility;
+            entry.urgentMesh = false; // the edit is on screen — back to the Normal lane
         }
         // Stale results (version mismatch after an edit or light change)
         // are dropped; the old mesh keeps rendering until the rebuilt one
@@ -1540,7 +1554,9 @@ void World::Update(const glm::vec3& cameraPos) {
     // Collect missing work, nearest column first.
     std::vector<std::pair<int, glm::ivec3>> toGenerate;
     std::vector<std::pair<int, glm::ivec2>> toLight;
+    std::vector<std::pair<int, glm::ivec2>> toLightUrgent; // player edits, High lane
     std::vector<std::pair<int, glm::ivec3>> toMesh;
+    std::vector<std::pair<int, glm::ivec3>> toMeshUrgent; // player edits, High lane
     m_pendingMeshes = 0;
     for (int dz = -kDataRadius; dz <= kDataRadius; ++dz) {
         for (int dx = -kDataRadius; dx <= kDataRadius; ++dx) {
@@ -1568,7 +1584,7 @@ void World::Update(const glm::vec3& cameraPos) {
                 }
                 if (needsMesh && entry.meshingVersion != entry.dataVersion &&
                     NeighborsReady(coord)) {
-                    toMesh.emplace_back(dist2, coord);
+                    (entry.urgentMesh ? toMeshUrgent : toMesh).emplace_back(dist2, coord);
                 }
             }
 
@@ -1577,7 +1593,7 @@ void World::Update(const glm::vec3& cameraPos) {
                 ColumnEntry& colEntry = m_columns.try_emplace(column).first->second;
                 if (colEntry.litSeq != colEntry.dirtySeq &&
                     colEntry.lightingSeq != colEntry.dirtySeq && ColumnHasData(column)) {
-                    toLight.emplace_back(dist2, column);
+                    (colEntry.urgent ? toLightUrgent : toLight).emplace_back(dist2, column);
                 }
             }
         }
@@ -1617,8 +1633,23 @@ void World::Update(const glm::vec3& cameraPos) {
     std::sort(toGenerate.begin(), toGenerate.end(), byDistance);
     std::sort(toLight.begin(), toLight.end(), byDistance);
     std::sort(toMesh.begin(), toMesh.end(), byDistance);
+    std::sort(toMeshUrgent.begin(), toMeshUrgent.end(), byDistance);
+    std::sort(toLightUrgent.begin(), toLightUrgent.end(), byDistance);
     std::sort(lodToGenerate.begin(), lodToGenerate.end(), byDistance);
     std::sort(lodToMesh.begin(), lodToMesh.end(), byDistance);
+
+    // A player edit's whole reaction chain goes out first on the pool's High
+    // lane and bypasses the in-flight cap: the relight (so glowstone's glow
+    // spreads at once) and the remesh (so a broken block clears at once).
+    // Both are bounded per edit — a handful of columns and chunks — so they
+    // can't starve streaming; they just make it yield briefly. Light before
+    // mesh, since the post-light cascade remeshes anyway.
+    for (const auto& [dist2, column] : toLightUrgent) {
+        SubmitLight(column, /*priority=*/true);
+    }
+    for (const auto& [dist2, coord] : toMeshUrgent) {
+        SubmitMesh(coord, /*priority=*/true);
+    }
 
     // Meshes first (visible geometry), then light (feeds meshes), then
     // generation (feeds everything).
