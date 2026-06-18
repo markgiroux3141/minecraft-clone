@@ -108,6 +108,48 @@ public:
     // from World's liquid-flow rules and the falling-block landing.
     void CrushDrops(const glm::ivec3& pos);
 
+    // --- M35 explosions (TNT + creeper) ------------------------------------
+    // A primed TNT block in flight (vanilla EntityTNTPrimed): a full cube with
+    // a fuse, gravity 0.04 b/tick^2, drag x0.98 (ground x0.7), that detonates an
+    // Explode(4.0) when the fuse runs out. Spawned by RMB'ing a TNT block with
+    // flint & steel (GameApp). NOT persisted — vanishes on quit, like dropped
+    // items (a rare edge case). Inherits Body (render-interpolated cube center).
+    struct PrimedTnt : Body {
+        int fuse = 80;     // ticks until detonation (vanilla 80 = 4 s)
+        int prevFuse = 80; // for the render flash interpolation
+    };
+    const std::vector<PrimedTnt>& PrimedTnts() const { return m_primedTnt; }
+    // Spawn a primed TNT at `pos` (cube bottom-center) with the given fuse.
+    void SpawnPrimedTnt(const glm::vec3& pos, int fuse);
+
+    // The shared explosion (vanilla Explosion.doExplosionA/B): casts the 16x16
+    // surface rays from `center`, removing blocks whose blast resistance the ray
+    // can punch through (skipping unbreakable + liquid), spawning a fraction of
+    // their drops; then damages + knocks back nearby mobs (DamageMob) and the
+    // player (the injected damagePlayer callback). Queues an ExplosionEvent for
+    // GameApp to play the boom + smoke. MUST NOT be called while m_mobs is being
+    // iterated by index (it erases dead mobs) — the creeper path defers it to
+    // after TickMobs's loop; the TNT path runs it from Tick() where m_mobs is idle.
+    void Explode(const glm::vec3& center, float size);
+
+    // A boom GameApp drains each tick for sound + particles (World/Entity stay
+    // audio/particle-free, like MobSoundEvents).
+    struct ExplosionEvent {
+        glm::vec3 pos;
+        float size;
+    };
+    std::vector<ExplosionEvent>& ExplosionEvents() { return m_explosions; }
+
+    // GameApp injects the player's feet + a damage callback (with knockback)
+    // before the tick, so both explosion triggers (creeper in TickMobs, TNT in
+    // Tick) can hurt the player while World stays Player-agnostic. Same shape as
+    // MobTickCtx's damagePlayer (already gated on Walk mode by GameApp).
+    void SetExplosionTargets(const glm::vec3& playerFeet,
+                             std::function<void(float dmg, const glm::vec3& fromPos)> damagePlayer) {
+        m_playerFeet = playerFeet;
+        m_damagePlayer = std::move(damagePlayer);
+    }
+
     // --- M32 mobs ----------------------------------------------------------
     // Mobs stay Player- and audio-agnostic, so mob AI gets the player state
     // it needs (feet + AABB + whether it's night for hostile spawns) and two
@@ -144,6 +186,11 @@ public:
     // collected) and wears the shears + plays the sound. Returns 0 for a
     // non-sheep or an already-sheared sheep so RMB falls through.
     int ShearMob(size_t index);
+    // M35: force-ignite a creeper (player RMB with flint & steel) — sets its
+    // fuse alight so it swells to detonation regardless of player range. Returns
+    // true if `index` was a creeper, false for any other mob (so RMB falls
+    // through to the normal place/use path).
+    bool IgniteMob(size_t index);
     // Mob sounds the sim wants played this tick (hurt/death). GameApp drains
     // and clears it after Tick, keeping the sim audio-free.
     std::vector<MobSound>& MobSoundEvents() { return m_mobSounds; }
@@ -166,6 +213,13 @@ private:
     // One tick of EntityItem physics for every dropped item: move with
     // axis-separated collision, drag, merge, despawn.
     void TickItemEntities();
+    // One tick of every primed TNT (gravity + drag + collision, fuse countdown,
+    // detonate at 0). Detonation runs Explode() — safe here, m_mobs is idle.
+    void TickPrimedTnt();
+    // M35: line-of-sight blast exposure of `target` from `center` — 1.0 if a
+    // single ray reaches it unobstructed, ~0.4 if a block blocks it (vanilla
+    // samples the whole AABB; this is the cheap approximation).
+    float BlastDensity(const glm::vec3& center, const glm::vec3& target) const;
     // Periodic natural spawn attempt around the player (light + caps + ring).
     void SpawnMobs(const MobTickCtx& ctx);
     // Drop a dead mob's loot and queue its death sound (caller erases it).
@@ -174,9 +228,16 @@ private:
     World& m_world; // block/collision queries (public API only); outlives this
     std::vector<FallingBlock> m_fallingBlocks; // settled back into blocks on dtor
     std::vector<ItemEntity> m_itemEntities;    // not persisted (see ItemEntity)
+    std::vector<PrimedTnt> m_primedTnt;        // not persisted (see PrimedTnt)
     std::vector<Mob> m_mobs;                   // persisted to mobs.dat
     std::vector<MobSound> m_mobSounds;         // drained by GameApp each tick
+    std::vector<ExplosionEvent> m_explosions;  // drained by GameApp each tick
     uint32_t m_mobTickCount = 0;               // gates the periodic spawn attempt
+    // M35 explosion targets, injected by GameApp before each tick (see
+    // SetExplosionTargets) so explosions can hurt the player without World
+    // knowing about Player.
+    glm::vec3 m_playerFeet{0.0f};
+    std::function<void(float dmg, const glm::vec3& fromPos)> m_damagePlayer;
 };
 
 } // namespace vc

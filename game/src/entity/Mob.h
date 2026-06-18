@@ -16,7 +16,15 @@ namespace vc {
 // (the M30/M31 vitals + box-model renderer plug in on top): health, a body AABB
 // it resolves against blocks, a skinned vox::BoxModel, and the vanilla
 // EntityLivingBase walk-cycle accumulators.
-enum class MobType : uint8_t { Pig = 0, Zombie = 1, Cow = 2, Sheep = 3, Chicken = 4, Count };
+enum class MobType : uint8_t {
+    Pig = 0,
+    Zombie = 1,
+    Cow = 2,
+    Sheep = 3,
+    Chicken = 4,
+    Creeper = 5, // M35: appended (mobs.dat ids stay stable)
+    Count
+};
 
 // How a mob is placed by natural spawning (the rule that gates which surface +
 // light level it spawns on). Data-driven so a new mob is a table row, not an
@@ -43,6 +51,12 @@ struct MobDef {
     int spawnWeight;     // relative weight among mobs sharing this spawn rule
     bool slowFall;       // no fall damage + damped descent (chicken)
     bool laysEggs;       // periodic egg drop (chicken)
+    // M35 creeper: explodeRadius > 0 swaps melee for the swell/fuse behavior
+    // (the AI chases like a hostile, swells when close or force-ignited, and
+    // detonates an Explode(radius) instead of biting). fuseTime is the swell
+    // length in ticks before detonation (vanilla EntityCreeper: 3.0 / 30).
+    float explodeRadius; // 0 = not a bomber
+    int fuseTime;        // ticks of swell before it blows
 };
 
 inline constexpr MobDef kMobDefs[] = {
@@ -50,21 +64,30 @@ inline constexpr MobDef kMobDefs[] = {
     // every mob; modelScale 1.0 until baby/variant sizing lands. Speeds are the
     // vanilla movementSpeed attribute scaled to the pig's existing 3.4 b/s
     // (0.25 attr) so passives amble at comparable feel.
+    // Trailing fields per row: ..., slowFall, laysEggs, explodeRadius, fuseTime.
     // Pig: 0.9x0.9, 10 hp, drops porkchops. (spawnWeight 10, vanilla)
     {0.45f, 0.9f, 10.0f, 3.4f, false, 0.0f, 0.0f, 24.0f, 1.0f, SpawnRule::SurfaceDay, 10, false,
-     false},
+     false, 0.0f, 0},
     // Zombie: 0.6x1.95, 20 hp, hits for 3. Chase 4.0 b/s is just under the
     // player's 4.3 walk (vanilla 0.23): walk away slowly, sprint to escape.
-    {0.3f, 1.95f, 20.0f, 4.0f, true, 3.0f, 16.0f, 24.0f, 1.0f, SpawnRule::Dark, 100, false, false},
+    {0.3f, 1.95f, 20.0f, 4.0f, true, 3.0f, 16.0f, 24.0f, 1.0f, SpawnRule::Dark, 100, false, false,
+     0.0f, 0},
     // Cow: 0.9x1.4, 10 hp, slow amble (vanilla 0.20 -> 2.7 b/s); beef + leather.
     {0.45f, 1.4f, 10.0f, 2.7f, false, 0.0f, 0.0f, 24.0f, 1.0f, SpawnRule::SurfaceDay, 8, false,
-     false},
+     false, 0.0f, 0},
     // Sheep: 0.9x1.3, 8 hp (vanilla 0.23 -> 3.1 b/s); mutton + (un-sheared) wool.
     {0.45f, 1.3f, 8.0f, 3.1f, false, 0.0f, 0.0f, 24.0f, 1.0f, SpawnRule::SurfaceDay, 12, false,
-     false},
+     false, 0.0f, 0},
     // Chicken: 0.4x0.7, 4 hp (vanilla 0.25 -> 3.4 b/s); chicken + feathers, lays
     // eggs, takes no fall damage (flutters down).
-    {0.2f, 0.7f, 4.0f, 3.4f, false, 0.0f, 0.0f, 24.0f, 1.0f, SpawnRule::SurfaceDay, 10, true, true},
+    {0.2f, 0.7f, 4.0f, 3.4f, false, 0.0f, 0.0f, 24.0f, 1.0f, SpawnRule::SurfaceDay, 10, true, true,
+     0.0f, 0},
+    // Creeper: 0.6x1.7, 20 hp, chases at vanilla 0.25 -> 3.4 b/s. attackDamage 0
+    // (it explodes, never bites); explodeRadius 3 / fuseTime 30 (vanilla). Owns
+    // the Dark rule alongside the zombie (weight 100 -> ~50/50 at night). Drops
+    // gunpowder only when KILLED before it blows (see MobDrops / TickMobs).
+    {0.3f, 1.7f, 20.0f, 3.4f, true, 0.0f, 16.0f, 24.0f, 1.0f, SpawnRule::Dark, 100, false, false,
+     3.0f, 30},
 };
 static_assert(sizeof(kMobDefs) / sizeof(kMobDefs[0]) == static_cast<size_t>(MobType::Count));
 
@@ -112,6 +135,14 @@ struct Mob : Body, LivingAnim {
     // its wool back, a chicken's egg cycle restarts).
     bool sheared = false; // sheep: wool harvested (hides the fur layer, no wool drop)
     int eggTimer = 0;     // chicken: ticks until the next egg (vanilla 6000..11999)
+
+    // M35 creeper swell state (runtime only). `fuse` counts up while swelling
+    // (near the player or force-ignited) and back down when safe; at fuseTime it
+    // detonates. `fuseLit` = force-ignited by flint & steel (swells to the end
+    // regardless of range). `prevFuse` feeds the render flash interpolation.
+    int fuse = 0;
+    int prevFuse = 0;
+    bool fuseLit = false;
 };
 
 // A positional sound the mob sim wants played (drained by GameApp so World

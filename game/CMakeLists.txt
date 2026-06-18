@@ -12,9 +12,12 @@ add_executable(game
     src/entity/ChickenModel.h
     src/entity/CowModel.cpp
     src/entity/CowModel.h
+    src/entity/CreeperModel.cpp
+    src/entity/CreeperModel.h
     src/entity/Entity.h
     src/entity/EntityManager.cpp
     src/entity/EntityManager.h
+    src/entity/Explosion.cpp
     src/entity/HumanoidModel.cpp
     src/entity/HumanoidModel.h
     src/entity/Mob.cpp

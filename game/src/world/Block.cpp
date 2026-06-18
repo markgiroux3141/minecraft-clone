@@ -67,6 +67,7 @@ BlockId CobbleStairs = 0;
 BlockId PlankStairs = 0;
 BlockId SandstoneStairs = 0;
 BlockId WhiteWool = 0;
+BlockId Tnt = 0;
 
 namespace {
 
@@ -140,6 +141,7 @@ void RegisterDefaults() {
     stone.hardness = 1.5f;
     stone.toolClass = ToolClass::Pickaxe;
     stone.needsPickaxe = true;
+    stone.blastResistance = 6.0f; // vanilla rock (resistance 30 / 5)
     Stone = registry.Register(std::move(stone));
 
     BlockDef dirt = BlockDef::Uniform("dirt", 1);
@@ -251,6 +253,7 @@ void RegisterDefaults() {
     cobble.hardness = 2.0f;
     cobble.toolClass = ToolClass::Pickaxe;
     cobble.needsPickaxe = true;
+    cobble.blastResistance = 6.0f; // vanilla rock
     Cobblestone = registry.Register(std::move(cobble));
 
     // M19: planks (tile 39) — crafted from any log, the wooden-tool
@@ -400,6 +403,7 @@ void RegisterDefaults() {
     obsidian.toolClass = ToolClass::Pickaxe;
     obsidian.needsPickaxe = true;
     obsidian.harvestLevel = 2;
+    obsidian.blastResistance = 1200.0f; // vanilla (resistance 6000 / 5): survives blasts
     Obsidian = registry.Register(std::move(obsidian));
 
     // M28: slabs + straight stairs (stone / cobblestone / planks / sandstone).
@@ -429,6 +433,18 @@ void RegisterDefaults() {
     wool.hardness = 0.8f;
     wool.soundType = SoundType::Cloth;
     WhiteWool = registry.Register(std::move(wool));
+
+    // M35: TNT (tiles 103 side / 104 top / 105 bottom — the first layers after
+    // the M34 wool/drops/shears at 95..102; keep both atlas scripts in sync).
+    // Vanilla: hardness 0 (instant break, drops itself), zero blast resistance
+    // so a nearby blast simply removes it; the grass material gives a soft
+    // place/break thud. Primed by RMB with flint & steel (see GameApp).
+    BlockDef tnt = BlockDef::Uniform("tnt", 103);
+    tnt.faceTiles[static_cast<size_t>(BlockFace::PosY)] = 104;
+    tnt.faceTiles[static_cast<size_t>(BlockFace::NegY)] = 105;
+    tnt.hardness = 0.0f;
+    tnt.soundType = SoundType::Grass;
+    Tnt = registry.Register(std::move(tnt));
 
     // M18 drop table (vanilla-ish; cross-references resolve here, after
     // every id exists). Leaves/tall grass/dead bush already drop nothing.

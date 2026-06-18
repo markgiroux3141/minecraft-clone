@@ -113,6 +113,11 @@ extern ItemId RawChicken;  // chicken
 extern ItemId Feather;     // chicken
 extern ItemId Egg;         // chicken lays these
 extern ItemId Shears;      // shear a sheep for wool
+// M35 explosives: gunpowder (creeper drop + TNT ingredient) and flint & steel
+// (a damageable igniter — RMB a TNT block to prime it, or a creeper to detonate
+// it). Flint & steel substitutes coal for vanilla's flint (no gravel/flint yet).
+extern ItemId Gunpowder;
+extern ItemId FlintAndSteel;
 
 // M33 armor: the 20 pieces register contiguously, material-major then slot,
 // starting at FirstArmor (leather helmet). ArmorPiece() addresses one by

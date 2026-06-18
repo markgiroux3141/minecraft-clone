@@ -331,6 +331,18 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   per-`MobType` mob voices. New content: white wool block + beef/leather/mutton/
   chicken/feather/egg/shears items (atlas tiles 95–102). Debug spawn keys
   V/N/M (cow/sheep/chicken).
+- **M35 — Explosion system → Creeper (+ TNT)** ✅: a shared
+  `EntityManager::Explode` (game/src/entity/Explosion.cpp) ported from 1.12
+  `Explosion.java` — the 16×16 surface-ray block carve (per-block
+  `BlockDef::blastResistance`; obsidian/bedrock survive), drop spawning, and the
+  distance-falloff damage to the player + mobs with knockback. Creeper (a new
+  `MobDef` row + `CreeperModel` + swell/fuse AI that detonates near the player or
+  when force-ignited) and a primed-TNT entity (`PrimedTnt`, vanilla physics +
+  fuse) both drive it. New content: TNT block + gunpowder (creeper drop) + flint
+  & steel igniter (RMB a TNT block to prime it / a creeper to detonate it), with
+  TNT (gunpowder+sand) and flint&steel (iron+coal) recipes (atlas tiles 103–107).
+  Debug spawn key K (creeper). World stays Player/audio/particle-agnostic — the
+  player-damage callback + explosion/sound events are injected/drained by GameApp.
 - **Backlog**: eating food (vanilla `ItemFood` — RMB-hold to eat, restore the
   M30 hunger/saturation; the M32/M34 meat drops exist but can't be eaten yet),
   creative-palette CATEGORY TABS (the palette scrolls now — tabs are the vanilla

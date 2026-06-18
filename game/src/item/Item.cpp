@@ -135,6 +135,8 @@ ItemId RawChicken = 0;
 ItemId Feather = 0;
 ItemId Egg = 0;
 ItemId Shears = 0;
+ItemId Gunpowder = 0;
+ItemId FlintAndSteel = 0;
 ItemId FirstArmor = 0;
 
 namespace {
@@ -293,6 +295,18 @@ void RegisterDefaults() {
     shears.maxStack = 1;
     shears.maxDamage = 238; // vanilla Items.SHEARS
     Shears = registry.Register(std::move(shears));
+
+    // M35 explosives (sprite tiles 106 gunpowder / 107 flint & steel — after
+    // the M35 TNT block tiles 103..105; keep BOTH atlas scripts in sync).
+    // Gunpowder is a plain sprite; flint & steel is a 64-use damageable igniter
+    // (vanilla durability 65, no dig bonus — mirrors shears).
+    Gunpowder = sprite("gunpowder", 106);
+    ItemDef flintAndSteel;
+    flintAndSteel.name = "flint and steel";
+    flintAndSteel.tile = 107;
+    flintAndSteel.maxStack = 1;
+    flintAndSteel.maxDamage = 64; // vanilla Items.FLINT_AND_STEEL (65 uses)
+    FlintAndSteel = registry.Register(std::move(flintAndSteel));
 
     // Coal ore's drop is the coal item — its id only exists now, after
     // item registration (same late-patch pattern as stone -> cobblestone).

@@ -113,6 +113,33 @@ void ParticleSystem::SpawnBlockHit(const World& world, const glm::ivec3& cell,
     Spawn(world, pos, vel, (Rand01() * 0.5f + 0.5f) * 0.6f, id, cell + faceNormal);
 }
 
+void ParticleSystem::SpawnExplosion(const World& world, const glm::vec3& center, float size) {
+    // Texture the debris from the ground just under the blast (the cell at the
+    // center is air now — the blast cleared it). No solid ground -> skip the
+    // visual (the boom sound still plays).
+    const int cx = static_cast<int>(std::floor(center.x));
+    const int cz = static_cast<int>(std::floor(center.z));
+    int cy = static_cast<int>(std::floor(center.y));
+    BlockId id = blocks::Air;
+    for (int dy = 0; dy <= 3 && id == blocks::Air; ++dy) {
+        id = world.GetBlock(cx, cy - dy, cz);
+    }
+    if (id == blocks::Air) {
+        return;
+    }
+    const glm::ivec3 lightCell{cx, cy, cz};
+    const int count = std::min(static_cast<int>(size * 16.0f), 96);
+    for (int i = 0; i < count; ++i) {
+        glm::vec3 dir{Rand01() * 2.0f - 1.0f, Rand01() * 2.0f - 1.0f, Rand01() * 2.0f - 1.0f};
+        const float len = glm::length(dir);
+        dir = len > 1e-4f ? dir / len : glm::vec3{0.0f, 1.0f, 0.0f};
+        const float speed = (Rand01() + Rand01() + 0.5f) * size * 0.12f; // b/tick
+        const glm::vec3 vel = dir * speed + glm::vec3{0.0f, 0.1f, 0.0f};
+        const glm::vec3 pos = center + dir * (Rand01() * size * 0.5f);
+        Spawn(world, pos, vel, Rand01() + 0.6f, id, lightCell);
+    }
+}
+
 void ParticleSystem::Tick(const World& world) {
     const auto moveAxis = [&](Particle& p, int axis, float delta) {
         if (delta == 0.0f) {

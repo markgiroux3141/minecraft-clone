@@ -18,6 +18,7 @@
 #include "InputState.h"
 #include "entity/ChickenModel.h"
 #include "entity/CowModel.h"
+#include "entity/CreeperModel.h"
 #include "entity/Entity.h"
 #include "entity/HumanoidModel.h"
 #include "entity/Mob.h"
@@ -82,6 +83,10 @@ private:
     // than any block target), shear it (wool drop + sound + shears wear) and
     // return true so RMB doesn't also place. False otherwise.
     bool TryShearSheep();
+    // M35: if the hand holds flint & steel, prime a targeted TNT block (-> a
+    // PrimedTnt entity) or ignite a creeper in reach, wearing the tool, and
+    // return true so RMB doesn't also place. False otherwise.
+    bool TryIgnite();
     // The block the camera eye sits in (air's def when none/no world).
     const vc::BlockDef& EyeLiquid() const;
     bool EyeInWater() const; // eye inside water (drives tint + fog)

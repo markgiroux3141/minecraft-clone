@@ -274,6 +274,7 @@ void GameApp::OnInit() {
     m_mobModels[static_cast<size_t>(vc::MobType::Cow)] = std::make_unique<vc::CowModel>();
     m_mobModels[static_cast<size_t>(vc::MobType::Sheep)] = std::make_unique<vc::SheepModel>();
     m_mobModels[static_cast<size_t>(vc::MobType::Chicken)] = std::make_unique<vc::ChickenModel>();
+    m_mobModels[static_cast<size_t>(vc::MobType::Creeper)] = std::make_unique<vc::CreeperModel>();
 
     m_outlineShader = vox::Shader::FromFiles("shaders/outline.vert", "shaders/outline.frag");
     constexpr float corners[] = {
@@ -484,6 +485,18 @@ void GameApp::OnTick(double dt) {
         if (m_player.ConsumeHurt()) {
             m_sounds.PlayHurt(); // M30: damage noise on each fresh hit
         }
+
+        // Fly is creative (M30): no damage. Reused by the mob melee AND the M35
+        // explosions (TNT in World::Tick, creeper in TickMobs).
+        const auto damagePlayer = [this](float dmg, const glm::vec3& from) {
+            if (m_player.GetMode() == Player::Mode::Walk) {
+                m_player.Hurt(dmg, from);
+            }
+        };
+        // M35: inject the player target before the world tick so a TNT
+        // detonation (ticked in World::Tick) can hurt the player; World stays
+        // Player-agnostic (the callback carries the dependency).
+        m_world->Entities().SetExplosionTargets(m_player.Position(), damagePlayer);
         m_world->Tick(); // scheduled block updates (falling sand, water flow)
 
         // M32: tick mobs (AI/physics/combat/spawning). World stays Player- and
@@ -494,13 +507,7 @@ void GameApp::OnTick(double dt) {
         mobCtx.playerHalfWidth = Player::kHalfWidth;
         mobCtx.playerHeight = Player::kHeight;
         mobCtx.isNight = IsNight();
-        mobCtx.damagePlayer = [&](float dmg, const glm::vec3& from) {
-            // Fly is creative (M30): no mob damage. Zombies still chase + shove
-            // so you can watch them harmlessly.
-            if (m_player.GetMode() == Player::Mode::Walk) {
-                m_player.Hurt(dmg, from);
-            }
-        };
+        mobCtx.damagePlayer = damagePlayer; // zombie melee + creeper blast (gated above)
         mobCtx.pushPlayer = [&](float dx, float dz) { m_player.ExternalPush(*m_world, dx, dz); };
         m_world->Entities().TickMobs(mobCtx);
         if (m_player.ConsumeHurt()) {
@@ -510,11 +517,22 @@ void GameApp::OnTick(double dt) {
             switch (s.kind) {
             case 0: m_sounds.PlayMobHurt(s.type, s.pos); break;
             case 1: m_sounds.PlayMobDeath(s.type, s.pos); break;
-            case 2: m_sounds.PlayChickenEgg(s.pos); break; // M34: egg plop
+            case 2: m_sounds.PlayChickenEgg(s.pos); break;    // M34: egg plop
+            case 3: m_sounds.PlayCreeperPrime(s.pos); break;  // M35: creeper fuse hiss
             default: break;
             }
         }
         m_world->Entities().MobSoundEvents().clear();
+
+        // M35: explosions (TNT detonation in World::Tick + creeper detonation in
+        // TickMobs) queued an event each — play the boom + spawn the debris puff.
+        for (const auto& e : m_world->Entities().ExplosionEvents()) {
+            m_sounds.PlayExplosion(e.pos);
+            if (m_particles) {
+                m_particles->SpawnExplosion(*m_world, e.pos, e.size);
+            }
+        }
+        m_world->Entities().ExplosionEvents().clear();
 
         // M33: wear the worn pieces by the damage they absorbed this tick
         // (vanilla InventoryPlayer.damageArmor: max(1, raw/4) per piece);
@@ -829,6 +847,12 @@ void GameApp::HandleInput(double frameDt, int scroll) {
         SpawnMobAhead(vc::MobType::Chicken);
     }
     m_input.spawnChickenKeyWasDown = chickenKey;
+    // M35: K = creeper.
+    const bool creeperKey = vox::Input::IsKeyDown(vox::Key::K);
+    if (creeperKey && !m_input.spawnCreeperKeyWasDown) {
+        SpawnMobAhead(vc::MobType::Creeper);
+    }
+    m_input.spawnCreeperKeyWasDown = creeperKey;
 
     // 1..9 select the hotbar slot; the wheel cycles it (vanilla: scroll
     // up moves left, wrapping).
@@ -1004,6 +1028,9 @@ void GameApp::HandleInput(double frameDt, int scroll) {
         if (TryShearSheep()) {
             // Shears + sheep beats placing; it does its own mob raycast.
             m_input.placeCooldown = kEditRepeatDelay;
+        } else if (TryIgnite()) {
+            // M35: flint & steel priming a TNT block / igniting a creeper beats
+            // placing; it does its own mob + block-target checks (+ its cooldown).
         } else if (m_target && targetId == vc::blocks::CraftingTable) {
             // Use beats place (vanilla, sans sneak): open the 3x3 grid.
             OpenContainer(State::Crafting);
@@ -1179,6 +1206,57 @@ bool GameApp::TryShearSheep() {
         }
     }
     return true;
+}
+
+bool GameApp::TryIgnite() {
+    vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
+    if (hand.id != vc::items::FlintAndSteel) {
+        return false; // not holding flint & steel -> normal RMB place/use
+    }
+    // Wear one use + break at the durability limit (shared by both ignite paths).
+    const auto wear = [&] {
+        if (const vc::ItemDef* def = vc::ItemRegistry::Get().Find(hand.id);
+            def && def->maxDamage > 0) {
+            if (++hand.damage >= def->maxDamage) {
+                hand = {};
+            }
+        }
+    };
+
+    // A creeper in reach (and nearer than any block target) gets force-ignited.
+    float mobDist = 0.0f;
+    const auto mobHit = m_world->Entities().RaycastMob(m_camera.Position(), m_camera.Forward(),
+                                                       kReachDistance, mobDist);
+    const float blockDist =
+        m_target ? glm::length(m_target->point - m_camera.Position()) : 1e9f;
+    if (mobHit && mobDist <= blockDist) {
+        const glm::vec3 mobPos = m_world->Entities().Mobs()[*mobHit].pos;
+        if (m_world->Entities().IgniteMob(*mobHit)) {
+            m_sounds.PlayCreeperPrime(mobPos);
+            m_viewModel->TriggerSwing();
+            wear();
+            m_input.placeCooldown = kEditRepeatDelay;
+            return true;
+        }
+        return false; // a non-creeper mob is in front -> nothing to ignite
+    }
+
+    // Otherwise, prime a targeted TNT block into a falling/primed entity.
+    if (m_target) {
+        const vc::BlockId targetId =
+            m_world->GetBlock(m_target->block.x, m_target->block.y, m_target->block.z);
+        if (targetId == vc::blocks::Tnt) {
+            const glm::vec3 center = glm::vec3(m_target->block) + 0.5f;
+            m_world->SetBlock(m_target->block, vc::blocks::Air);
+            m_world->Entities().SpawnPrimedTnt(center, 80); // vanilla 4 s fuse
+            m_sounds.PlayCreeperPrime(center);              // the fuse hiss doubles as the ignite
+            m_viewModel->TriggerSwing();
+            wear();
+            m_input.placeCooldown = kEditRepeatDelay;
+            return true;
+        }
+    }
+    return false;
 }
 
 const vc::BlockDef& GameApp::EyeLiquid() const {
@@ -1542,9 +1620,10 @@ void GameApp::OnRender(double alpha, double frameDt) {
         // shader bound again afterwards).
         const auto& fallingBlocks = m_world->Entities().FallingBlocks();
         const auto& items = m_world->Entities().ItemEntities();
+        const auto& primedTnt = m_world->Entities().PrimedTnts();
         const int crackStage =
             m_digCell ? std::min(static_cast<int>(m_digProgress * 10.0f) - 1, 9) : -1;
-        if (!fallingBlocks.empty() || !items.empty() || crackStage >= 0) {
+        if (!fallingBlocks.empty() || !items.empty() || !primedTnt.empty() || crackStage >= 0) {
             m_entityShader->Bind();
             m_entityShader->SetMat4("u_viewProj", viewProj);
             m_entityShader->SetInt("u_atlas", 0);
@@ -1590,6 +1669,28 @@ void GameApp::OnRender(double alpha, double frameDt) {
                 m_entityShader->SetFloat("u_yaw", 0.0f);
                 vox::Renderer::DrawIndexed(*m_entityCube);
             }
+
+            // M35: primed TNT — a near-full cube that blinks bright (u_unlit) in
+            // its final ticks, vanilla's white flash (fuse/5 % 2). Reset u_unlit
+            // afterwards so the item loop below renders lit.
+            for (const auto& tnt : primedTnt) {
+                const glm::vec3 pos =
+                    glm::mix(tnt.prevPos, tnt.pos, static_cast<float>(alpha));
+                setFaceLayers(vc::BlockRegistry::Get().Def(vc::blocks::Tnt).faceTiles);
+                setCellLight({static_cast<int>(std::floor(pos.x)),
+                              static_cast<int>(std::floor(pos.y + 0.5f)),
+                              static_cast<int>(std::floor(pos.z))});
+                const float fuseF =
+                    glm::mix(static_cast<float>(tnt.prevFuse), static_cast<float>(tnt.fuse),
+                             static_cast<float>(alpha));
+                const bool flash = (static_cast<int>(fuseF) / 5) % 2 == 0;
+                m_entityShader->SetFloat("u_unlit", flash ? 1.0f : 0.0f);
+                m_entityShader->SetFloat3("u_center", pos + glm::vec3{0.0f, 0.49f, 0.0f});
+                m_entityShader->SetFloat("u_scale", 0.98f);
+                m_entityShader->SetFloat("u_yaw", 0.0f);
+                vox::Renderer::DrawIndexed(*m_entityCube);
+            }
+            m_entityShader->SetFloat("u_unlit", 0.0f); // restore for the item/crack passes
 
             for (const auto& item : items) {
                 // Vanilla item presentation: hovers (sin, ~3 s period)

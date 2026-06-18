@@ -168,6 +168,18 @@ void Recipes::RegisterDefaults() {
     shapeRecipes(blocks::Planks, blocks::PlankSlab, blocks::PlankStairs);
     shapeRecipes(blocks::Sandstone, blocks::SandstoneSlab, blocks::SandstoneStairs);
 
+    // M35: TNT — vanilla's gunpowder/sand checkerboard (G=gunpowder, S=sand).
+    g_recipes.push_back(Shaped({"GSG", "SGS", "GSG"},
+                               {{'G', {items::Gunpowder}}, {'S', {blocks::Sand}}},
+                               {blocks::Tnt, 1}));
+    // M35: flint & steel — vanilla pairs iron with flint; we substitute coal
+    // (no gravel/flint block yet). Shapeless so either arrangement works.
+    Recipe flintAndSteel;
+    flintAndSteel.shapeless = true;
+    flintAndSteel.ingredients = {{items::IronIngot}, {items::Coal}};
+    flintAndSteel.result = {items::FlintAndSteel, 1};
+    g_recipes.push_back(std::move(flintAndSteel));
+
     GAME_INFO("Registered {} crafting recipes", g_recipes.size());
 }
 

@@ -111,6 +111,12 @@ struct BlockDef {
     // (digSpeed 1 / hardness / 30 damage per tick at 20 TPS). 0 breaks
     // instantly (plants). Unbreakable blocks use the flag, not -1.
     float hardness = 1.0f;
+    // M35 explosion resistance (vanilla getExplosionResistance = resistance/5):
+    // how strongly the block absorbs a blast ray. 0 = derive from hardness (see
+    // BlastResistance()); set explicitly for the blocks that must resist
+    // (obsidian 1200). The explosion routine skips `unbreakable` and `liquid`
+    // blocks outright, so those need no value here.
+    float blastResistance = 0.0f;
     // What breaking one of these yields: kDropSelf (default), Air for
     // nothing (leaves, tall grass), or a specific id. The value is a
     // unified ItemId (see Item.h) — block ids place, higher ids are
@@ -138,6 +144,10 @@ struct BlockDef {
     std::vector<ModelBox> model;
 
     uint16_t ResolveDrop(BlockId self) const { return drop == kDropSelf ? self : drop; }
+
+    // M35: blast resistance used by the explosion ray; 0 means derive from
+    // hardness (a sensible default for the soft-but-not-special blocks).
+    float BlastResistance() const { return blastResistance > 0.0f ? blastResistance : hardness; }
 
     static BlockDef Uniform(std::string name, uint16_t tile) {
         BlockDef def;
@@ -239,6 +249,11 @@ extern BlockId SandstoneStairs;
 // M34: white wool — a sheep drop (and shearing yield). Full opaque cube, soft
 // "cloth" material; colored variants/dyeing are a later (farming) milestone.
 extern BlockId WhiteWool;
+// M35: TNT — placed, then RMB'd with flint & steel to prime it into an
+// EntityManager::PrimedTnt that detonates after a fuse. Different top/side/
+// bottom tiles (like a log); zero blast resistance (chain-removable). Never
+// generated; crafted from gunpowder + sand.
+extern BlockId Tnt;
 
 // M18 crack overlay: destroy_stage_0..9 occupy ten consecutive texture
 // layers right after the block tiles — keep BOTH scripts/gen_textures.py

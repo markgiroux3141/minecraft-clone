@@ -10,6 +10,7 @@ namespace vc {
 void EntityManager::Tick() {
     TickFallingBlocks();
     TickItemEntities();
+    TickPrimedTnt();
 }
 
 void EntityManager::SettleFallingBlocks() {

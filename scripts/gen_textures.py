@@ -528,6 +528,39 @@ def shears_sprite(x, y):
     return (0, 0, 0, 0)
 
 
+# M35 placeholders (real art comes from import_mc_assets.py): a TNT block (red
+# body with a white-on-dark band, lighter top/bottom caps) + gunpowder/flint &
+# steel item blobs.
+def tnt_side(x, y):
+    if 6 <= y <= 9:  # the white "TNT" band
+        return speckle((228, 228, 228), x, y, 103, 6)
+    return speckle((182, 54, 44), x, y, 103, 12)
+
+
+def tnt_top(x, y):
+    return speckle((196, 80, 66), x, y, 104, 10)
+
+
+def tnt_bottom(x, y):
+    return speckle((120, 64, 52), x, y, 105, 10)
+
+
+def gunpowder_sprite(x, y):
+    # A dark-gray granular pile.
+    if (x - 8) ** 2 + (y - 9) ** 2 <= 30 and hash01(x, y, 106) > 0.2:
+        return speckle((72, 72, 76), x, y, 106, 16)
+    return (0, 0, 0, 0)
+
+
+def flint_and_steel_sprite(x, y):
+    # A gray steel bar (upper-left) + a dark flint chip (lower-right).
+    if 2 <= x <= 8 and 3 <= y <= 6:
+        return speckle((176, 176, 182), x, y, 107, 8)
+    if (x - 10) ** 2 + (y - 11) ** 2 <= 10:
+        return speckle((54, 50, 58), x, y, 107, 10)
+    return (0, 0, 0, 0)
+
+
 # M33 armor placeholder silhouettes (the real icons come from
 # import_mc_assets.py). Each shape is a flat material-colored stencil; the
 # four shapes mirror the equip order helmet/chestplate/leggings/boots.
@@ -625,7 +658,10 @@ TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top,
          _blob((236, 200, 170), 99),  # raw chicken
          feather_sprite,              # feather (100)
          egg_sprite,                  # egg (101)
-         shears_sprite]               # shears (102)
+         shears_sprite] + [           # shears (102)
+         # M35: TNT block (103 side / 104 top / 105 bottom) + gunpowder (106) +
+         # flint & steel (107), matching Block.cpp / Item.cpp RegisterDefaults.
+         tnt_side, tnt_top, tnt_bottom, gunpowder_sprite, flint_and_steel_sprite]
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:

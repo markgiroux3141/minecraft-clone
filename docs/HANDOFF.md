@@ -1,12 +1,17 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-18, written for a FRESH CONTEXT. M34 (PASSIVE ROSTER — cow +
-sheep + chicken) is now CODE COMPLETE awaiting user verification — see the "M34"
+Updated: 2026-06-18, written for a FRESH CONTEXT. M35 (EXPLOSION SYSTEM →
+CREEPER + TNT, roadmap step 3) is now DONE and USER-VERIFIED ("it all works") —
+see the "M35" section for the full design. It built the shared
+`EntityManager::Explode` routine and drives it from both a Creeper mob and a
+primed-TNT entity. The NEXT milestone is the PROJECTILE system → Skeleton
+(+ player bow/arrows), roadmap step 4 — see "Mob & enemy roadmap". M34 (PASSIVE
+ROSTER — cow +
+sheep + chicken) is CODE COMPLETE awaiting user verification — see the "M34"
 section for the full design + the user test checklist (debug spawn keys V = cow,
-N = sheep, M = chicken; re-run import_mc_assets.py first). It built on the M32 mob
+N = sheep, M = chicken). It built on the M32 mob
 framework and did the two roadmap generalizations (data-driven spawning + a
-model-scale hook). The NEXT milestone is the EXPLOSION system → Creeper (+ TNT),
-roadmap step 3 — see "Mob & enemy roadmap". M0-M20, M22 (AUDIO), and
+model-scale hook). M0-M20, M22 (AUDIO), and
 M23 (MODEL-BLOCK STREAM) are all done and USER-VERIFIED (M22: "beautiful,
 it all works"; M23: "everything looks perfect and the torch cap is where
 it should be"). M21 (ORES + FURNACE/SMELTING + torches), M24 (BLOCK
@@ -97,7 +102,8 @@ Quit. In game the cursor is captured: WASD move, mouse look, Space jump
 (walk) or rise (fly), LeftShift sink (fly), LeftControl sprint/boost,
 F toggles walk/fly, O toggles occlusion culling (debug), T fast-forwards
 world time (debug), G spawns/despawns the debug Steve (M31), B/C spawn a
-debug pig/zombie ~3 blocks ahead (M32), LMB hold-to-break in walk (crack overlay, drops pop
+debug pig/zombie ~3 blocks ahead (M32), V/N/M spawn a debug cow/sheep/chicken
+(M34), K spawns a debug creeper (M35), LMB hold-to-break in walk (crack overlay, drops pop
 out as item entities and vacuum into the inventory; tools dig faster,
 stone needs a pickaxe to drop) / instant pop in fly (creative-style, no
 drops), RMB place (consumes one) or use a crafting table (opens its
@@ -2238,6 +2244,107 @@ drowning / starvation still hurt at full strength through armor (they bypass it)
 while lava/cactus/mob hits are reduced. Quit + re-enter → worn armor restored
 from the `armor2` line; an OLD world loads fine with nothing worn.
 
+## M35 — explosion system → Creeper (+ TNT) (DONE & USER-VERIFIED)
+
+DONE & USER-VERIFIED 2026-06-18 ("it all works"). Roadmap step 3: build the
+shared EXPLOSION system once, then drive it from a Creeper mob and a primed-TNT
+entity. Decisions confirmed with the user before coding: terrain destruction ON
+(vanilla mobGriefing — explosions carve blocks, obsidian/bedrock survive); the
+full content chain (gunpowder + flint & steel + craftable TNT); Creeper + TNT
+both this milestone. Mechanics ported verbatim from the 1.12 source
+(world/Explosion.java, EntityCreeper, EntityTNTPrimed, ModelCreeper). NO new
+world needed. RE-IMPORT REQUIRED on this machine: `python
+scripts/import_mc_assets.py` — M35 added 5 atlas tiles (TNT side/top/bottom
+103..105, gunpowder 106, flint & steel 107 → texture array is 108 layers now),
+the creeper skin (`entity/creeper/creeper.png`), and the creeper sound family +
+the boom/fuse one-offs (199 sound files now: `mob/creeper/say1..4` + `death`,
+`random/explode1..4`, `random/fuse`). A clean clone with no overlay draws no
+creeper and is silent for the boom, like the M32 pig/zombie.
+
+- THE SHARED ROUTINE (`EntityManager::Explode`, game/src/entity/Explosion.cpp —
+  split out of EntityManager.cpp to stay within budget): a verbatim port of
+  Explosion.doExplosionA/B. (1) BLOCK CARVE: 16×16 surface rays march from the
+  center at 0.3 steps, strength `size*(0.7..1.3)` decremented 0.225/step and by
+  `(blastResistance+0.3)*0.3` per non-air block; cells the ray still has strength
+  at join a dedup set. `BlockDef::blastResistance` (Block.h, 0 = derive from
+  hardness; stone/cobble 6, obsidian 1200) gates it; `unbreakable` (bedrock) and
+  `liquid` blocks absorb the ray entirely (never carved). Each carved cell rolls a
+  `1/size` drop then `SetBlock(Air)` (which auto-schedules neighbor updates → sand
+  cascades + water backfill come free). (2) ENTITY DAMAGE (computed on the intact
+  world, before removal, like vanilla): within `2*size`, falloff
+  `d=(1-dist/2size)*density`, `dmg=(int)((d²+d)/2 * 7 * 2size + 1)`. `density` is a
+  single center→target LOS raycast (1.0 clear, 0.4 behind cover — vanilla samples
+  the full AABB; ours is the cheap approximation). Mobs go through `DamageMob`
+  (knockback/flash/drops/erase; iterate-by-index, re-check after erase). The
+  player goes through an injected `damagePlayer(dmg, center)` callback (reuses
+  `Player::Hurt` knockback). (3) Queues an `ExplosionEvent{pos,size}` GameApp
+  drains for the boom + debris puff.
+- PLAYER-CONTEXT PLUMBING: World stays Player/audio/particle-agnostic. GameApp
+  calls `EntityManager::SetExplosionTargets(playerFeet, damagePlayer)` before
+  `World::Tick()` each tick (the TNT path detonates inside `Tick()`); the same
+  callback is also the mob ctx's `damagePlayer` (creeper path, in `TickMobs`).
+  Fly mode = creative, no damage (the callback gates on Walk, same as mob melee).
+- CREEPER (a data row + an AI branch + a model): `MobType::Creeper` appended
+  (=5, mobs.dat ids stay stable). `MobDef` grew `explodeRadius` (3.0) + `fuseTime`
+  (30); `Mob` grew runtime `fuse`/`prevFuse`/`fuseLit` (NOT persisted, like
+  sheared/eggTimer). Row: 0.3×1.7, 20 hp, ~3.4 b/s, hostile, attackDamage 0
+  (it explodes, never bites), followRange 16, SpawnRule::Dark weight 100 (≈50/50
+  with the zombie at night), drops gunpowder 0–2 (only if KILLED before it blows).
+  TickMobs: when `explodeRadius>0` it chases like a hostile and swells — `fuse++`
+  while `fuseLit` OR within ~3 blocks of the player (the 0→1 edge queues a prime
+  hiss, MobSound kind 3), else `fuse--`; at `fuseTime` it pushes a deferred
+  detonation + erases itself (no drop). Detonations run AFTER the TickMobs loop
+  (Explode erases mobs, which would invalidate the loop index). `CreeperModel`
+  (entity/CreeperModel.cpp) is a verbatim ModelCreeper port (8³ head, upright
+  8×12×4 body, four 4×6×4 legs, 64×32 skin, `IMobModel` like CowModel).
+- TNT (a block + a primed entity): `blocks::Tnt` (top/side/bottom tiles, hardness
+  0, drops self, 0 blast resistance). `EntityManager::PrimedTnt` (a Body + fuse) —
+  vanilla EntityTNTPrimed physics (gravity 0.04 b/tick², drag ×0.98, ground
+  ×0.7/−0.5 bounce, AABB collision), ticked in `EntityManager::Tick()`; at fuse 0
+  it `Explode(4.0)` + erases. NOT persisted (vanishes on quit, like dropped items
+  — a rare edge case). Rendered in GameApp's entity-cube pass (block_entity
+  shader) as a 0.98 cube that blinks bright (u_unlit, vanilla's `fuse/5 % 2`
+  flash) near detonation.
+- CONTENT + CRAFTING: `items::Gunpowder` (sprite) + `items::FlintAndSteel` (a
+  64-use damageable igniter, mirrors Shears). Recipes (Crafting.cpp): TNT =
+  gunpowder/sand checkerboard `GSG/SGS/GSG`; flint & steel = shapeless
+  `{iron ingot, coal}` (a pragmatic substitute — no gravel/flint block exists,
+  documented). The creative palette auto-lists all three.
+- IGNITION (`GameApp::TryIgnite`, RMB chain beside TryShearSheep/TryUseBucket):
+  holding flint & steel, a creeper in reach (nearer than any block) gets
+  `IgniteMob` (sets fuseLit → swells to detonation regardless of range); else a
+  targeted TNT block is removed + replaced with a `SpawnPrimedTnt` (80-tick fuse).
+  Either path wears the tool one use + plays the fuse hiss.
+- AUDIO (`GameSounds`): the per-MobType voice array grew to 6 (creeper
+  hurt/death from `mob/creeper/`). `PlayExplosion` (random/explode*) +
+  `PlayCreeperPrime` (random/fuse, pitch 0.5) added; GameApp drains
+  ExplosionEvents → boom + `ParticleSystem::SpawnExplosion` (a radial debris
+  burst textured from the ground under the blast), and MobSound kind 3 → prime.
+- TESTABILITY: debug key K spawns a creeper ~3 blocks ahead (KeyCodes.h grew
+  `Key::K`). TNT + flint & steel + gunpowder are all in the creative palette.
+- KNOWN M35 LIMITS / decisions: primed TNT isn't persisted (gone on quit);
+  creepers persist as mobs but their fuse/lit state resets on load (runtime-only);
+  the blast-density LOS is a single ray, not the full-AABB sample (so cover
+  reduces damage coarsely); a TNT block caught in a blast is just removed, it
+  doesn't chain-prime (vanilla re-primes it — backlog); no charged/powered
+  creepers (no lightning/weather); the creeper has no white swell-flash on the
+  model (the entity_model shader's hurt tint is red-only — the prime hiss + audio
+  carry it; a swell flash would need a shader uniform — backlog).
+
+WHAT THE USER SHOULD TEST (NO new world; re-run `import_mc_assets.py` first for
+the creeper skin + sounds): press K to spawn a creeper ahead — it should chase
+you, and when you let it get within ~3 blocks it hisses, swells, and after ~1.5 s
+EXPLODES, leaving a crater and knocking/hurting you (stand back to watch one blow
+without dying). LMB-kill a creeper before it blows → it drops gunpowder. Grab TNT
++ flint & steel from the creative palette: place a TNT block, RMB it with flint &
+steel → it hops up, blinks, and after ~4 s makes a bigger crater. Hold flint &
+steel and RMB a creeper → it force-ignites (swells even if you back away). Confirm
+obsidian/bedrock survive a blast (place obsidian from the palette next to TNT).
+Craft TNT (gunpowder + sand in the checkerboard) and flint & steel (iron ingot +
+coal) at a table. Confirm armor reduces the blast damage, and that drops from
+carved blocks pop out + can be picked up. Quit + re-enter → creepers you left are
+restored (their fuse resets); primed TNT is gone (expected).
+
 ## M34 — passive mob roster: cow + sheep + chicken (CODE COMPLETE)
 
 CODE COMPLETE 2026-06-18, awaiting user verification. The first step of the
@@ -2435,7 +2542,9 @@ FRAMEWORK-READY (no new system — a `MobDef` row + a model + a skin + a drop):
 NEEDS A SYSTEM FIRST (each system also unlocks player features — build once,
 reuse):
 - Creeper → an EXPLOSION system (sphere block-removal + damage falloff + fuse/
-  ignite). Also unlocks TNT, ghast fireballs, beds, end crystals.
+  ignite). ✅ DONE in M35 (see the M35 section): the shared
+  `EntityManager::Explode` also powers TNT now and is ready for ghast fireballs,
+  beds, end crystals.
 - Skeleton → a PROJECTILE/arrow entity + ranged AI. Also unlocks the player
   bow & arrows, snowballs, eggs, fireballs, thrown potions.
 - Breeding / baby animals → a FOOD/EATING system (+ a model SCALE factor for
@@ -2450,10 +2559,10 @@ RECOMMENDED ORDER:
    section above). Both small framework generalizations landed here: SpawnMobs is
    now data-driven (per-MobDef SpawnRule + weight) and the render path carries a
    per-mob modelScale (baby/variant hook).
-3. **Explosion system → Creeper (+ TNT)** ← NEXT. The iconic missing enemy; one
-   system, big payoff. (Build the sphere block-removal + damage falloff + fuse/
-   ignite once; it also unlocks TNT, ghast fireballs, beds, end crystals.)
-4. **Projectile system → Skeleton (+ player bow/arrows)**.
+3. **Explosion system → Creeper (+ TNT)** ✅ CODE COMPLETE (see the M35 section
+   above). The shared `EntityManager::Explode` drives both the creeper and a
+   primed-TNT entity; ready to reuse for ghast fireballs, beds, end crystals.
+4. **Projectile system → Skeleton (+ player bow/arrows)** ← NEXT.
 5. **Food/eating → breeding + babies** (pairs with farming).
 6. **Bespoke movers** as desired: spider climbing, slime splitting, enderman
    teleport, bats.

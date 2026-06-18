@@ -31,6 +31,11 @@ public:
     void SpawnBlockHit(const World& world, const glm::ivec3& cell, const glm::ivec3& faceNormal,
                        BlockId id);
 
+    // M35 explosion debris: a radial burst of chips flung from the blast center,
+    // textured from the ground beneath it (the terrain it tore up); count scales
+    // with the blast size. The boom sound is GameApp's; this is the visual puff.
+    void SpawnExplosion(const World& world, const glm::vec3& center, float size);
+
     void Tick(const World& world); // 20 TPS, alongside the entity ticks
 
     void Render(const vox::PerspectiveCamera& camera, double alpha, float sunLight,

@@ -69,6 +69,8 @@ public:
     void PlayMobDeath(MobType type, const glm::vec3& pos);
     void PlaySheepShear(const glm::vec3& pos);  // M34: shears snip
     void PlayChickenEgg(const glm::vec3& pos);  // M34: egg "plop"
+    void PlayExplosion(const glm::vec3& pos);    // M35: TNT/creeper boom
+    void PlayCreeperPrime(const glm::vec3& pos); // M35: creeper fuse hiss
 
     // --- Looping furnace crackle (one voice per lit furnace) ----------------
     // Reconciles the live voices against the world's currently-lit furnaces:
@@ -117,7 +119,7 @@ private:
     // Per-MobType voices (mob/<folder>/{say,hurt,death}; folder from
     // MobSoundFolder). Some mobs lack a distinct hurt clip in 1.12 (pig, cow,
     // sheep, chicken reuse "say"), so PlayMobHurt falls back to the say set.
-    static constexpr int kMobVoiceCount = 5; // == MobType::Count (asserted in .cpp)
+    static constexpr int kMobVoiceCount = 6; // == MobType::Count (asserted in .cpp)
     struct MobVoice {
         ClipSet say;
         ClipSet hurt;
@@ -126,6 +128,8 @@ private:
     std::array<MobVoice, kMobVoiceCount> m_mobVoices{};
     ClipSet m_sheepShear{}; // mob/sheep/shear*
     ClipSet m_chickenEgg{}; // mob/chicken/plop*
+    ClipSet m_explode{};    // random/explode* (M35 TNT/creeper boom)
+    ClipSet m_creeperFuse{}; // random/fuse (M35 creeper prime hiss)
     vox::ClipHandle m_pop{};
     vox::ClipHandle m_fireLoop{};
     // Music is decoded on demand (one track at a time), so we keep paths, not

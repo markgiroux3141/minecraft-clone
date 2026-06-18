@@ -58,6 +58,8 @@ COPIES = [
     # Chicken's skin is flat (entity/chicken.png) in 1.12; copy it into a
     # chicken/ subfolder so the model path matches cow/sheep.
     ("textures/entity/chicken.png", "textures/entity/chicken/chicken.png"),
+    # M35 creeper skin (64x32).
+    ("textures/entity/creeper/creeper.png", "textures/entity/creeper/creeper.png"),
     # Fire overlay (M30): the first-person "on fire" flames — vanilla's
     # ItemRenderer.renderFireInFirstPerson uses fire_layer_1. 16x512 vertical
     # animation strip (32 frames of 16x16); the HUD tiles a frame across the
@@ -276,6 +278,13 @@ def build_atlas(mc: Path, out_path: Path) -> None:
         load_tile(items / "feather.png"),
         load_tile(items / "egg.png"),
         load_tile(items / "shears.png"),
+        # M35: TNT block (103 side / 104 top / 105 bottom) + gunpowder (106) +
+        # flint & steel (107) — matches Block.cpp / Item.cpp RegisterDefaults.
+        load_tile(blocks / "tnt_side.png"),
+        load_tile(blocks / "tnt_top.png"),
+        load_tile(blocks / "tnt_bottom.png"),
+        load_tile(items / "gunpowder.png"),
+        load_tile(items / "flint_and_steel.png"),
     ]
 
     strip = Image.new("RGBA", (TILE * len(tiles), TILE))
@@ -309,11 +318,14 @@ def want_sound(rel: str) -> str | None:
     # music/game/<name>.ogg to music/<name>.ogg (the game loads it flat).
     for family in ("dig/", "step/", "ambient/cave/", "liquid/", "fire/", "item/bucket/",
                    "damage/", "mob/pig/", "mob/zombie/", "mob/cow/", "mob/sheep/",
-                   "mob/chicken/"):
+                   "mob/chicken/", "mob/creeper/"):
         if rel.startswith(family):
             return rel
     if rel in ("random/pop.ogg", "random/glass1.ogg", "random/glass2.ogg",
-               "random/glass3.ogg"):
+               "random/glass3.ogg",
+               # M35: TNT/creeper boom + the creeper fuse hiss.
+               "random/explode1.ogg", "random/explode2.ogg", "random/explode3.ogg",
+               "random/explode4.ogg", "random/fuse.ogg"):
         return rel
     if rel.startswith("music/game/") and rel.count("/") == 2:
         return "music/" + rel.rsplit("/", 1)[1]

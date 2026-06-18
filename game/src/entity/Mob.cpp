@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
+#include <vector>
 
 #include "entity/EntityManager.h"
 #include "world/Block.h"
@@ -23,6 +25,7 @@ std::vector<MobDrop> MobDrops(MobType type, bool sheared) {
         return drops;
     }
     case MobType::Chicken: return {{items::RawChicken, 1, 1}, {items::Feather, 0, 2}};
+    case MobType::Creeper: return {{items::Gunpowder, 0, 2}}; // only if killed before it blows
     default: return {};
     }
 }
@@ -34,6 +37,7 @@ const char* MobSoundFolder(MobType type) {
     case MobType::Cow: return "cow";
     case MobType::Sheep: return "sheep";
     case MobType::Chicken: return "chicken";
+    case MobType::Creeper: return "creeper";
     default: return "pig";
     }
 }
@@ -267,14 +271,31 @@ int EntityManager::ShearMob(size_t index) {
     return 1 + MobRandInt(3); // vanilla EntitySheep.onSheared: 1..3 wool
 }
 
+bool EntityManager::IgniteMob(size_t index) {
+    if (index >= m_mobs.size()) {
+        return false;
+    }
+    Mob& mob = m_mobs[index];
+    if (MobDefOf(mob.type).explodeRadius <= 0.0f) {
+        return false; // not a creeper -> RMB falls through
+    }
+    mob.fuseLit = true; // swells to detonation regardless of range now
+    return true;
+}
+
 void EntityManager::TickMobs(const MobTickCtx& ctx) {
     const glm::vec3 playerFeet = ctx.playerFeet;
+
+    // Creeper detonations are deferred to after the loop: Explode() erases dead
+    // mobs (DamageMob), which would invalidate this loop's index. {center, radius}.
+    std::vector<std::pair<glm::vec3, float>> pendingExplosions;
 
     for (size_t i = 0; i < m_mobs.size();) {
         Mob& mob = m_mobs[i];
         const MobDef& def = MobDefOf(mob.type);
         mob.prevPos = mob.pos;
         mob.prevYaw = mob.yaw;
+        mob.prevFuse = mob.fuse;
         if (mob.hurtTime > 0) {
             --mob.hurtTime;
         }
@@ -435,12 +456,36 @@ void EntityManager::TickMobs(const MobTickCtx& ctx) {
             }
         }
 
-        // --- Hostile melee -------------------------------------------------
-        if (chasing && mob.attackCooldown <= 0 &&
+        // --- Hostile melee (biting mobs only; creeper deals 0 + explodes) --
+        if (def.attackDamage > 0.0f && chasing && mob.attackCooldown <= 0 &&
             distXZ <= def.halfWidth + ctx.playerHalfWidth + 0.7f &&
             std::abs(toPlayer.y) < 2.0f && ctx.damagePlayer) {
             ctx.damagePlayer(def.attackDamage, mob.pos);
             mob.attackCooldown = 20; // ~1 s between swings
+        }
+
+        // --- Creeper swell / fuse (M35) ------------------------------------
+        // Vanilla EntityCreeper + AICreeperSwell: swell (fuse counts up) while
+        // force-ignited OR within ~3 blocks of the player, otherwise the fuse
+        // recedes. A 0->swelling edge plays the prime hiss. At fuseTime it
+        // detonates — deferred past the loop (Explode erases mobs). It consumes
+        // itself, so NO death drop (gunpowder only drops from a kill below).
+        if (def.explodeRadius > 0.0f) {
+            const bool inSwellRange = glm::length(toPlayer) <= 3.0f;
+            if (mob.fuseLit || inSwellRange) {
+                if (mob.fuse == 0) {
+                    m_mobSounds.push_back({mob.type, mob.pos, 3}); // primed hiss
+                }
+                ++mob.fuse;
+            } else if (mob.fuse > 0) {
+                --mob.fuse;
+            }
+            if (mob.fuse >= def.fuseTime) {
+                pendingExplosions.push_back(
+                    {mob.pos + glm::vec3{0.0f, def.height * 0.5f, 0.0f}, def.explodeRadius});
+                m_mobs.erase(m_mobs.begin() + static_cast<ptrdiff_t>(i));
+                continue; // gone — no death drop
+            }
         }
 
         // --- Egg laying (chicken) -----------------------------------------
@@ -482,6 +527,11 @@ void EntityManager::TickMobs(const MobTickCtx& ctx) {
             continue;
         }
         ++i;
+    }
+
+    // Creeper detonations, now that the iteration is done (Explode erases mobs).
+    for (const auto& [center, radius] : pendingExplosions) {
+        Explode(center, radius);
     }
 
     // Periodic natural spawn attempt (~ every 2 s).

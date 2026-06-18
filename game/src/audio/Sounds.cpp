@@ -94,11 +94,14 @@ void GameSounds::Load(vox::AudioEngine& audio) {
     // shear.ogg / plop.ogg are UNNUMBERED in 1.12, so the material+N probe in
     // LoadSet misses them — load by explicit name (like splash/death).
     for (auto [set, rel] : {std::pair{&m_sheepShear, "mc/sounds/mob/sheep/shear.ogg"},
-                            std::pair{&m_chickenEgg, "mc/sounds/mob/chicken/plop.ogg"}}) {
+                            std::pair{&m_chickenEgg, "mc/sounds/mob/chicken/plop.ogg"},
+                            std::pair{&m_creeperFuse, "mc/sounds/random/fuse.ogg"}}) {
         if (vox::ClipHandle h = audio.LoadClip(vox::assets::Resolve(rel)); h) {
             set->clips[set->count++] = h;
         }
     }
+    // M35: TNT/creeper boom (random/explode1..4).
+    m_explode = LoadSet("random", "explode", 4);
 
     m_pop = audio.LoadClip(vox::assets::Resolve("mc/sounds/random/pop.ogg"));
     m_fireLoop = audio.LoadClip(vox::assets::Resolve("mc/sounds/fire/fire.ogg"));
@@ -222,6 +225,19 @@ void GameSounds::PlaySheepShear(const glm::vec3& pos) {
 void GameSounds::PlayChickenEgg(const glm::vec3& pos) {
     if (!m_audio || !m_chickenEgg.count) return;
     m_audio->Play3D(Pick(m_chickenEgg), pos, vox::AudioBus::Sfx, 0.6f, Jitter(1.0f, 0.1f));
+}
+
+void GameSounds::PlayExplosion(const glm::vec3& pos) {
+    if (!m_audio || !m_explode.count) return;
+    // Vanilla ENTITY_GENERIC_EXPLODE: loud (volume 4, clamped by the engine),
+    // pitched down ~0.7 with a wide jitter.
+    m_audio->Play3D(Pick(m_explode), pos, vox::AudioBus::Sfx, 1.0f, Jitter(0.7f, 0.14f));
+}
+
+void GameSounds::PlayCreeperPrime(const glm::vec3& pos) {
+    if (!m_audio || !m_creeperFuse.count) return;
+    // Vanilla ENTITY_CREEPER_PRIMED: volume 1.0, pitch 0.5 (the long hiss).
+    m_audio->Play3D(Pick(m_creeperFuse), pos, vox::AudioBus::Sfx, 0.8f, 0.5f);
 }
 
 vox::VoiceHandle GameSounds::StartFurnaceLoop(const glm::vec3& blockCenter) {
