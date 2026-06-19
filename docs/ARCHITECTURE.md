@@ -402,6 +402,31 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   100). Debug: `L` spawns a spider. Deferred: spider jockeys, leap-at-target,
   cave spider, climbing-anim head/body tilt, tight 2-wide natural-spawn clearance
   check (wide mobs use the 1-wide column gate today).
+- **Planned — REDSTONE arc (RS1–RS4)** (scoped with the user 2026-06-19, full
+  breakdown in `HANDOFF.md` "Redstone roadmap"). The next major arc after the
+  passive/survival/mob work. Redstone is the hardest vanilla system, but it
+  decomposes into one contained engineering core + a long tail of data-driven
+  components, and every prerequisite already exists (M13 scheduled block updates,
+  M24 meta byte, M23 model blocks, block entities, the M21 ore + M25 deep world,
+  and — the key reuse — the `LightEngine`'s 0–15 BFS-from-sources/attenuate-per-step
+  propagation, which is the exact shape of redstone power). Order:
+  - **RS1 — power core + minimal loop** (lever → dust → lamp): a `RedstoneEngine`
+    modelled on `LightEngine` (per-cell power 0–15, recomputed on M13 updates),
+    redstone ore (deep, M21 framework) + dust item, redstone wire block (flat,
+    power-tinted), lever + redstone block sources, redstone lamp consumer. This is
+    the one genuinely scary milestone; everything after drops onto its bus.
+  - **RS2 — logic + timing**: redstone torch (source + NOT-gate inverter, M23
+    model like the torch), repeater (one-way diode + 2/4/6/8-tick delay via
+    `ScheduleBlockUpdate`), button (pulse) + pressure plate (entity detection).
+    Adds strong/weak block-powering rules. With these you can build real gates.
+  - **RS3 — analog + consumers**: comparator (compare/subtract, reads container
+    fullness), daylight sensor (reads sky light), note block, dispenser/dropper
+    (reuse the item/projectile spawn path), powered doors/trapdoors/fence gates.
+  - **RS4 — pistons** (its own sub-arc — block MOVEMENT is a separate hard system):
+    piston + sticky piston, the moving-block entity (reuse the M13 FallingBlock
+    handover pattern), 12-block push limit, immovable-block rules, sticky pull-back.
+  - Deferred / possible RS5: rails + minecarts (needs a rideable entity), hoppers,
+    observers, BUD/quasi-connectivity quirks.
 - **Backlog**: creative-palette CATEGORY TABS (the palette scrolls now — tabs are the vanilla
   follow-up once the item count justifies categories), stair auto-corner shapes
   (inner/outer), per-face light sampling

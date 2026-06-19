@@ -2995,6 +2995,76 @@ restored hunger/food persists (M30 vitals save). COOKING: put raw meat in a
 furnace input slot + any fuel → after ~10 s out comes the cooked variant; the
 cooked meats restore more hunger than raw and appear in the creative palette.
 
+## Redstone roadmap (scoped with the user 2026-06-19)
+
+The NEXT major arc (after parking the remaining bespoke movers). Redstone is the
+hardest vanilla system to get right — but the fear is front-loaded into ONE
+milestone (RS1, the power-propagation engine), and that engine is structurally
+the `LightEngine` we already shipped and trust. Everything after RS1 is the same
+"add data + a little behavior to an existing bus" pattern as adding a block or a
+mob. Pistons (the other genuinely hard piece, because block MOVEMENT is its own
+system) are cleanly separated into the last sub-arc.
+
+WHY IT'S LESS SCARY THAN IT LOOKS — every prerequisite is already in the codebase:
+- **Propagation = light.** Redstone power is a 0–15 value that radiates from
+  sources and drops 1 per block — IDENTICAL in shape to block light. `LightEngine`
+  already does BFS-from-sources / attenuate-per-step / COW snapshot / versioned
+  recompute. A `RedstoneEngine` is that algorithm again, with directional/stateful
+  twists layered on for repeaters & comparators (RS2/RS3).
+- **Update model = M13.** `World::ScheduleBlockUpdate(pos, delayTicks)` +
+  `ProcessBlockUpdate` already drive water/sand cascades at 20 TPS with arbitrary
+  tick delays — exactly what redstone signal updates + repeater delays (2/4/6/8
+  game ticks) need. No new tick infrastructure.
+- **Component state = M24 meta.** The per-cell `GetMeta/SetMeta` byte already
+  stores facing (4 bits); the spare bits hold lever on/off, repeater delay step,
+  comparator mode. Block entities + persistence exist for anything bigger.
+- **Component models = M23.** The torch is already a float-model block; lever /
+  repeater / comparator / button reuse that stream. The lamp reuses the furnace
+  front's lit/unlit texture-swap. Redstone ore drops into the M21 ore framework +
+  M25 deep world.
+
+THE ARC (each milestone is a runnable vertical slice; do them in order):
+
+- **RS1 — power core + the minimal loop (lever → dust → lamp).** THE scary one.
+  Build the `RedstoneEngine` (per-cell power 0–15, recomputed on M13 block updates
+  over the affected network/region; model it on `LightEngine`). Add: redstone ore
+  (deep underground, M21 framework, drops redstone dust), the redstone dust ITEM,
+  the redstone WIRE block (flat overlay on a solid block's top face, tinted dark→
+  bright red by power; v1 can connect to all neighbours and refine connection
+  geometry later), the LEVER (toggle source, M23 model + M24 facing) and REDSTONE
+  BLOCK (constant 15), and the REDSTONE LAMP (lit/unlit texture-swap consumer).
+  SIMPLIFY for v1: skip the strong/weak-power distinction — a lamp lights if an
+  adjacent wire has power>0 or an adjacent source is on; refine when RS2 needs it.
+  Verify: lever → dust run → lamp lights when flipped. Once this works, redstone
+  is "real" and the rest is incremental.
+- **RS2 — logic + timing.** Redstone TORCH (a source AND an inverter — off when its
+  attachment block is powered; introduces the NOT gate + torch burnout). REPEATER
+  (one-way diode, restores signal to 15, 2/4/6/8-tick delay via the M13 scheduler;
+  the trickiest timing piece — delay state in M24 meta). BUTTON (momentary pulse) +
+  PRESSURE PLATE (powers while a player/mob stands on it — reuse the entity-position
+  queries the mob/pickup code already does). Add the strong/weak block-powering
+  rules deferred from RS1. Deliverable: real logic gates (AND/OR/NOT/XOR) buildable.
+- **RS3 — analog + more consumers.** COMPARATOR (compare/subtract modes; reads
+  container fullness → analog signal — needs a container fill-level query).
+  DAYLIGHT SENSOR (reads sky light, which the day/night + light system already
+  exposes). NOTE BLOCK. DISPENSER/DROPPER (spawn items — reuse the M18 item-entity
+  / M36 projectile spawn path). Powered DOORS / TRAPDOORS / FENCE GATES.
+- **RS4 — pistons (its own sub-arc — block movement).** PISTON + STICKY PISTON:
+  push up to 12 blocks, the moving-block animation (reuse the M13 FallingBlock
+  entity↔mesh handover pattern — hide the source cell, animate the entity, settle
+  into the destination cell), immovable-block rules (obsidian/bedrock/block
+  entities), sticky pull-back, drop-on-illegal-push. Biggest single piece; depends
+  only on RS1's power core, so it can land well after RS2/RS3.
+- **Deferred / possible RS5:** rails + minecarts (needs a rideable entity — a new
+  system), hoppers (item transport), observers, and the BUD/quasi-connectivity
+  quirks (probably skip — they're bug-features).
+
+OPEN QUESTIONS to settle when RS1 starts: (a) does redstone go BEFORE or AFTER a
+farming milestone (farming gives M38's wheat/carrot/seeds a real source; redstone
+is the bigger lift) — the user leaned redstone-is-more-important; (b) wire
+connection-geometry fidelity for RS1 (simple all-neighbours cross vs full vanilla
+dot/line/L/T/up-the-side shapes — recommend simple first, refine later).
+
 ## Backlog (after M28)
 
 With the M24 meta layer + M23 model stream + M28's partial collision all in
