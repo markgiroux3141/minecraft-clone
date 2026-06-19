@@ -1,6 +1,25 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-18, written for a FRESH CONTEXT. M38 (BREEDING + BABY ANIMALS —
+Updated: 2026-06-19, written for a FRESH CONTEXT. M39 (SPIDER — the first
+roadmap-step-6 BESPOKE MOVER, wall-climbing) is now DONE and USER-VERIFIED
+("that works") — see the "M39" section for the full design (debug spawn key
+`L` = spider). The user decided to PARK the remaining bespoke movers
+(slime/enderman/bats) for now and tackle REDSTONE next — see the "Redstone
+roadmap" section near the end for the scoped milestone breakdown. It adds `MobType::Spider` (a wide
+1.4×0.9 melee crawler, 16 hp), a `SpiderModel` (port of vanilla ModelSpider —
+head/neck/body + 8 phase-paired legs), string + spider-eye drops (atlas tiles
+121/122 → atlas is 123 layers now), and the bespoke MOVEMENT: two data-driven
+`MobDef` flags — `canClimb` (vanilla `PathNavigateClimber`/`isOnLadder`: pinned
+against a wall it wants to cross → ascends instead of stalling) and
+`neutralInLight` (vanilla brightness give-up: only actually chases when it's dark
+where it stands, otherwise wanders). IMPORTANT after pulling: re-run
+`import_mc_assets.py` — M39 added the spider skin (`entity/spider/spider.png`),
+the `mob/spider/` sound family (say/step/death; 225 sound files now), and 2 atlas
+item tiles. The NEXT milestone is open — more roadmap-step-6 bespoke movers (slime
+split / enderman teleport / bats) or a FARMING milestone (would give M38's
+wheat/carrot/seeds a real in-world source).
+
+M38 (BREEDING + BABY ANIMALS —
 roadmap step 5's PAYOFF) is now DONE and USER-VERIFIED ("that works") — see
 the "M38" section for the full design. It adds three
 breeding items (wheat / carrot / seeds, plain non-food sprites in the creative
@@ -158,7 +177,8 @@ F toggles walk/fly, O toggles occlusion culling (debug), T fast-forwards
 world time (debug), G spawns/despawns the debug Steve (M31), B/C spawn a
 debug pig/zombie ~3 blocks ahead (M32), V/N/M spawn a debug cow/sheep/chicken
 (M34), K spawns a debug creeper (M35), J spawns a debug skeleton (M36), H spawns
-a debug baby cow (M38), RMB-hold
+a debug baby cow (M38), L spawns a debug spider (M39 — climbs walls, only
+aggressive in the dark), RMB-hold
 with a bow drawn from the hand charges + fires an arrow on release (M36, consumes
 an Arrow; full draw hits harder), RMB-hold a FOOD item (raw meat / rotten flesh)
 eats it over ~1.6 s when hunger isn't full (M37, restores hunger/saturation,
@@ -2756,14 +2776,95 @@ RECOMMENDED ORDER:
    their breed item → love mode → a half-scale child (the M34 `modelScale` hook is
    the baby-size lever); baby grows up on a timer; baby state persists. Pairs with
    a future farming milestone (which would give the breed items a real source).
-6. **Bespoke movers** as desired: spider climbing, slime splitting, enderman
-   teleport, bats. ← roughly NEXT (or a FARMING milestone — crops would give
-   wheat/carrot/seeds an in-world source beyond the creative palette).
+6. **Bespoke movers** as desired: spider climbing ✅ CODE COMPLETE (M39 — see the
+   M39 section), then slime splitting / enderman teleport / bats as desired. ←
+   spider was the first; the rest are roughly NEXT (or a FARMING milestone — crops
+   would give wheat/carrot/seeds an in-world source beyond the creative palette).
 
 TWO SMALL GENERALIZATIONS to slip in during step 2 — both ✅ DONE in M34 (see the
 M34 section): `World::SpawnMobs` (now in game/src/entity/Mob.cpp) is data-driven
 via `MobDef::spawnRule` + `spawnWeight`, and the mob render path folds in
 `MobDef::modelScale` (the baby/slime size multiplier hook, all 1.0 today).
+
+## M39 — Spider (bespoke movers I: wall-climb) (how it works)
+
+DONE and USER-VERIFIED 2026-06-19 ("that works"). The FIRST roadmap-step-6
+"bespoke mover": a wide melee crawler that CLIMBS walls and is NEUTRAL in
+daylight. Builds entirely on the M32/M34 mob framework — no new system, the
+bespoke parts are two data-driven `MobDef` flags + their handling in `TickMobs`.
+RE-IMPORT on this machine: `import_mc_assets.py` (spider skin + `mob/spider/`
+sounds + 2 atlas tiles → 123 layers).
+
+- DATA (`Mob.h`): `MobType::Spider` appended (id 7; mobs.dat ids stay stable).
+  `MobDef` grew two trailing bools WITH default initializers (`canClimb` /
+  `neutralInLight`, both default false) so only the spider row lists them — the
+  other 7 rows are untouched (aggregate init omits the defaulted trailing
+  members). Spider row: 1.4×0.9 AABB (halfWidth 0.7, height 0.9 — wide + low,
+  vanilla `setSize(1.4, 0.9)`), 16 hp, 4.1 b/s (vanilla 0.30 movementSpeed scaled
+  off the pig's 0.25→3.4), hostile melee 2, `SpawnRule::Dark` weight 100 (even
+  with zombie/creeper/skeleton at night), `canClimb`+`neutralInLight` true.
+- CLIMB (`TickMobs`, vanilla `PathNavigateClimber` + `isOnLadder`): a runtime
+  `Mob::besideClimbable` flag mirrors vanilla's `setBesideClimbableBlock(
+  isCollidedHorizontally)`. It's REFRESHED at the end of the move (after the
+  auto-step block) and READ at the start of the next tick's gravity phase — the
+  vanilla ordering (set in onUpdate, used next moveEntityWithHeading). Refresh
+  rule: `besideClimbable = moving && (hitX||hitZ) && movedSq < wantSq*0.25` — i.e.
+  it WANTED to move but a horizontal collision kept it from advancing. That
+  `movedSq < wantSq*0.25` test is what excludes a successful 1-block AUTO-STEP
+  (which advances fully) from triggering a climb — climb only engages on walls
+  taller than the step. When climbing, the gravity phase overrides `vel.y =
+  kClimbSpeed` (4 b/s up, vanilla motionY 0.2 b/tick) and zeroes fallDistance, so
+  it scales the wall; once it clears the top there's no more horizontal collision,
+  besideClimbable goes false, and gravity drops it onto the ledge. All gated on
+  `def.canClimb`, so every other mob is byte-for-byte unaffected.
+- NEUTRAL-IN-LIGHT (`TickMobs`): the hostile-chase branch gained `&& (!def
+  .neutralInLight || IsDarkAt(mob.pos, def.height))`. `IsDarkAt` (a lambda at the
+  top of TickMobs) mirrors the `SpawnRule::Dark` gate (blockLight ≤ 7 AND (night
+  OR skyLight ≤ 7)) at the mob's body cell. In daylight the condition fails → the
+  spider falls through to the wander branch (vanilla `AISpiderAttack`/`AISpiderTarget`
+  give up when brightness ≥ 0.5). It still climbs walls while wandering (vanilla —
+  climbing is target-independent). NOTE: a daytime spider does NOT retaliate when
+  hit (the framework has no hurt-by-target/aggro-on-attack concept yet) — minor
+  deviation, deferred.
+- MODEL (`entity/SpiderModel.h/.cpp`): a verbatim port of vanilla ModelSpider on
+  `vox::BoxModel` (64×32 skin) — head (texOffset 32,4), neck (0,0), body (0,12),
+  and 8 legs (all texOffset 18,0; right legs origin -15, left legs -1, pivots
+  stepping z 2,2,1,1,0,0,-1,-1). `SetRotationAngles` ports the leg base Z/Y splay
+  + the four-phase scuttle (fY cos at 2× freq, fZ |sin|), applied in the BoxModel's
+  vanilla Z-then-Y-then-X order. Uses the standard `modelOffsetPx` 24 like every
+  mob; the splayed legs rest ~1px into the ground (cosmetic, reads grounded —
+  matches vanilla's low slung look). Wired in GameApp's mob-model table + the
+  generic mob render pass handles it (no variant, baby/modelScale fold in as usual).
+- DROPS / SOUNDS / ITEMS: `MobDrops` → string 0-2 + spider eye 0-1 (player-kill
+  secondary, like vanilla). `MobSoundFolder` → "spider"; the per-type voice loop
+  auto-loads `mob/spider/` (say/step/death — no distinct hurt, falls back to say;
+  `kMobVoiceCount` bumped 7→8). New items `items::String` (121) + `items::SpiderEye`
+  (122), plain sprites appended after M38's seeds in BOTH atlas scripts; spider eye
+  is non-food for now (vanilla poison waits for a status-effect system — kept a
+  sprite-only brewing ingredient like gunpowder). The creative palette auto-lists
+  both. `import_mc_assets.py` got the spider skin COPY + the 2 atlas tiles +
+  `mob/spider/` in `want_sound`.
+- TESTABILITY: debug key `L` spawns a spider ~3 blocks ahead. Persistence is
+  type-generic (mobs.dat), so a spider saves/loads like any mob — savetest needed
+  no change and still passes (incl. the pre-M38 back-compat read).
+- KNOWN M39 LIMITS / deferrals: natural spider spawns use the framework's 1-WIDE
+  column clearance check, so a 1.4-wide spider can spawn snug against a wall (the
+  first ticks' collision resolves it; debug spawns drop it in open air); no spider
+  jockey (skeleton riders), no leap-at-target, no cave spider, no climbing-pose
+  head/body tilt, no daytime retaliation. More step-6 movers (slime/enderman/bats)
+  are the next candidates.
+
+WHAT THE USER SHOULD TEST (NO new world; re-run `import_mc_assets.py` first for
+the spider skin + sounds): press `L` → an eight-legged spider drops in and
+scuttles (verify the body sits low on splayed, trotting legs + it makes spider
+chittering). Build a wall ≥2 blocks tall in front of it and stand on top / behind
+it AT NIGHT (or in a dark cave) → it should chase, hit the wall, and CLIMB
+straight up to reach you (not just stand there). In DAYLIGHT on the surface a
+spider should ignore you and wander (it may still climb walls it bumps). Hit it
+with a sword → string (and sometimes a spider eye) pop out and vacuum up; both
+also appear in the creative palette. Quit + re-enter → a spider you left is still
+there. Spiders should also appear naturally at night / in dark caves alongside
+the other hostiles.
 
 ## M38 — Breeding + baby animals (how it works)
 

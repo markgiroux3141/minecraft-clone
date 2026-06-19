@@ -388,6 +388,20 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   (appended fields, back-compatible read); love/cooldown are runtime-only. Debug:
   `H` spawns a baby cow. Deferred: heart particles + XP orbs on breeding; smaller
   baby hitbox (babies keep the adult AABB); vanilla big-head baby proportions.
+- **M39 — Spider (bespoke movers I: wall-climb)** ✅: the first roadmap-step-6
+  bespoke mover. New `MobType::Spider` (1.4×0.9 AABB, 16 hp, ~4.1 b/s, melee 2),
+  `SpiderModel` (port of vanilla ModelSpider — head/neck/body + 8 phase-paired
+  legs, 64×32 skin), drops string + spider eye (sprite tiles 121/122). Two new
+  data-driven `MobDef` flags (default false, so other rows are untouched):
+  `canClimb` ports vanilla `PathNavigateClimber`/`isOnLadder` — when the mob is
+  pinned against a wall it still wants to move into (`Mob::besideClimbable`,
+  refreshed each tick from the move result), the next tick it ascends at
+  `kClimbSpeed` instead of stalling; `neutralInLight` ports the spider's
+  brightness give-up rule — the chase branch in `TickMobs` is gated on `IsDarkAt`,
+  so a daytime spider just wanders. Shares the `SpawnRule::Dark` table (weight
+  100). Debug: `L` spawns a spider. Deferred: spider jockeys, leap-at-target,
+  cave spider, climbing-anim head/body tilt, tight 2-wide natural-spawn clearance
+  check (wide mobs use the 1-wide column gate today).
 - **Backlog**: creative-palette CATEGORY TABS (the palette scrolls now — tabs are the vanilla
   follow-up once the item count justifies categories), stair auto-corner shapes
   (inner/outer), per-face light sampling

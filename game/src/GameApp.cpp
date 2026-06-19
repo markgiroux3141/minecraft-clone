@@ -287,6 +287,8 @@ void GameApp::OnInit() {
     m_mobModels[static_cast<size_t>(vc::MobType::Skeleton)] = std::make_unique<vc::HumanoidModel>(
         "mc/textures/entity/skeleton/skeleton.png", vc::HumanoidModel::Pose::BowAim, 0.0f, 64.0f,
         32.0f, true, /*thinArms=*/true);
+    // M39 spider: the eight-legged climber (64x32 skin, like the cow).
+    m_mobModels[static_cast<size_t>(vc::MobType::Spider)] = std::make_unique<vc::SpiderModel>();
     m_arrowModel = std::make_unique<vc::ArrowModel>(); // M36 flying-arrow renderer
     m_heldBow = std::make_unique<vc::HeldBowModel>();  // M36 bow in the skeleton's hand
 
@@ -981,6 +983,12 @@ void GameApp::HandleInput(double frameDt, int scroll) {
         SpawnMobAhead(vc::MobType::Cow, /*baby=*/true);
     }
     m_input.spawnBabyKeyWasDown = babyKey;
+    // M39: L = spider (climbs walls; aggressive only in the dark).
+    const bool spiderKey = vox::Input::IsKeyDown(vox::Key::L);
+    if (spiderKey && !m_input.spawnSpiderKeyWasDown) {
+        SpawnMobAhead(vc::MobType::Spider);
+    }
+    m_input.spawnSpiderKeyWasDown = spiderKey;
 
     // 1..9 select the hotbar slot; the wheel cycles it (vanilla: scroll
     // up moves left, wrapping).

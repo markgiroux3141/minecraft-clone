@@ -155,6 +155,12 @@ extern ItemId CookedChicken;
 extern ItemId Wheat;
 extern ItemId Carrot;
 extern ItemId Seeds;
+// M39 spider drops (plain sprites). String is the primary drop (also a vanilla
+// bow/lead ingredient); the spider eye is a player-kill secondary — non-food for
+// now (vanilla spider eye poisons, which waits for a status-effect system, so it
+// stays a sprite-only brewing ingredient like gunpowder).
+extern ItemId String;
+extern ItemId SpiderEye;
 
 // The three bow_pulling_0..2 draw-frame sprite tiles (atlas 109..111). The view
 // model swaps the held bow's tile among these by draw charge (vanilla ItemBow

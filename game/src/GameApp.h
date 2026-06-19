@@ -27,6 +27,7 @@
 #include "entity/MobModel.h"
 #include "entity/PigModel.h"
 #include "entity/SheepModel.h"
+#include "entity/SpiderModel.h"
 #include "item/Inventory.h"
 #include "render/Particles.h"
 #include "render/PlayerDoll.h"

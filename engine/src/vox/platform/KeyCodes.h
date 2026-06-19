@@ -26,6 +26,7 @@ enum class Key : int {
     H = 72,
     J = 74,
     K = 75,
+    L = 76,
     M = 77,
     N = 78,
     O = 79,

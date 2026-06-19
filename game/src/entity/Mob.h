@@ -24,6 +24,7 @@ enum class MobType : uint8_t {
     Chicken = 4,
     Creeper = 5, // M35: appended (mobs.dat ids stay stable)
     Skeleton = 6, // M36: appended
+    Spider = 7,   // M39: appended (first bespoke mover — wall-climber)
     Count
 };
 
@@ -64,6 +65,14 @@ struct MobDef {
     bool ranged;       // true = ranged attacker (fires arrows)
     float bowRange;    // preferred firing distance, blocks
     int shootInterval; // ticks between shots
+    // M39 spider (bespoke mover). canClimb ports vanilla PathNavigateClimber +
+    // isOnLadder: when the mob bumps a wall it still wants to move into, it climbs
+    // up instead of stalling. neutralInLight ports the spider's brightness>=0.5
+    // give-up rule — a hostile that only actually chases when it's dark where it
+    // stands, otherwise it just wanders (so daytime spiders are passive). Both
+    // default false via member initializers, so the other rows don't list them.
+    bool canClimb = false;
+    bool neutralInLight = false;
 };
 
 inline constexpr MobDef kMobDefs[] = {
@@ -102,6 +111,12 @@ inline constexpr MobDef kMobDefs[] = {
     // Drops arrows + bones (see MobDrops).
     {0.3f, 1.99f, 20.0f, 3.4f, true, 0.0f, 16.0f, 24.0f, 1.0f, SpawnRule::Dark, 100, false, false,
      0.0f, 0, true, 15.0f, 30},
+    // Spider: 1.4x0.9 (wide + low), 16 hp, ~4.1 b/s (vanilla 0.30 movementSpeed
+    // scaled off the pig's 0.25->3.4). Hostile melee for 2; canClimb + neutralInLight
+    // (vanilla EntitySpider: climbs walls via PathNavigateClimber, neutral when
+    // bright). Shares the Dark spawn rule with the other hostiles (weight 100).
+    {0.7f, 0.9f, 16.0f, 4.1f, true, 2.0f, 16.0f, 24.0f, 1.0f, SpawnRule::Dark, 100, false, false,
+     0.0f, 0, false, 0.0f, 0, /*canClimb=*/true, /*neutralInLight=*/true},
 };
 static_assert(sizeof(kMobDefs) / sizeof(kMobDefs[0]) == static_cast<size_t>(MobType::Count));
 
@@ -189,6 +204,12 @@ struct Mob : Body, LivingAnim {
     int growUpTimer = 0;
     int loveTimer = 0;
     int breedCooldown = 0;
+
+    // M39 spider climb (runtime only). True when the spider was blocked
+    // horizontally last tick while wanting to move (vanilla isCollidedHorizontal
+    // -> setBesideClimbableBlock); a climbing mob ascends the wall next tick
+    // instead of stalling. Reset every tick from the move result.
+    bool besideClimbable = false;
 };
 
 // A positional sound the mob sim wants played (drained by GameApp so World

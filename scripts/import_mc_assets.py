@@ -60,6 +60,8 @@ COPIES = [
     ("textures/entity/chicken.png", "textures/entity/chicken/chicken.png"),
     # M35 creeper skin (64x32).
     ("textures/entity/creeper/creeper.png", "textures/entity/creeper/creeper.png"),
+    # M39 spider skin (64x32, the eight-legged SpiderModel).
+    ("textures/entity/spider/spider.png", "textures/entity/spider/spider.png"),
     # M36 skeleton skin (64x64, reuses the biped model with thin limbs) + the
     # arrow projectile texture (32x32, sampled by the in-flight ArrowModel).
     ("textures/entity/skeleton/skeleton.png", "textures/entity/skeleton/skeleton.png"),
@@ -311,6 +313,9 @@ def build_atlas(mc: Path, out_path: Path) -> None:
         load_tile(items / "wheat.png"),
         load_tile(items / "carrot.png"),
         load_tile(items / "seeds_wheat.png"),
+        # M39 spider drops (121 string / 122 spider eye) — matches Item.cpp.
+        load_tile(items / "string.png"),
+        load_tile(items / "spider_eye.png"),
     ]
 
     strip = Image.new("RGBA", (TILE * len(tiles), TILE))
@@ -344,7 +349,7 @@ def want_sound(rel: str) -> str | None:
     # music/game/<name>.ogg to music/<name>.ogg (the game loads it flat).
     for family in ("dig/", "step/", "ambient/cave/", "liquid/", "fire/", "item/bucket/",
                    "damage/", "mob/pig/", "mob/zombie/", "mob/cow/", "mob/sheep/",
-                   "mob/chicken/", "mob/creeper/", "mob/skeleton/"):
+                   "mob/chicken/", "mob/creeper/", "mob/skeleton/", "mob/spider/"):
         if rel.startswith(family):
             return rel
     if rel in ("random/pop.ogg", "random/glass1.ogg", "random/glass2.ogg",

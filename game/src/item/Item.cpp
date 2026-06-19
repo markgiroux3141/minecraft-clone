@@ -170,6 +170,8 @@ ItemId CookedChicken = 0;
 ItemId Wheat = 0;
 ItemId Carrot = 0;
 ItemId Seeds = 0;
+ItemId String = 0;
+ItemId SpiderEye = 0;
 ItemId FirstArmor = 0;
 
 namespace {
@@ -394,6 +396,13 @@ void RegisterDefaults() {
     Wheat = sprite("wheat", 118);
     Carrot = sprite("carrot", 119);
     Seeds = sprite("seeds", 120);
+
+    // M39 spider drops (sprite tiles 121 string / 122 spider eye — appended after
+    // the M38 breeding items; keep BOTH atlas scripts in sync). Plain sprites; the
+    // spider eye's vanilla poison waits for a status-effect system. Auto-listed in
+    // the creative palette.
+    String = sprite("string", 121);
+    SpiderEye = sprite("spider eye", 122);
 
     // Coal ore's drop is the coal item — its id only exists now, after
     // item registration (same late-patch pattern as stone -> cobblestone).

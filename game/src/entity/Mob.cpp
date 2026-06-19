@@ -27,6 +27,7 @@ std::vector<MobDrop> MobDrops(MobType type, bool sheared) {
     case MobType::Chicken: return {{items::RawChicken, 1, 1}, {items::Feather, 0, 2}};
     case MobType::Creeper: return {{items::Gunpowder, 0, 2}}; // only if killed before it blows
     case MobType::Skeleton: return {{items::Arrow, 0, 2}, {items::Bone, 0, 2}};
+    case MobType::Spider: return {{items::String, 0, 2}, {items::SpiderEye, 0, 1}};
     default: return {};
     }
 }
@@ -50,6 +51,7 @@ const char* MobSoundFolder(MobType type) {
     case MobType::Chicken: return "chicken";
     case MobType::Creeper: return "creeper";
     case MobType::Skeleton: return "skeleton";
+    case MobType::Spider: return "spider";
     default: return "pig";
     }
 }
@@ -72,6 +74,7 @@ constexpr float kGravity = 32.0f;
 constexpr float kTerminal = 60.0f;
 constexpr float kStepHeight = 1.0f; // mobs step a full block (vanilla default)
 constexpr float kSkin = 0.001f;
+constexpr float kClimbSpeed = 4.0f; // spider wall-climb (vanilla motionY 0.2 b/tick = 4 b/s)
 
 // Single-axis AABB move + clamp against block collision boxes — the same
 // axis-separated resolution as Player::MoveAxis, parameterized by the mob's
@@ -325,6 +328,16 @@ bool EntityManager::IgniteMob(size_t index) {
 void EntityManager::TickMobs(const MobTickCtx& ctx) {
     const glm::vec3 playerFeet = ctx.playerFeet;
 
+    // M39: is it dark enough at a mob's body cell for a neutralInLight hostile
+    // (spider) to be aggressive? Mirrors the SpawnRule::Dark gate in SpawnMobs.
+    const auto IsDarkAt = [&](const glm::vec3& p, float height) {
+        const glm::ivec3 c{static_cast<int>(std::floor(p.x)),
+                           static_cast<int>(std::floor(p.y + height * 0.5f)),
+                           static_cast<int>(std::floor(p.z))};
+        const uint8_t pk = m_world.PackedLightAt(c);
+        return ChunkLight::Block(pk) <= 7 && (ctx.isNight || ChunkLight::Sky(pk) <= 7);
+    };
+
     // Creeper detonations are deferred to after the loop: Explode() erases dead
     // mobs (DamageMob), which would invalidate this loop's index. {center, radius}.
     std::vector<std::pair<glm::vec3, float>> pendingExplosions;
@@ -414,9 +427,12 @@ void EntityManager::TickMobs(const MobTickCtx& ctx) {
                 ShootArrowAt(eye, aim);
                 mob.shootCooldown = def.shootInterval;
             }
-        } else if (def.hostile && distXZ <= def.followRange) {
+        } else if (def.hostile && distXZ <= def.followRange &&
+                   (!def.neutralInLight || IsDarkAt(mob.pos, def.height))) {
             // Walk straight at the player (simple ground pathing; auto-step
-            // handles 1-block rises).
+            // handles 1-block rises). A neutralInLight mob (spider) only takes
+            // this branch in the dark — in daylight the condition fails and it
+            // falls through to wander (vanilla EntitySpider give-up rule).
             chasing = true;
             mob.moving = true;
             wish = glm::normalize(glm::vec2{toPlayer.x, toPlayer.z});
@@ -490,6 +506,16 @@ void EntityManager::TickMobs(const MobTickCtx& ctx) {
         if (def.slowFall && !mob.onGround && mob.vel.y < 0.0f) {
             mob.vel.y *= 0.6f;
         }
+        // M39 spider climb (vanilla isOnLadder): if it was pinned against a wall
+        // last tick and still wants to move, ascend instead of being stopped flat.
+        // The wall-detection (mob.besideClimbable) is refreshed after the
+        // horizontal move below; this reads last tick's state, like vanilla's
+        // setBesideClimbableBlock running in onUpdate after the move.
+        const bool climbing = def.canClimb && mob.besideClimbable && mob.moving;
+        if (climbing) {
+            mob.vel.y = kClimbSpeed;
+            mob.fallDistance = 0.0f;
+        }
 
         // Horizontal movement with an acceleration ramp: step the current
         // velocity toward the target (wish*speed, or 0 when idle) by a capped
@@ -549,6 +575,18 @@ void EntityManager::TickMobs(const MobTickCtx& ctx) {
                 mob.vel = flatEndVel;
                 mob.onGround = true;
             }
+        }
+
+        // M39: refresh the spider's wall-pin flag for next tick's climb (vanilla
+        // setBesideClimbableBlock(isCollidedHorizontally)). Only when it wanted to
+        // move but barely advanced despite a horizontal collision — an auto-step
+        // that cleared a 1-block rise advances fully and is NOT a climbable wall.
+        if (def.canClimb) {
+            const float movedSq = (mob.pos.x - flatStart.x) * (mob.pos.x - flatStart.x) +
+                                  (mob.pos.z - flatStart.z) * (mob.pos.z - flatStart.z);
+            const float wantSq = (flatVel.x * flatVel.x + flatVel.z * flatVel.z) *
+                                 (kTickDt * kTickDt);
+            mob.besideClimbable = mob.moving && (hitX || hitZ) && movedSq < wantSq * 0.25f;
         }
 
         // --- Walk-cycle animation accumulators (vanilla EntityLivingBase) ---

@@ -34,6 +34,8 @@ add_executable(game
     src/entity/Projectile.cpp
     src/entity/SheepModel.cpp
     src/entity/SheepModel.h
+    src/entity/SpiderModel.cpp
+    src/entity/SpiderModel.h
     # Items / inventory / crafting
     src/item/Crafting.cpp
     src/item/Crafting.h

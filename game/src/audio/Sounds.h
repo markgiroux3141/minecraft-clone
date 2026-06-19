@@ -122,7 +122,7 @@ private:
     // Per-MobType voices (mob/<folder>/{say,hurt,death}; folder from
     // MobSoundFolder). Some mobs lack a distinct hurt clip in 1.12 (pig, cow,
     // sheep, chicken reuse "say"), so PlayMobHurt falls back to the say set.
-    static constexpr int kMobVoiceCount = 7; // == MobType::Count (asserted in .cpp)
+    static constexpr int kMobVoiceCount = 8; // == MobType::Count (asserted in .cpp)
     struct MobVoice {
         ClipSet say;
         ClipSet hurt;

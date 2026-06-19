@@ -556,6 +556,23 @@ def seeds_sprite(x, y):
     return (0, 0, 0, 0)
 
 
+# M39 spider drops (real art from import_mc_assets.py): a pale tangled string and
+# a dark spider eye with a reddish iris.
+def string_sprite(x, y):
+    # A loose diagonal coil of off-white thread.
+    if abs((x + y) % 6 - 3) <= 1 and 2 <= x <= 13 and 2 <= y <= 13:
+        return speckle((220, 220, 220), x, y, 121, 10)
+    return (0, 0, 0, 0)
+
+
+def spider_eye_sprite(x, y):
+    if (x - 8) ** 2 + (y - 8) ** 2 <= 24:
+        if (x - 8) ** 2 + (y - 8) ** 2 <= 5:
+            return speckle((196, 64, 48), x, y, 122, 10)  # reddish iris
+        return speckle((58, 40, 44), x, y, 122, 10)        # dark eyeball
+    return (0, 0, 0, 0)
+
+
 # M35 placeholders (real art comes from import_mc_assets.py): a TNT block (red
 # body with a white-on-dark band, lighter top/bottom caps) + gunpowder/flint &
 # steel item blobs.
@@ -733,7 +750,9 @@ TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top,
          _blob((176, 130, 78), 117)] + [  # cooked chicken
          # M38 breeding items (118 wheat / 119 carrot / 120 seeds) — matching
          # Item.cpp RegisterDefaults.
-         wheat_sprite, carrot_sprite, seeds_sprite]
+         wheat_sprite, carrot_sprite, seeds_sprite,
+         # M39 spider drops (121 string / 122 spider eye).
+         string_sprite, spider_eye_sprite]
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:
