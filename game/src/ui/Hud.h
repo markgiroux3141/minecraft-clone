@@ -26,12 +26,15 @@ struct HudVitals {
     bool show = false;
 };
 
-// In-game overlay: crosshair + hotbar + vitals. Stateless — layout is recomputed
-// from the screen size every frame, scaled in integer steps (Minecraft GUI scale).
+// In-game overlay: crosshair + hotbar + vitals + a debug coordinate readout.
+// Stateless — layout is recomputed from the screen size every frame, scaled in
+// integer steps (Minecraft GUI scale). `playerPos` is the player's feet-center
+// world position; the HUD shows its floored block coords top-left.
 class Hud {
 public:
     static void Draw(vox::UiRenderer& ui, glm::vec2 screen, std::span<const ItemStack> hotbar,
-                     size_t selectedSlot, const GuiTextures& tex, const HudVitals& vitals);
+                     size_t selectedSlot, const GuiTextures& tex, const HudVitals& vitals,
+                     const glm::vec3& playerPos);
 };
 
 } // namespace vc

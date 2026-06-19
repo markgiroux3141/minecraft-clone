@@ -494,6 +494,19 @@ void World::ProcessBlockUpdate(const glm::ivec3& worldPos) {
             m_entities.SpawnBlockDrop(worldPos, def.ResolveDrop(id), 1);
             SetBlock(worldPos, blocks::Air);
         }
+    } else if (def.redstone) {
+        // RS1: wire + the floor lever pop without solid ground below (like a
+        // torch). Otherwise recompute the power network and refresh adjacent
+        // lamps. Sources (redstone block) and lamps have no support rule. The
+        // SetBlock that woke this cell also woke its 6 neighbours, so a change
+        // next to a run reaches the wire cells through this same branch.
+        if ((def.wireOverlay || def.lever) &&
+            !IsSolid(worldPos.x, worldPos.y - 1, worldPos.z)) {
+            m_entities.SpawnBlockDrop(worldPos, def.ResolveDrop(id), 1);
+            SetBlock(worldPos, blocks::Air);
+        } else {
+            m_redstone.Update(worldPos);
+        }
     } else if (def.gravity) {
         const BlockId below = GetBlock(worldPos.x, worldPos.y - 1, worldPos.z);
         const BlockDef& belowDef = registry.Def(below);
@@ -772,11 +785,12 @@ std::optional<World::RaycastHit> World::RaycastBlocks(const glm::vec3& origin,
         }
         cell[axis] += step[axis];
         tMax[axis] += tDelta[axis];
-        // Solids, plants, and torches are targetable (break/place);
-        // liquids and air are not (unless includeLiquids — the bucket).
-        // Plants/torches never collide — only the raycast sees them.
+        // Solids, plants, torches, and redstone wire/levers are targetable
+        // (break/place/use); liquids and air are not (unless includeLiquids —
+        // the bucket). These never collide — only the raycast sees them.
         const BlockDef& def = BlockRegistry::Get().Def(GetBlock(cell.x, cell.y, cell.z));
-        if (def.solid || def.cross || def.torch || (includeLiquids && def.liquid)) {
+        if (def.solid || def.cross || def.torch || def.wireOverlay || def.lever ||
+            (includeLiquids && def.liquid)) {
             glm::ivec3 normal{0};
             normal[axis] = -step[axis];
             // tMax[axis] was just advanced past this cell's entry face, so the

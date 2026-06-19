@@ -81,6 +81,8 @@ add_executable(game
     src/world/LightEngine.h
     src/world/OreGen.cpp
     src/world/OreGen.h
+    src/world/RedstoneEngine.cpp
+    src/world/RedstoneEngine.h
     src/world/TerrainGen.cpp
     src/world/TerrainGen.h
     src/world/World.cpp

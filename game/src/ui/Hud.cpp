@@ -1,6 +1,8 @@
 #include "ui/Hud.h"
 
 #include <algorithm>
+#include <cmath>
+#include <format>
 
 #include "vox/renderer/UiRenderer.h"
 
@@ -126,6 +128,20 @@ void DrawVitals(vox::UiRenderer& ui, glm::vec2 screen, float s, const HudVitals&
     }
 }
 
+// Debug XYZ readout, top-left (vanilla F3 style — floored block coords, the
+// useful thing when you want to know your depth). Drawn with a soft shadow so
+// it stays legible over any terrain.
+void DrawCoords(vox::UiRenderer& ui, float s, const glm::vec3& playerPos) {
+    const float textScale = UiTextScale(ui, s);
+    const std::string text =
+        std::format("XYZ: {} {} {}", static_cast<int>(std::floor(playerPos.x)),
+                    static_cast<int>(std::floor(playerPos.y)),
+                    static_cast<int>(std::floor(playerPos.z)));
+    const glm::vec2 pos{4.0f * s, 4.0f * s};
+    ui.DrawText(pos + glm::vec2(textScale), text, textScale, {0.0f, 0.0f, 0.0f, 0.6f});
+    ui.DrawText(pos, text, textScale, kWhite);
+}
+
 void DrawSelectedName(vox::UiRenderer& ui, glm::vec2 screen, float s,
                       std::span<const ItemStack> hotbar, size_t selectedSlot, float barTop) {
     const float textScale = UiTextScale(ui, s);
@@ -144,9 +160,11 @@ float GuiScale(glm::vec2 screen) {
 }
 
 void Hud::Draw(vox::UiRenderer& ui, glm::vec2 screen, std::span<const ItemStack> hotbar,
-               size_t selectedSlot, const GuiTextures& tex, const HudVitals& vitals) {
+               size_t selectedSlot, const GuiTextures& tex, const HudVitals& vitals,
+               const glm::vec3& playerPos) {
     const float s = GuiScale(screen);
     DrawCrosshair(ui, screen, s, tex);
+    DrawCoords(ui, s, playerPos);
     if (hotbar.empty()) {
         return;
     }

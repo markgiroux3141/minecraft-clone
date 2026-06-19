@@ -282,18 +282,26 @@ int main() {
     {
         size_t coal = 0;
         size_t iron = 0;
+        size_t redstone = 0;
         int ironMaxY = 0;
+        int redstoneMaxY = 0;
         bool oreInStone = true;
         for (int wz = lo; wz < hi; ++wz) {
             for (int wx = lo; wx < hi; ++wx) {
                 for (int wy = 1; wy < vc::kWorldHeightBlocks - 1; ++wy) {
                     const vc::BlockId id = blockAt(wx, wy, wz);
-                    if (id != vc::blocks::CoalOre && id != vc::blocks::IronOre) {
+                    if (id != vc::blocks::CoalOre && id != vc::blocks::IronOre &&
+                        id != vc::blocks::RedstoneOre) {
                         continue;
                     }
-                    id == vc::blocks::CoalOre ? ++coal : ++iron;
-                    if (id == vc::blocks::IronOre) {
+                    if (id == vc::blocks::CoalOre) {
+                        ++coal;
+                    } else if (id == vc::blocks::IronOre) {
+                        ++iron;
                         ironMaxY = std::max(ironMaxY, wy);
+                    } else {
+                        ++redstone;
+                        redstoneMaxY = std::max(redstoneMaxY, wy);
                     }
                     // Veins only replace stone, so an ore cell must touch
                     // at least one solid neighbor on every axis pair —
@@ -311,7 +319,9 @@ int main() {
         }
         Check(coal > 0, "coal veins actually generate");
         Check(iron > 0, "iron veins actually generate");
+        Check(redstone > 0, "redstone veins actually generate");
         Check(ironMaxY < vc::kWorldHeightBlocks / 2 + 8, "iron stays in the lower half");
+        Check(redstoneMaxY < 24, "redstone stays in the deep band");
         Check(oreInStone, "ore cells sit in terrain, not open space");
     }
 

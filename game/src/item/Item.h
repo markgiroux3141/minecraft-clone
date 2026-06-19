@@ -48,6 +48,11 @@ struct ItemDef {
     int foodPoints = 0;
     float saturationModifier = 0.0f;
     bool alwaysEdible = false;
+    // RS1: a non-block item that, on RMB against a surface, places a DIFFERENT
+    // block than itself (redstone dust -> the wire block; like the water bucket
+    // placing a water source). 0 = this item places nothing. The block's own
+    // placement rules (e.g. wire needs solid ground below) still apply.
+    BlockId placesBlock = 0;
 };
 
 class ItemRegistry {
@@ -161,6 +166,9 @@ extern ItemId Seeds;
 // stays a sprite-only brewing ingredient like gunpowder).
 extern ItemId String;
 extern ItemId SpiderEye;
+// RS1: redstone dust (sprite tile 124). Mined from redstone ore + dropped by
+// breaking wire; placing it (RMB) lays the redstone wire block (placesBlock).
+extern ItemId RedstoneDust;
 
 // The three bow_pulling_0..2 draw-frame sprite tiles (atlas 109..111). The view
 // model swaps the held bow's tile among these by draw charge (vanilla ItemBow

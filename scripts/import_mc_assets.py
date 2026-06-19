@@ -134,6 +134,25 @@ def torch_flame_cap(path: Path) -> Image.Image:
     return cap
 
 
+def redstone_cross_base(blocks: Path) -> Image.Image:
+    # 1.12 ships no full-cross dust tile — the game composes it at render time
+    # from two line frames (vertical + horizontal) plus the center dot. Bake
+    # that "+" once (grayscale, alpha preserved); the caller tints it per power.
+    base = load_tile(blocks / "redstone_dust_line0.png")
+    base.alpha_composite(load_tile(blocks / "redstone_dust_line1.png"))
+    base.alpha_composite(load_tile(blocks / "redstone_dust_dot.png"))
+    return base
+
+
+def redstone_tint(power: int) -> tuple[int, int, int]:
+    # Dark-red (unpowered) -> bright-red (15) ramp, applied to the grayscale
+    # dust cross. A faint warm tinge at high power, like vanilla's color ramp.
+    f = power / 15.0
+    r = 0.30 + 0.70 * f
+    g = max(0.0, 0.20 * f - 0.05)
+    return (int(r * 255), int(g * 255), 0)
+
+
 def flattened(img: Image.Image) -> Image.Image:
     # Bake transparent pixels opaque over the tile's own body color — used
     # for the full-cube cactus, whose vanilla texture leaves the model's
@@ -316,6 +335,19 @@ def build_atlas(mc: Path, out_path: Path) -> None:
         # M39 spider drops (121 string / 122 spider eye) — matches Item.cpp.
         load_tile(items / "string.png"),
         load_tile(items / "spider_eye.png"),
+        # RS1 redstone: ore (123), dust item (124), redstone block (125), lamp
+        # off/on (126/127), lever handle (128), and the 16-level wire power ramp
+        # (129..144) — matches Block.cpp / Item.cpp RegisterDefaults. The wire
+        # ramp composes vanilla's dust pieces (1.12 ships no full-cross tile)
+        # into a "+" and bakes the dark->bright red power tint per level, since
+        # our model stream can't tint at runtime (same pre-bake idea as grass).
+        load_tile(blocks / "redstone_ore.png"),
+        load_tile(items / "redstone_dust.png"),
+        load_tile(blocks / "redstone_block.png"),
+        load_tile(blocks / "redstone_lamp_off.png"),
+        load_tile(blocks / "redstone_lamp_on.png"),
+        load_tile(blocks / "lever.png"),
+        *[tinted(redstone_cross_base(blocks), redstone_tint(level)) for level in range(16)],
     ]
 
     strip = Image.new("RGBA", (TILE * len(tiles), TILE))

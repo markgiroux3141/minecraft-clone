@@ -22,8 +22,9 @@ struct OreParams {
     int size;
     int minY, rangeY;
 };
-constexpr OreParams kCoal{20, 17, 2, 123}; // y 2..124 (whole underground)
-constexpr OreParams kIron{20, 9, 2, 61};   // y 2..62 (lower half, vanilla-ish)
+constexpr OreParams kCoal{20, 17, 2, 123};  // y 2..124 (whole underground)
+constexpr OreParams kIron{20, 9, 2, 61};    // y 2..62 (lower half, vanilla-ish)
+constexpr OreParams kRedstone{8, 8, 2, 14}; // y 2..15 (deep, vanilla 8/8/0..16)
 
 // WorldGenMinable.generate, verbatim: an ellipsoid of shrinking-then-
 // growing radius swept along a random diagonal through (sx+8, sy, sz+8).
@@ -101,8 +102,11 @@ void Place(Chunk& chunk, const glm::ivec3& chunkCoord, int seed) {
             JavaRandom rand((static_cast<int64_t>(ocx) * 341873128712LL +
                              static_cast<int64_t>(ocz) * 132897987541LL) ^
                             static_cast<int64_t>(seed));
+            // Redstone draws come AFTER coal+iron, so their vein sequences are
+            // unchanged (only deep redstone is added to pre-RS1 seeds).
             for (const auto& [params, ore] :
-                 {std::pair{kCoal, blocks::CoalOre}, std::pair{kIron, blocks::IronOre}}) {
+                 {std::pair{kCoal, blocks::CoalOre}, std::pair{kIron, blocks::IronOre},
+                  std::pair{kRedstone, blocks::RedstoneOre}}) {
                 for (int v = 0; v < params.veins; ++v) {
                     const int sx = ocx * Chunk::kSize + rand.NextInt(16);
                     const int sy = params.minY + rand.NextInt(params.rangeY);

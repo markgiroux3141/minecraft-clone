@@ -92,6 +92,21 @@ struct BlockDef {
     // the placer's look direction), bit 3 (8) = upside-down. See facing::
     // StairsMeta. Collision mirrors the two boxes.
     bool stairs = false;
+    // RS1 redstone. `redstone` marks a power-network component (wire, lever,
+    // redstone block, lamp) so World::ProcessBlockUpdate dispatches the cell
+    // (and cells next to one) to the RedstoneEngine. `wireOverlay` renders the
+    // block as a flat power-tinted "+" cross on the cell top (power 0..15 in
+    // meta; the mesher samples kRedstoneWireTile0 + power) and pops without a
+    // solid block below, like a floor torch. `lever` renders the floor lever
+    // model (a cobble base + a handle that tilts with the on/off meta bit) and
+    // is toggled by RMB. Both are non-solid but targetable (RaycastBlocks).
+    bool redstone = false;
+    bool wireOverlay = false;
+    bool lever = false;
+    // Hidden from the creative palette (PaletteIds): internal blocks the player
+    // never holds directly — the redstone wire (placed via the dust item) and
+    // the lit redstone lamp (an engine-driven swap of the off lamp).
+    bool hiddenItem = false;
     // Skylight attenuation for non-opaque blocks, 0..15: blocks direct
     // (straight-down) sky and costs max(1, lightOpacity) per propagation
     // step. Ignored when opaque (opaque always blocks fully). Leaves 1,
@@ -255,6 +270,23 @@ extern BlockId WhiteWool;
 // generated; crafted from gunpowder + sand.
 extern BlockId Tnt;
 
+// RS1 redstone (power core: lever -> dust -> lamp). Append-only, like every
+// block. RedstoneOre generates deep underground (drops the dust item);
+// RedstoneBlock is a constant power-15 source; the lamp is a lit/unlit pair
+// swapped by the engine (like the furnace); Lever is a toggle source; Wire is
+// the flat dust overlay (power in meta). Wire + LampOn are hiddenItem.
+extern BlockId RedstoneOre;
+extern BlockId RedstoneBlock;
+extern BlockId RedstoneLampOff;
+extern BlockId RedstoneLampOn;
+extern BlockId Lever;
+extern BlockId RedstoneWire;
+
+// RS1 wire power ramp: 16 consecutive atlas tiles, sampled as
+// kRedstoneWireTile0 + power (0..15), baked dark->bright red at import. Keep
+// BOTH atlas scripts in sync with this (the first layer after the M39 drops).
+inline constexpr uint16_t kRedstoneWireTile0 = 129;
+
 // M18 crack overlay: destroy_stage_0..9 occupy ten consecutive texture
 // layers right after the block tiles — keep BOTH scripts/gen_textures.py
 // and scripts/import_mc_assets.py in sync with this.
@@ -335,6 +367,17 @@ inline constexpr BlockFace StairsFacing(uint8_t meta) {
     return static_cast<BlockFace>(meta & 0x7);
 }
 inline constexpr bool StairsIsTop(uint8_t meta) { return (meta & 8) != 0; }
+
+// RS1 redstone wire meta: the cell's power level 0..15 lives in the low nibble,
+// so a power change is a SetMeta + remesh (the mesher samples a brighter tile).
+inline constexpr uint8_t WireMeta(int power) { return static_cast<uint8_t>(power & 0x0F); }
+inline constexpr int WirePower(uint8_t meta) { return meta & 0x0F; }
+
+// RS1 lever meta: floor-mounted in v1, so only the on/off state matters — bit 3
+// (value 8) = on, leaving the low bits free for a future wall-mount facing.
+inline constexpr uint8_t LeverOnBit = 8;
+inline constexpr uint8_t LeverMeta(bool on) { return on ? LeverOnBit : 0; }
+inline constexpr bool LeverOn(uint8_t meta) { return (meta & LeverOnBit) != 0; }
 
 } // namespace facing
 

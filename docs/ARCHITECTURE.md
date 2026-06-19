@@ -402,19 +402,28 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
   100). Debug: `L` spawns a spider. Deferred: spider jockeys, leap-at-target,
   cave spider, climbing-anim head/body tilt, tight 2-wide natural-spawn clearance
   check (wide mobs use the 1-wide column gate today).
-- **Planned — REDSTONE arc (RS1–RS4)** (scoped with the user 2026-06-19, full
-  breakdown in `HANDOFF.md` "Redstone roadmap"). The next major arc after the
+- **REDSTONE arc (RS1–RS4)** (scoped with the user 2026-06-19, full
+  breakdown in `HANDOFF.md` "Redstone roadmap"). The major arc after the
   passive/survival/mob work. Redstone is the hardest vanilla system, but it
   decomposes into one contained engineering core + a long tail of data-driven
   components, and every prerequisite already exists (M13 scheduled block updates,
   M24 meta byte, M23 model blocks, block entities, the M21 ore + M25 deep world,
   and — the key reuse — the `LightEngine`'s 0–15 BFS-from-sources/attenuate-per-step
   propagation, which is the exact shape of redstone power). Order:
-  - **RS1 — power core + minimal loop** (lever → dust → lamp): a `RedstoneEngine`
-    modelled on `LightEngine` (per-cell power 0–15, recomputed on M13 updates),
-    redstone ore (deep, M21 framework) + dust item, redstone wire block (flat,
-    power-tinted), lever + redstone block sources, redstone lamp consumer. This is
-    the one genuinely scary milestone; everything after drops onto its bus.
+  - **RS1 — power core + minimal loop** (lever → dust → lamp) ✅: `RedstoneEngine`
+    (`world/RedstoneEngine.{h,cpp}`) modelled on `LightEngine` — flood-fills the
+    connected wire network, BFS-relaxes power 0–15 (−1/step), writes changed wire
+    power to the M24 meta byte (→ remesh), and swaps adjacent redstone lamps
+    lit/unlit; run synchronously from `World::ProcessBlockUpdate`. Added: redstone
+    ore (deep `OreGen` band, drops dust), the dust item (places the wire via the
+    new `ItemDef::placesBlock`), the wire block (flat power-tinted `+` overlay,
+    16-tile baked red ramp `kRedstoneWireTile0`+power, power in meta), the floor
+    lever (M23 model — cobble base + tilting handle, on/off in meta, RMB-toggle)
+    and redstone block (constant 15) sources, and the lamp off/on pair. RS1 skips
+    strong/weak powering (a lamp lights from any adjacent powered wire/source) and
+    full wire connection-geometry — both deferred to RS2/refines. Wire + lit lamp
+    are `hiddenItem` (off the palette). Persistence is free (meta + block ids).
+    Also this milestone: an on-screen XYZ debug readout (top-left HUD).
   - **RS2 — logic + timing**: redstone torch (source + NOT-gate inverter, M23
     model like the torch), repeater (one-way diode + 2/4/6/8-tick delay via
     `ScheduleBlockUpdate`), button (pulse) + pressure plate (entity detection).

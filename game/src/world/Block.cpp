@@ -68,6 +68,12 @@ BlockId PlankStairs = 0;
 BlockId SandstoneStairs = 0;
 BlockId WhiteWool = 0;
 BlockId Tnt = 0;
+BlockId RedstoneOre = 0;
+BlockId RedstoneBlock = 0;
+BlockId RedstoneLampOff = 0;
+BlockId RedstoneLampOn = 0;
+BlockId Lever = 0;
+BlockId RedstoneWire = 0;
 
 namespace {
 
@@ -445,6 +451,73 @@ void RegisterDefaults() {
     tnt.hardness = 0.0f;
     tnt.soundType = SoundType::Grass;
     Tnt = registry.Register(std::move(tnt));
+
+    // RS1 redstone (power core: lever -> dust -> lamp). Tiles 123..144,
+    // appended after the M39 spider drops; keep BOTH atlas scripts in sync.
+    // Block ids persist in save blobs, so this stays append-only.
+
+    // Redstone ore (tile 123): generated deep underground (OreGen), harvested
+    // with a stone+ pickaxe, drops the dust item (patched in Item.cpp after the
+    // item exists, like coal ore -> the coal item).
+    BlockDef redstoneOre = BlockDef::Uniform("redstone ore", 123);
+    redstoneOre.toolClass = ToolClass::Pickaxe;
+    redstoneOre.needsPickaxe = true;
+    redstoneOre.harvestLevel = 1; // stone pickaxe or better
+    redstoneOre.hardness = 3.0f;  // vanilla BlockRedstoneOre
+    RedstoneOre = registry.Register(std::move(redstoneOre));
+
+    // Redstone block (tile 125): a constant power-15 source. Full opaque cube,
+    // pickaxe-mineable, drops itself (decompresses to 9 dust in vanilla — we
+    // keep it a block for now).
+    BlockDef redstoneBlock = BlockDef::Uniform("redstone block", 125);
+    redstoneBlock.toolClass = ToolClass::Pickaxe;
+    redstoneBlock.needsPickaxe = true;
+    redstoneBlock.hardness = 5.0f;
+    redstoneBlock.redstone = true; // a source the engine reads
+    RedstoneBlock = registry.Register(std::move(redstoneBlock));
+
+    // Redstone lamp (tiles 126 off / 127 on): lit/unlit pair, swapped by the
+    // engine like the furnace. The lit lamp emits light 15 and is hidden from
+    // the palette; the off lamp is the placeable/held item.
+    BlockDef lampOff = BlockDef::Uniform("redstone lamp", 126);
+    lampOff.redstone = true;
+    lampOff.soundType = SoundType::Glass; // vanilla lamp is the glass material
+    RedstoneLampOff = registry.Register(std::move(lampOff));
+    BlockDef lampOn = BlockDef::Uniform("redstone lamp (lit)", 127);
+    lampOn.redstone = true;
+    lampOn.emission = 15;
+    lampOn.soundType = SoundType::Glass;
+    lampOn.hiddenItem = true; // engine-driven swap, never held
+    RedstoneLampOn = registry.Register(std::move(lampOn));
+
+    // Lever (tile 128 handle): a floor-mounted toggle source (v1 — wall mounts
+    // deferred). Non-solid, targetable, pops without solid ground below; the
+    // on/off state lives in meta (facing::LeverMeta). Model = a cobblestone
+    // base box + a handle box the mesher tilts by the on/off bit.
+    BlockDef lever = BlockDef::Uniform("lever", 128);
+    lever.opaque = false;
+    lever.solid = false;
+    lever.lever = true;
+    lever.redstone = true;
+    lever.hardness = 0.5f; // vanilla BlockLever
+    lever.soundType = SoundType::Wood;
+    Lever = registry.Register(std::move(lever));
+
+    // Redstone wire (dust on the ground): a flat power-tinted "+" overlay on a
+    // solid block's top face. Non-solid, targetable, pops without support like
+    // a torch. Placed via the dust ITEM (ItemDef::placesBlock), so it's hidden
+    // from the palette. Power 0..15 lives in meta; the mesher samples
+    // kRedstoneWireTile0 + power. Drops the dust item.
+    BlockDef wire = BlockDef::Uniform("redstone wire", kRedstoneWireTile0);
+    wire.opaque = false;
+    wire.solid = false;
+    wire.wireOverlay = true;
+    wire.redstone = true;
+    wire.replaceable = true; // flowing water washes it away (vanilla)
+    wire.hardness = 0.0f;
+    wire.soundType = SoundType::Stone;
+    wire.hiddenItem = true;
+    RedstoneWire = registry.Register(std::move(wire));
 
     // M18 drop table (vanilla-ish; cross-references resolve here, after
     // every id exists). Leaves/tall grass/dead bush already drop nothing.

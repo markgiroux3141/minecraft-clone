@@ -50,8 +50,13 @@ void FillPadded(const ChunkSnapshot& snapshot, PaddedVolume& out) {
                 out.cutout[p] = def.cutout ? 1 : 0;
                 out.cross[p] = def.cross ? 1 : 0;
                 // M28: slabs/stairs also emit into the model stream (their
-                // boxes are built per-cell from meta in EmitModelCell).
-                out.model[p] = (!def.model.empty() || def.slab || def.stairs) ? 1 : 0;
+                // boxes are built per-cell from meta in EmitModelCell). RS1
+                // redstone wire (flat power-tinted overlay) and the lever
+                // (base + tilting handle) build their boxes there too.
+                out.model[p] = (!def.model.empty() || def.slab || def.stairs ||
+                                def.wireOverlay || def.lever)
+                                   ? 1
+                                   : 0;
                 out.liquid[p] = def.liquid ? 1 : 0;
                 out.level[p] = def.liquidLevel;
 
@@ -508,6 +513,62 @@ void EmitModelCell(ChunkMesh& mesh, const PaddedVolume& vol, int x, int y, int z
         for (int i = 0; i < n; ++i) {
             EmitModelBox(mesh, vol, x, y, z, boxes[i], sky, block, glm::mat4(1.0f), true);
         }
+        return;
+    }
+
+    // RS1 redstone wire: a single flat "+" quad just above the cell floor,
+    // sampling the power-tinted ramp tile (kRedstoneWireTile0 + power). Only the
+    // +Y face is emitted; the shape + transparency live in the texture.
+    if (def.wireOverlay) {
+        ModelBox box;
+        box.from = {0.0f, 0.0f, 0.0f};
+        box.to = {16.0f, 0.5f, 16.0f}; // +Y plane at 0.5px — a hair off the floor
+        ModelBox::Face& top = box.faces[static_cast<size_t>(BlockFace::PosY)];
+        top.on = true;
+        top.tile = static_cast<uint16_t>(blocks::kRedstoneWireTile0 + facing::WirePower(meta));
+        top.uv = {0.0f, 0.0f, 16.0f, 16.0f};
+        EmitModelBox(mesh, vol, x, y, z, box, sky, block, glm::mat4(1.0f), false);
+        return;
+    }
+
+    // RS1 floor lever (v1): a cobblestone base pad + a handle stick the on/off
+    // meta bit tilts north (off) or south (on). Geometry + UVs follow vanilla's
+    // block/lever model exactly. The base's bottom face is dropped so it doesn't
+    // z-fight the block it rests on; the handle runs y 1..11 (so its lower 2px
+    // sit inside the base) and pivots from y 1.
+    if (def.lever) {
+        ModelBox base = ShapeBox({5, 0, 4}, {11, 3, 12},
+                                 BlockRegistry::Get().Def(blocks::Cobblestone).faceTiles);
+        base.faces[static_cast<size_t>(BlockFace::NegY)].on = false;
+        EmitModelBox(mesh, vol, x, y, z, base, sky, block, glm::mat4(1.0f), false);
+
+        // The lever texture's stick is a VERTICAL 2px column (texture x 7..9,
+        // top-down rows 6..16; knob 6..8). Our UVs measure v UP, so the stick is
+        // v 0..10 and the knob v 8..10. The four side faces want u across the
+        // 2px width and v along the 10px length — but +X/-Z faces set swapUv
+        // (texture axes transposed to keep texture-up aligned with world-up), so
+        // for those the u/v ranges must be pre-swapped or they'd sample a
+        // near-empty HORIZONTAL band (the "skinny" faces). The cap (+Y, no swap)
+        // samples the knob.
+        const uint16_t tile = def.faceTiles[0];
+        constexpr glm::vec4 kStick{7.0f, 0.0f, 9.0f, 10.0f};      // width x length
+        constexpr glm::vec4 kStickSwap{0.0f, 7.0f, 10.0f, 9.0f};  // transposed
+        ModelBox handle;
+        handle.from = {7.0f, 1.0f, 7.0f};
+        handle.to = {9.0f, 11.0f, 9.0f};
+        for (BlockFace f : {BlockFace::PosX, BlockFace::NegX, BlockFace::PosZ, BlockFace::NegZ}) {
+            const bool swap = kFaces[static_cast<size_t>(f)].swapUv;
+            handle.faces[static_cast<size_t>(f)] = {true, tile, swap ? kStickSwap : kStick};
+        }
+        handle.faces[static_cast<size_t>(BlockFace::PosY)] = {true, tile, {7.0f, 8.0f, 9.0f, 10.0f}};
+        // -Y stays off — buried in the base.
+
+        const float tilt = glm::radians(facing::LeverOn(meta) ? 45.0f : -45.0f);
+        const glm::vec3 pivot(0.5f, 1.0f / 16.0f, 0.5f);
+        const glm::mat4 xform = glm::translate(glm::mat4(1.0f), pivot) *
+                                glm::rotate(glm::mat4(1.0f), tilt, glm::vec3(1, 0, 0)) *
+                                glm::translate(glm::mat4(1.0f), -pivot);
+        EmitModelBox(mesh, vol, x, y, z, handle, sky, block, xform, false);
         return;
     }
 

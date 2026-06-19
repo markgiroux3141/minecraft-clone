@@ -1246,14 +1246,34 @@ void GameApp::HandleInput(double frameDt, int scroll) {
             m_openFurnace = m_target->block;
             OpenContainer(State::Furnace);
             m_input.placeCooldown = kEditRepeatDelay;
+        } else if (m_target && targetId == vc::blocks::Lever) {
+            // RS1: flip the lever — toggle its on/off meta bit. SetBlock wakes
+            // the neighbourhood, so the redstone engine recomputes the run.
+            const glm::ivec3 lp = m_target->block;
+            const uint8_t flipped =
+                m_world->GetMeta(lp.x, lp.y, lp.z) ^ vc::facing::LeverOnBit;
+            m_world->SetBlock(lp, vc::blocks::Lever, flipped);
+            m_sounds.PlayPlace(vc::SoundType::Wood, glm::vec3(lp) + 0.5f); // click
+            m_viewModel->TriggerSwing();
+            m_input.placeCooldown = kEditRepeatDelay;
         } else if (TryUseBucket()) {
             // Bucket fill/dump (or a no-op bucket click) — handled, no place.
             // It does its own liquid raycast, so it works with no crosshair
             // block target (aiming straight at water).
         } else if (m_target) {
             vc::ItemStack& hand = m_inventory.Slot(m_hotbarSlot);
-            if (!hand.Empty() && vc::IsBlockItem(hand.id)) {
-                const auto handId = static_cast<vc::BlockId>(hand.id);
+            // The hand places a block if it IS a block item, or if it's an item
+            // that places a different block (RS1 dust -> wire, like the bucket).
+            vc::BlockId handId = 0;
+            if (!hand.Empty()) {
+                if (vc::IsBlockItem(hand.id)) {
+                    handId = static_cast<vc::BlockId>(hand.id);
+                } else if (const vc::ItemDef* idef = vc::ItemRegistry::Get().Find(hand.id);
+                           idef != nullptr && idef->placesBlock != 0) {
+                    handId = idef->placesBlock;
+                }
+            }
+            if (handId != 0) {
                 const vc::BlockDef& def = vc::BlockRegistry::Get().Def(handId);
 
                 glm::ivec3 placePos = m_target->block + m_target->normal;
@@ -1308,6 +1328,17 @@ void GameApp::HandleInput(double frameDt, int scroll) {
                         placeMeta = vc::facing::StairsMeta(
                             vc::facing::HorizontalFromLook(m_camera.Forward()),
                             PlaceTopHalf(m_target->normal, m_target->point));
+                    } else if (def.wireOverlay) {
+                        // RS1: dust lays flat on top of a solid block (power 0;
+                        // the scheduled redstone update lights it).
+                        allowed = m_world->IsSolid(placePos.x, placePos.y - 1, placePos.z);
+                        placeMeta = vc::facing::WireMeta(0);
+                    } else if (def.lever) {
+                        // RS1 v1: floor lever only — placed on a block's top
+                        // face, starting off.
+                        allowed = m_target->normal.y > 0 &&
+                                  m_world->IsSolid(placePos.x, placePos.y - 1, placePos.z);
+                        placeMeta = vc::facing::LeverMeta(false);
                     }
                 }
 
@@ -1614,7 +1645,8 @@ void GameApp::DrawUi() {
     } else {
         const vc::HudVitals vitals{m_player.Health(), m_player.FoodLevel(), m_player.Air(),
                                    m_player.GetMode() == Player::Mode::Walk};
-        vc::Hud::Draw(*m_ui, screen, m_inventory.Hotbar(), m_hotbarSlot, m_guiTextures, vitals);
+        vc::Hud::Draw(*m_ui, screen, m_inventory.Hotbar(), m_hotbarSlot, m_guiTextures, vitals,
+                      m_player.Position());
         if (ContainerOpen()) {
             // Vanilla's darkened-world backdrop behind the container GUI.
             m_ui->DrawRect({0.0f, 0.0f}, screen, {0.06f, 0.06f, 0.06f, 0.75f});

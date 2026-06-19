@@ -573,6 +573,60 @@ def spider_eye_sprite(x, y):
     return (0, 0, 0, 0)
 
 
+# RS1 redstone placeholders (real art comes from import_mc_assets.py): ore (123),
+# dust item (124), redstone block (125), lamp off/on (126/127), lever handle
+# (128), and a 16-level wire-cross power ramp (129..144). Matching Block.cpp /
+# Item.cpp RegisterDefaults — keep both atlas scripts in sync.
+def redstone_ore(x, y):
+    if hash01(x // 2, y // 2, 123) > 0.74:
+        return speckle((196, 40, 30), x, y, 123, 16)  # red flecks
+    return speckle(STONE, x, y, 0)
+
+
+def redstone_dust_sprite(x, y):
+    if (x - 8) ** 2 + (y - 9) ** 2 <= 30 and hash01(x, y, 124) > 0.2:
+        return speckle((182, 36, 30), x, y, 124, 18)
+    return (0, 0, 0, 0)
+
+
+def redstone_block(x, y):
+    if hash01(x // 2, y // 2, 125) > 0.5:
+        return speckle((168, 28, 22), x, y, 125, 12)
+    return speckle((196, 44, 34), x, y, 125, 16)
+
+
+def redstone_lamp(lit):
+    def pixel(x, y):
+        seam = x % 4 == 0 or y % 4 == 0
+        if lit:
+            return speckle((236, 170, 90) if seam else (250, 198, 116), x, y, 127, 10)
+        return speckle((104, 68, 40) if seam else (128, 86, 52), x, y, 126, 8)
+
+    return pixel
+
+
+def lever_handle(x, y):
+    # The wooden handle stick only — the model's base box samples cobblestone.
+    if 6 <= x <= 9 and 2 <= y <= 12:
+        return speckle((150, 116, 74), x, y, 128, 8)
+    return (0, 0, 0, 0)
+
+
+def redstone_wire_cross(level):
+    # A flat red "+" overlay, brightness scaled dark->bright by power 0..15
+    # (the mesher samples tile kRedstoneWireTile0 + power). The cross shape +
+    # transparency is what makes it read as wire on the block top.
+    f = 0.30 + 0.70 * (level / 15.0)
+    col = (int(190 * f), int(36 * f), int(28 * f), 255)
+
+    def pixel(x, y):
+        if 6 <= x <= 9 or 6 <= y <= 9:
+            return col
+        return (0, 0, 0, 0)
+
+    return pixel
+
+
 # M35 placeholders (real art comes from import_mc_assets.py): a TNT block (red
 # body with a white-on-dark band, lighter top/bottom caps) + gunpowder/flint &
 # steel item blobs.
@@ -752,7 +806,13 @@ TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top,
          # Item.cpp RegisterDefaults.
          wheat_sprite, carrot_sprite, seeds_sprite,
          # M39 spider drops (121 string / 122 spider eye).
-         string_sprite, spider_eye_sprite]
+         string_sprite, spider_eye_sprite] + [
+         # RS1 redstone: ore (123), dust item (124), redstone block (125), lamp
+         # off/on (126/127), lever handle (128), and the 16-level wire power ramp
+         # (129..144) — matches Block.cpp / Item.cpp RegisterDefaults.
+         redstone_ore, redstone_dust_sprite, redstone_block,
+         redstone_lamp(False), redstone_lamp(True), lever_handle] + [
+         redstone_wire_cross(level) for level in range(16)]
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:

@@ -22,6 +22,7 @@
 #include "world/Furnace.h"
 #include "world/Light.h"
 #include "world/LightEngine.h"
+#include "world/RedstoneEngine.h"
 #include "world/TerrainGen.h"
 #include "world/WorldSave.h"
 
@@ -380,6 +381,10 @@ private:
     // reaches only World's public API. Settled/flushed from ~World, mob load
     // from the ctor body, before chunks go.
     EntityManager m_entities{*this};
+    // RS1 redstone power engine. Holds only a back-reference to this World and
+    // reaches its public block/meta API; recomputes wire power + lamps when a
+    // component updates (see ProcessBlockUpdate's redstone branch).
+    RedstoneEngine m_redstone{*this};
     // Furnace block entities by world position (main-thread, like the
     // chunk map). Entries whose chunk is unloaded just idle in the map
     // (tiny) and resume ticking when it streams back in.

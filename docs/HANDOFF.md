@@ -1,6 +1,36 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-19, written for a FRESH CONTEXT. M39 (SPIDER — the first
+Updated: 2026-06-19, written for a FRESH CONTEXT. RS1 (REDSTONE POWER CORE —
+lever → dust → lamp, the scary one of the redstone arc) is now DONE and
+USER-VERIFIED ("excellent") — see the "RS1" section below for the full design.
+It built `RedstoneEngine` (game/src/world/RedstoneEngine.{h,cpp}), modelled on
+`LightEngine`: flood-fill the connected wire network, BFS-relax power 0–15
+(−1/step), write changed wire power into the M24 meta byte (→ remesh to a
+brighter ramp tile), swap adjacent redstone lamps lit/unlit; run synchronously
+from `World::ProcessBlockUpdate`. New blocks (Block.cpp, append-only): redstone
+ore (deep `OreGen` band y2..15, drops the dust item, stone-pick), redstone block
+(constant power-15 source), redstone lamp off/on pair (furnace-style swap, lit
+emits light 15), floor lever (M23 model — cobble base + a tilting handle, on/off
+in meta, RMB-toggle), redstone wire (flat power-tinted `+` overlay, power 0–15 in
+meta). New item: redstone dust (places the wire via the new `ItemDef::placesBlock`,
+the bucket pattern). DECISIONS (settled with the user): simple always-cross wire
+geometry, flat-only (no up-the-side climbing), skip strong/weak powering — all
+deferred to RS2/refines; lever is floor-mount only in v1 (wall mounts deferred).
+Wire + lit-lamp are `hiddenItem` (off the creative palette; the others auto-list).
+Persistence is FREE — wire power + lever state ride the saved meta byte, lamp
+on/off is a block id; nothing in the engine to serialize. Also this milestone: an
+on-screen XYZ debug readout (top-left HUD, `Hud::DrawCoords`). IMPORTANT after
+pulling: re-run `import_mc_assets.py` — RS1 added atlas tiles 123..144 (ore 123,
+dust item 124, redstone block 125, lamp off 126 / on 127, lever handle 128, and
+the 16-level wire power ramp 129..144 baked dark→bright red — `kRedstoneWireTile0`
+= 129), so the atlas is 145 layers now. gentest grew redstone-vein checks;
+savetest already covers the meta round-trip. The NEXT milestone is RS2 (logic +
+timing): redstone torch (source + NOT-gate inverter + burnout), repeater (one-way
+diode + 2/4/6/8-tick delay via the M13 scheduler — delay state in meta), button +
+pressure plate (entity detection), and the deferred strong/weak block-powering
+rules — see the "Redstone roadmap" section for the full breakdown.
+
+M39 (SPIDER — the first
 roadmap-step-6 BESPOKE MOVER, wall-climbing) is now DONE and USER-VERIFIED
 ("that works") — see the "M39" section for the full design (debug spawn key
 `L` = spider). The user decided to PARK the remaining bespoke movers
@@ -3025,7 +3055,8 @@ WHY IT'S LESS SCARY THAN IT LOOKS — every prerequisite is already in the codeb
 
 THE ARC (each milestone is a runnable vertical slice; do them in order):
 
-- **RS1 — power core + the minimal loop (lever → dust → lamp).** THE scary one.
+- **RS1 — power core + the minimal loop (lever → dust → lamp).** ✅ DONE +
+  USER-VERIFIED (see the "RS1" section above). THE scary one.
   Build the `RedstoneEngine` (per-cell power 0–15, recomputed on M13 block updates
   over the affected network/region; model it on `LightEngine`). Add: redstone ore
   (deep underground, M21 framework, drops redstone dust), the redstone dust ITEM,
@@ -3059,12 +3090,57 @@ THE ARC (each milestone is a runnable vertical slice; do them in order):
   system), hoppers (item transport), observers, and the BUD/quasi-connectivity
   quirks (probably skip — they're bug-features).
 
-DECIDED 2026-06-19: redstone goes BEFORE farming — **RS1 (power core) is the
-confirmed next milestone.** Not yet started.
+DECIDED 2026-06-19: redstone goes BEFORE farming. **RS1 (power core) is now DONE
+and USER-VERIFIED** — see the "RS1" section below. RESOLVED open questions: wire
+geometry = simple always-cross; flat-only (no up-the-side); both acquisition
+paths (palette + deep ore); strong/weak powering skipped; lever floor-mount only.
+**RS2 (logic + timing) is the next milestone** — redstone torch / repeater /
+button / pressure plate + the deferred strong/weak rules.
 
-OPEN QUESTION to settle when RS1 starts: wire connection-geometry fidelity for
-RS1 (simple all-neighbours cross vs full vanilla dot/line/L/T/up-the-side shapes —
-recommend simple first, refine later).
+## RS1 — redstone power core (how it works)
+
+The hard milestone of the arc; everything after drops onto this bus. Built the
+`RedstoneEngine` (game/src/world/RedstoneEngine.{h,cpp}), structurally the
+`LightEngine` again but run synchronously on the LIVE world from
+`World::ProcessBlockUpdate` (a `def.redstone` branch), not on a worker snapshot:
+
+- `RedstoneEngine::Update(pos)` — (1) flood-fills the connected wire network from
+  pos (4-horizontal connectivity; seeds from pos or its wire neighbours); (2) per
+  wire, source power = max adjacent on-source (lever-on / redstone block = 15);
+  (3) BFS-relax across wire neighbours dropping 1/step (exactly LightEngine's
+  block-light spread); (4) write changed power into the M24 meta nibble via
+  `SetBlock` (bumps dataVersion → remesh to a brighter ramp tile; wakes
+  neighbours, which re-run and no-op → converges); (5) refresh lamps around pos +
+  every network cell (lit iff a face-neighbour emits power). Bounded at 4096 cells.
+- `World` gained ONE member: `RedstoneEngine m_redstone{*this}` (kept off the god
+  object). `ProcessBlockUpdate`'s redstone branch also pops wire/lever without a
+  solid block below (the torch support pattern).
+- Components (Block.cpp, append-only — ids persist in saves): `RedstoneOre`
+  (`OreGen` redstone vein 8/8/y2..15, after coal+iron so their sequences are
+  unchanged; drops dust, stone-pick gated), `RedstoneBlock` (constant 15),
+  `RedstoneLampOff`/`On` (lit/unlit pair, lit emits 15, On is `hiddenItem`),
+  `Lever` (`def.lever`, M23 model, floor-only, on/off = `facing::LeverOnBit` in
+  meta, RMB-toggle in GameApp), `RedstoneWire` (`def.wireOverlay`, flat `+`
+  overlay, power 0–15 in meta, `hiddenItem`, drops dust). New `BlockDef` flags:
+  `redstone` (dispatch), `wireOverlay`, `lever`, `hiddenItem`.
+- `RedstoneDust` item (Item.cpp) places the wire via the new `ItemDef::placesBlock`
+  (the bucket pattern — a non-block item that lays a different block). GameApp's
+  place chain grew a `placesBlock` path + wire/lever orientation cases; a
+  lever-toggle branch sits beside the crafting-table/furnace use branches.
+- Rendering (ChunkMesher `EmitModelCell`): wire = one flat +Y quad at y≈0.03
+  sampling `kRedstoneWireTile0 + power`; lever = a cobble base box + a handle box
+  the on/off bit tilts ±45° about a low pivot. GOTCHA fixed during review: the
+  lever handle's side-face UVs must be PRE-TRANSPOSED on the `swapUv` faces (+X,
+  −Z) — `lever.png`'s stick is a vertical 2px column, and the auto/naive UV
+  sampled a near-empty horizontal band on those faces (faces looked "skinny").
+- Atlas: tiles 123..144 (ore 123, dust 124, block 125, lamp off 126 / on 127,
+  lever handle 128, wire ramp 129..144 = 16 baked power levels). Both atlas
+  scripts grown in lockstep; re-run `import_mc_assets.py` after pulling (145
+  layers). gentest grew redstone-vein assertions; savetest already covers meta.
+- Debug aid added alongside: on-screen XYZ block coords, top-left HUD
+  (`Hud::DrawCoords`, fed `m_player.Position()`).
+- Deferred to RS2/later: strong/weak powering, wire dot/line/L/T shaping +
+  up-the-side climbing, wall-mounted levers, lamp unlight delay.
 
 ## Backlog (after M28)
 

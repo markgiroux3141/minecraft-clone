@@ -27,7 +27,7 @@ bool RenderAsSprite(ItemId id) {
         return true;
     }
     const BlockDef& def = BlockRegistry::Get().Def(id);
-    return def.cross || def.torch;
+    return def.cross || def.torch || def.lever || def.wireOverlay;
 }
 
 bool ItemExists(ItemId id) {
@@ -172,6 +172,7 @@ ItemId Carrot = 0;
 ItemId Seeds = 0;
 ItemId String = 0;
 ItemId SpiderEye = 0;
+ItemId RedstoneDust = 0;
 ItemId FirstArmor = 0;
 
 namespace {
@@ -404,9 +405,22 @@ void RegisterDefaults() {
     String = sprite("string", 121);
     SpiderEye = sprite("spider eye", 122);
 
+    // RS1 redstone dust (sprite tile 124 — appended after the M39 spider drops;
+    // keep BOTH atlas scripts in sync). Placing it lays the redstone wire block
+    // (placesBlock; the wire's own support rules still apply). The palette
+    // auto-lists it.
+    ItemDef dust;
+    dust.name = "redstone";
+    dust.tile = 124;
+    dust.placesBlock = blocks::RedstoneWire;
+    RedstoneDust = registry.Register(std::move(dust));
+
     // Coal ore's drop is the coal item — its id only exists now, after
     // item registration (same late-patch pattern as stone -> cobblestone).
     BlockRegistry::Get().EditDef(blocks::CoalOre).drop = Coal;
+    // RS1: redstone ore + broken wire both yield the dust item.
+    BlockRegistry::Get().EditDef(blocks::RedstoneOre).drop = RedstoneDust;
+    BlockRegistry::Get().EditDef(blocks::RedstoneWire).drop = RedstoneDust;
 
     GAME_INFO("Registered {} item types (ids from {})", registry.Count(), kFirstItemId);
 }

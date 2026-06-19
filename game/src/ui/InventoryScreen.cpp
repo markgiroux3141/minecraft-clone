@@ -127,8 +127,11 @@ std::vector<ItemId> PaletteIds() {
     std::vector<ItemId> ids;
     const auto& blockRegistry = BlockRegistry::Get();
     for (BlockId id = 1; id < static_cast<BlockId>(blockRegistry.Count()); ++id) {
-        const uint8_t level = blockRegistry.Def(id).liquidLevel;
-        if (level == 0 || level == 8) {
+        const BlockDef& def = blockRegistry.Def(id);
+        // Skip flowing-liquid levels (only source/full shown) and internal
+        // blocks the player never holds (RS1 wire — placed via the dust item —
+        // and the lit redstone lamp, an engine-driven swap of the off lamp).
+        if ((def.liquidLevel == 0 || def.liquidLevel == 8) && !def.hiddenItem) {
             ids.push_back(id);
         }
     }
