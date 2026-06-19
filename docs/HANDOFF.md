@@ -3059,11 +3059,12 @@ THE ARC (each milestone is a runnable vertical slice; do them in order):
   system), hoppers (item transport), observers, and the BUD/quasi-connectivity
   quirks (probably skip — they're bug-features).
 
-OPEN QUESTIONS to settle when RS1 starts: (a) does redstone go BEFORE or AFTER a
-farming milestone (farming gives M38's wheat/carrot/seeds a real source; redstone
-is the bigger lift) — the user leaned redstone-is-more-important; (b) wire
-connection-geometry fidelity for RS1 (simple all-neighbours cross vs full vanilla
-dot/line/L/T/up-the-side shapes — recommend simple first, refine later).
+DECIDED 2026-06-19: redstone goes BEFORE farming — **RS1 (power core) is the
+confirmed next milestone.** Not yet started.
+
+OPEN QUESTION to settle when RS1 starts: wire connection-geometry fidelity for
+RS1 (simple all-neighbours cross vs full vanilla dot/line/L/T/up-the-side shapes —
+recommend simple first, refine later).
 
 ## Backlog (after M28)
 
