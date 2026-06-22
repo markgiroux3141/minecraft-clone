@@ -136,6 +136,9 @@ public:
     // so cascades sustain themselves until everything settles.
     void Tick();
     void ScheduleBlockUpdate(const glm::ivec3& worldPos, int delayTicks);
+    // Current simulation tick (20 TPS). RedstoneEngine uses it for the torch
+    // burnout window (toggles within the last 60 ticks).
+    uint64_t SimTick() const { return m_simTick; }
 
     // Free-moving entities (falling blocks, dropped items, mobs) live in their
     // own subsystem; World owns it and drives it from Tick(). GameApp reaches

@@ -424,10 +424,24 @@ avoid spiral-of-death after stalls) → render once with `alpha = leftover/tickD
     full wire connection-geometry — both deferred to RS2/refines. Wire + lit lamp
     are `hiddenItem` (off the palette). Persistence is free (meta + block ids).
     Also this milestone: an on-screen XYZ debug readout (top-left HUD).
-  - **RS2 — logic + timing**: redstone torch (source + NOT-gate inverter, M23
-    model like the torch), repeater (one-way diode + 2/4/6/8-tick delay via
-    `ScheduleBlockUpdate`), button (pulse) + pressure plate (entity detection).
-    Adds strong/weak block-powering rules. With these you can build real gates.
+  - **RS2 — logic + timing** (split into RS2a/RS2b with the user 2026-06-19):
+    - **RS2a — strong/weak powering + redstone torch** ✅: rewrote `RedstoneEngine`
+      to the vanilla strong/weak block-powering model (ported from 1.12
+      `World.getRedstonePower`/`isBlockIndirectlyGettingPowered`): components emit
+      weak power to neighbours + strong power to specific cells, and a full opaque
+      cube (`IsNormalCube`) re-emits the strong power it receives. Added the
+      redstone torch (`RedstoneTorchOn`/`Off`, tiles 145/146) — a source AND a
+      NOT-gate inverter (off when its mount block is powered) with vanilla burnout
+      (≥8 turn-offs/60 ticks → 160-tick lockout, transient deque on the engine).
+      It reuses the torch model + floor/wall meta; on/off is the block id (free
+      persistence, like the lamp). Lamps now light via full indirect power.
+      Documented RS2a simplifications: torch reacts on the block-update tick (the
+      M13 wake delay gives ~2-tick granularity) rather than a separate +2 schedule;
+      wire→block horizontal powering uses same-level connection detection (flat,
+      no up/down step).
+    - **RS2b — repeater + button + pressure plate** (next): one-way diode +
+      2/4/6/8-tick delay via `ScheduleBlockUpdate` (delay/facing in meta), button
+      (momentary pulse), pressure plate (entity detection). Rides the RS2a engine.
   - **RS3 — analog + consumers**: comparator (compare/subtract, reads container
     fullness), daylight sensor (reads sky light), note block, dispenser/dropper
     (reuse the item/projectile spawn path), powered doors/trapdoors/fence gates.

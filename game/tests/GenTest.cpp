@@ -507,6 +507,25 @@ int main() {
         Check(shiftedToWall, "wall torch is oriented (tilted/shifted toward its wall)");
     }
 
+    // RS2a redstone torch: reuses the float torch model (4 planes + a cap),
+    // sampling its own on/off tile. Floor mount, like the plain torch.
+    {
+        vc::ChunkSnapshot snapshot;
+        auto center = std::make_shared<vc::Chunk>();
+        center->Set(8, 8, 8, vc::blocks::RedstoneTorchOn);
+        snapshot.chunks[vc::ChunkSnapshot::Index(1, 1, 1)] = center;
+        snapshot.skyAbove = true;
+
+        const vc::ChunkMesh mesh = vc::ChunkMesher::Build(snapshot);
+        Check(mesh.vertices.empty(), "redstone torch emits no cubic geometry");
+        Check(mesh.modelVertices.size() == 20, "lone redstone torch meshes to 4 planes + a cap");
+        bool sampledTorchTile = false;
+        for (const auto& vtx : mesh.modelVertices) {
+            sampledTorchTile |= (vtx.packed & 0xFFFFu) == vc::blocks::kRedstoneTorchOnTile;
+        }
+        Check(sampledTorchTile, "redstone torch samples its lit tile (145)");
+    }
+
     if (g_failures == 0) {
         std::printf("GenTest: all checks passed (%zu logs, %zu leaves)\n", logs, leafBlocks);
     } else {

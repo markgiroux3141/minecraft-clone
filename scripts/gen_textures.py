@@ -612,6 +612,23 @@ def lever_handle(x, y):
     return (0, 0, 0, 0)
 
 
+def redstone_torch(lit):
+    # A torch sprite (vertical post + a glowing tip), red-toned for redstone.
+    # `lit` brightens the head; the mesher reuses the floor/wall torch model and
+    # samples tile 145 (on) / 146 (off). Matches Block.cpp RegisterDefaults.
+    salt = 145 if lit else 146
+    head = (220, 40, 30) if lit else (96, 24, 20)
+
+    def pixel(x, y):
+        if 7 <= x <= 8 and 6 <= y <= 13:  # the post
+            return speckle((120, 96, 70), x, y, salt, 6)
+        if 6 <= x <= 9 and 3 <= y <= 6:  # the glowing head
+            return speckle(head, x, y, salt, 12)
+        return (0, 0, 0, 0)
+
+    return pixel
+
+
 def redstone_wire_cross(level):
     # A flat red "+" overlay, brightness scaled dark->bright by power 0..15
     # (the mesher samples tile kRedstoneWireTile0 + power). The cross shape +
@@ -812,7 +829,10 @@ TILES = [stone, dirt, grass_side, grass_top, glowstone, sand, log_side, log_top,
          # (129..144) — matches Block.cpp / Item.cpp RegisterDefaults.
          redstone_ore, redstone_dust_sprite, redstone_block,
          redstone_lamp(False), redstone_lamp(True), lever_handle] + [
-         redstone_wire_cross(level) for level in range(16)]
+         redstone_wire_cross(level) for level in range(16)] + [
+         # RS2a redstone torch: lit (145) / unlit (146). Reuses the torch model;
+         # on/off is the block id (engine swap). Matches Block.cpp.
+         redstone_torch(True), redstone_torch(False)]
 
 
 def png_chunk(tag: bytes, data: bytes) -> bytes:

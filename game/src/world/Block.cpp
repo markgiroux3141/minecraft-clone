@@ -74,6 +74,8 @@ BlockId RedstoneLampOff = 0;
 BlockId RedstoneLampOn = 0;
 BlockId Lever = 0;
 BlockId RedstoneWire = 0;
+BlockId RedstoneTorchOn = 0;
+BlockId RedstoneTorchOff = 0;
 
 namespace {
 
@@ -518,6 +520,55 @@ void RegisterDefaults() {
     wire.soundType = SoundType::Stone;
     wire.hiddenItem = true;
     RedstoneWire = registry.Register(std::move(wire));
+
+    // RS2a redstone torch (tiles 145 on / 146 off): a source AND a NOT-gate
+    // inverter. Reuses the floor/wall torch (def.torch handles placement,
+    // support-pop, and water-wash; the M24 torch meta carries floor/wall +
+    // facing). On/off is the BLOCK ID (engine swap, like the lamp), so it
+    // persists for free. The lit torch emits light 7 (vanilla); the unlit one
+    // is hidden from the palette. Both drop the lit torch item. Same crossed-
+    // planes + cap geometry as the regular torch, sampling the redstone tile.
+    const auto redstoneTorchModel = [](uint16_t tile) {
+        ModelBox xPlanes;
+        xPlanes.from = {7.0f, 0.0f, 0.0f};
+        xPlanes.to = {9.0f, 16.0f, 16.0f};
+        xPlanes.faces[static_cast<size_t>(BlockFace::NegX)] = {true, tile, {0, 0, 16, 16}};
+        xPlanes.faces[static_cast<size_t>(BlockFace::PosX)] = {true, tile, {0, 0, 16, 16}};
+        ModelBox zPlanes;
+        zPlanes.from = {0.0f, 0.0f, 7.0f};
+        zPlanes.to = {16.0f, 16.0f, 9.0f};
+        zPlanes.faces[static_cast<size_t>(BlockFace::NegZ)] = {true, tile, {0, 0, 16, 16}};
+        zPlanes.faces[static_cast<size_t>(BlockFace::PosZ)] = {true, tile, {0, 0, 16, 16}};
+        ModelBox cap;
+        cap.from = {7.0f, 0.0f, 7.0f};
+        cap.to = {9.0f, 10.0f, 9.0f};
+        cap.faces[static_cast<size_t>(BlockFace::PosY)] = {true, tile, {0, 0, 16, 16}};
+        return std::vector<ModelBox>{xPlanes, zPlanes, cap};
+    };
+    BlockDef torchOn = BlockDef::Uniform("redstone torch", kRedstoneTorchOnTile);
+    torchOn.opaque = false;
+    torchOn.solid = false;
+    torchOn.torch = true;     // placement / support / water-wash (shared path)
+    torchOn.redstone = true;  // a source the engine reads + inverts
+    torchOn.replaceable = true;
+    torchOn.hardness = 0.0f;
+    torchOn.emission = 7; // vanilla redstone torch light level
+    torchOn.soundType = SoundType::Wood;
+    torchOn.model = redstoneTorchModel(kRedstoneTorchOnTile);
+    RedstoneTorchOn = registry.Register(std::move(torchOn));
+
+    BlockDef torchOff = BlockDef::Uniform("redstone torch (off)", kRedstoneTorchOffTile);
+    torchOff.opaque = false;
+    torchOff.solid = false;
+    torchOff.torch = true;
+    torchOff.redstone = true;
+    torchOff.replaceable = true;
+    torchOff.hardness = 0.0f;
+    torchOff.soundType = SoundType::Wood;
+    torchOff.hiddenItem = true; // engine-driven swap, never held
+    torchOff.drop = RedstoneTorchOn; // both variants drop the lit torch item
+    torchOff.model = redstoneTorchModel(kRedstoneTorchOffTile);
+    RedstoneTorchOff = registry.Register(std::move(torchOff));
 
     // M18 drop table (vanilla-ish; cross-references resolve here, after
     // every id exists). Leaves/tall grass/dead bush already drop nothing.

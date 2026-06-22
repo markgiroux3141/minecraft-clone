@@ -1,6 +1,34 @@
 # Session Handoff — Voxcraft
 
-Updated: 2026-06-19, written for a FRESH CONTEXT. RS1 (REDSTONE POWER CORE —
+Updated: 2026-06-22, written for a FRESH CONTEXT. RS2a (STRONG/WEAK POWERING +
+REDSTONE TORCH — the architectural half of RS2) is now DONE and USER-VERIFIED
+("it works") — see the "RS2a" section below for the full design. RS2 was SPLIT
+with the user into RS2a (the powering-model
+rearchitecture + the torch, the NOT gate) and RS2b (repeater + button + pressure
+plate), with full vanilla strong/weak accuracy chosen for v1. RS2a rewrote
+`RedstoneEngine` to the vanilla strong/weak model (ported from 1.12
+`World.getRedstonePower`/`isBlockIndirectlyGettingPowered`): components emit WEAK
+power to neighbours + STRONG power to specific cells, and a full opaque cube
+(`IsNormalCube`) re-emits the strong power it receives ("indirect" powering) —
+this is what makes torch-through-block and dust-on-block work and what turns the
+torch off. Added the REDSTONE TORCH (`RedstoneTorchOn`/`Off`, atlas tiles
+145/146): a source AND a NOT-gate inverter (off when its mount block is powered)
+with vanilla BURNOUT (≥8 turn-offs in 60 ticks → 160-tick lockout, via a
+transient toggle deque on the engine). It reuses the existing torch model +
+floor/wall meta; on/off is the BLOCK ID (free persistence, like the lamp). Lamps
+now light via the full indirect-power query. IMPORTANT after pulling: re-run
+`import_mc_assets.py` — RS2a added 2 atlas tiles (redstone torch on 145 / off
+146; atlas is 147 layers now), already imported on this machine. gentest grew a
+redstone-torch mesh check; savetest unchanged (on/off is a block id, facing rides
+the existing torch meta — both already covered). The NEXT milestone is RS2b
+(repeater + button + pressure plate) — rides the RS2a engine; see the "Redstone
+roadmap" section. DECIDED RS2a SIMPLIFICATIONS (flagged for RS2b): the torch
+reacts on the block-update tick rather than a separate +2-tick schedule (the M13
+wake delay already gives ~2-tick granularity, and burnout caps runaway); the
+wire→block horizontal powering rule uses same-level connection detection (no
+up/down-step, matching our flat wire).
+
+RS1 (REDSTONE POWER CORE —
 lever → dust → lamp, the scary one of the redstone arc) is now DONE and
 USER-VERIFIED ("excellent") — see the "RS1" section below for the full design.
 It built `RedstoneEngine` (game/src/world/RedstoneEngine.{h,cpp}), modelled on
@@ -3068,13 +3096,21 @@ THE ARC (each milestone is a runnable vertical slice; do them in order):
   adjacent wire has power>0 or an adjacent source is on; refine when RS2 needs it.
   Verify: lever → dust run → lamp lights when flipped. Once this works, redstone
   is "real" and the rest is incremental.
-- **RS2 — logic + timing.** Redstone TORCH (a source AND an inverter — off when its
-  attachment block is powered; introduces the NOT gate + torch burnout). REPEATER
-  (one-way diode, restores signal to 15, 2/4/6/8-tick delay via the M13 scheduler;
-  the trickiest timing piece — delay state in M24 meta). BUTTON (momentary pulse) +
-  PRESSURE PLATE (powers while a player/mob stands on it — reuse the entity-position
-  queries the mob/pickup code already does). Add the strong/weak block-powering
-  rules deferred from RS1. Deliverable: real logic gates (AND/OR/NOT/XOR) buildable.
+- **RS2 — logic + timing.** SPLIT into RS2a + RS2b (2026-06-19):
+  - **RS2a — strong/weak powering + redstone torch.** ✅ DONE and USER-VERIFIED
+    (see the "RS2a" section). The vanilla strong/weak block-powering
+    model + the redstone TORCH (source + NOT-gate inverter + burnout). This was the
+    architectural half — the powering model is what every later component reads.
+  - **RS2b — repeater + button + pressure plate (NEXT).** REPEATER (one-way diode,
+    restores signal to 15, 2/4/6/8-tick delay via the M13 scheduler; the trickiest
+    timing piece — delay + facing state in M24 meta). BUTTON (momentary pulse) +
+    PRESSURE PLATE (powers while a player/mob stands on it — reuse the
+    entity-position queries the mob/pickup code already does). Rides the RS2a
+    engine: each is a new `WeakPower`/`StrongPower` case + a little state. NOTE for
+    the repeater: vanilla wire's `isPowerSourceAt`/`canConnectTo` already special-
+    case `POWERED_REPEATER` facing — the RS2a `WireConnects` helper will need the
+    repeater added so dust connects to a repeater's front/back. Deliverable: real
+    logic gates (AND/OR/NOT/XOR) buildable.
 - **RS3 — analog + more consumers.** COMPARATOR (compare/subtract modes; reads
   container fullness → analog signal — needs a container fill-level query).
   DAYLIGHT SENSOR (reads sky light, which the day/night + light system already
@@ -3094,8 +3130,76 @@ DECIDED 2026-06-19: redstone goes BEFORE farming. **RS1 (power core) is now DONE
 and USER-VERIFIED** — see the "RS1" section below. RESOLVED open questions: wire
 geometry = simple always-cross; flat-only (no up-the-side); both acquisition
 paths (palette + deep ore); strong/weak powering skipped; lever floor-mount only.
-**RS2 (logic + timing) is the next milestone** — redstone torch / repeater /
-button / pressure plate + the deferred strong/weak rules.
+**RS2 was SPLIT 2026-06-19** into RS2a (strong/weak powering model + the redstone
+torch — the architectural half; **now DONE and USER-VERIFIED**, see
+the "RS2a" section) and **RS2b (repeater + button + pressure plate — the next
+milestone)**, with full vanilla strong/weak accuracy chosen for v1.
+
+## RS2a — strong/weak powering + redstone torch (how it works)
+
+The architectural half of RS2. Rewrote `RedstoneEngine` (game/src/world/
+RedstoneEngine.{h,cpp}) to the vanilla STRONG/WEAK block-powering model, then
+added the redstone torch (the NOT gate) on top. Ported from the 1.12 source
+(BlockRedstoneTorch / BlockRedstoneWire / World.getRedstonePower — read them via
+the source-tree resource note at the top).
+
+- **Powering model** (anon-namespace helpers in RedstoneEngine.cpp, mirroring
+  vanilla's queries): `WeakPower(p, side)` / `StrongPower(p, side)` per component
+  (side = unit dir from the querying cell toward p). Lever-on: weak 15 all sides,
+  strong 15 into its floor support (the block below). Redstone block: weak 15 all,
+  strong 0. Redstone-torch-on: weak 15 to all faces except its point dir, strong
+  15 to the block ABOVE it. Wire: strong = weak; UP-face → power i (so dust on a
+  block strong-powers it), DOWN → 0, horizontal → i only at a "tip" (the vanilla
+  directional rule, via `WireConnects` same-level detection). `IsNormalCube` (full
+  opaque solid, non-slab/stair/cutout/liquid) blocks re-emit the strong power they
+  receive (`StrongPowerReceived`). `RedstonePower` = normal-cube ? strong-received
+  : own weak. `IndirectPower(pos, excludeWire)` = max over 6 faces (vanilla
+  `isBlockIndirectlyGettingPowered`).
+- **Wire network** (Update steps 1–4, same shape as RS1): flood-fill the connected
+  wire net, inject each wire's `IndirectPower(excludeWire=true)` (non-wire sources;
+  other wires propagate via the relaxation), BFS-relax −1/step across horizontal
+  wire neighbours, write changed power to the meta nibble.
+- **Consumers** (Update step 5): sweep TWO face-rings out from pos + every network
+  cell (a consumer can sit one block past a normal cube that conducts), dedup, and
+  refresh each lamp (lit iff `IndirectPower > 0`) and torch.
+- **Redstone torch** = a source AND inverter. `RefreshTorch`: desired ON iff its
+  mount block (`pos − pointDir`) is NOT powered (`RedstonePower(attach, −pointDir)
+  == 0`). On mismatch it swaps the block id (On↔Off, preserving the torch meta).
+  No self-feedback: a torch strong-powers only the block ABOVE it, never its mount.
+  BURNOUT: every turn-OFF records a (pos, tick) in a transient deque pruned to a
+  60-tick window; ≥8 at one pos → forced off + a +160-tick re-check schedule (caps
+  a self-feeding torch oscillator). `World::SimTick()` getter added for the window.
+- **Block** (Block.cpp append-only): `RedstoneTorchOn` (tile 145, emission 7,
+  held/placed, auto-listed) + `RedstoneTorchOff` (tile 146, emission 0, hidden,
+  drops the On torch). Both `torch = true` (free floor/wall placement, support-pop,
+  water-wash via the M24 torch meta) + `redstone = true`. They reuse the float
+  torch model (crossed planes + cap) sampling their own tile; wall orientation is
+  the existing `ModelOrientation` (keys on `def.torch`). On/off is the block id →
+  free persistence; facing rides the torch meta.
+- **Dispatch** (World::ProcessBlockUpdate): the plain-torch branch is now
+  `def.torch && !def.redstone`; a redstone torch falls into the `def.redstone`
+  branch, which does the torch support-pop (floor/wall) OR the wire/lever
+  support-pop, then ALWAYS calls `m_redstone.Update(pos)` (recompute even after a
+  pop — a removed source/torch unpowers downstream).
+- **Atlas**: tiles 145 (torch on) / 146 (torch off) appended after the RS1 wire
+  ramp; both atlas scripts grown in lockstep (147 layers). re-run
+  `import_mc_assets.py` after pulling. gentest grew a redstone-torch mesh check.
+- **USER TEST CHECKLIST** (agent does NOT launch the game — see "How to verify"):
+  1. Grab a **redstone torch** from the creative palette (E). It places on a
+     block's TOP (floor) or SIDE (wall), like a normal torch, and starts LIT.
+  2. **Inverter:** put a redstone torch on top of a block, run dust onto that same
+     block (or power the block with a lever) → the torch turns OFF. Remove the
+     power → it turns back ON. (Wire next to the torch's block, lever on the block,
+     or a torch underneath all count.)
+  3. **Torch as a source:** a lit torch should power adjacent dust (the wire ramp
+     brightens) and light an adjacent redstone lamp.
+  4. **NOT/torch tower:** lever → dust → into a block with a torch on its far side
+     → the torch inverts the lever (off when lever on). Chain two for a buffer.
+  5. **Burnout:** build a single-torch oscillator (torch whose output feeds back to
+     power its own block) → it should flicker a few times then BURN OUT (stay off)
+     for ~8 s, then recover — not lock the game.
+  6. Break the block under a torch → the torch pops as an item (drops the lit
+     torch). Flowing water washes it away.
 
 ## RS1 — redstone power core (how it works)
 

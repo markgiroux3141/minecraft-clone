@@ -348,6 +348,11 @@ def build_atlas(mc: Path, out_path: Path) -> None:
         load_tile(blocks / "redstone_lamp_on.png"),
         load_tile(blocks / "lever.png"),
         *[tinted(redstone_cross_base(blocks), redstone_tint(level)) for level in range(16)],
+        # RS2a redstone torch: lit (145) / unlit (146) — matches Block.cpp. Reuses
+        # the floor/wall torch model; on/off is the block id (engine swap, like
+        # the lamp). Vanilla ships separate on/off sprites.
+        load_tile(blocks / "redstone_torch_on.png"),
+        load_tile(blocks / "redstone_torch_off.png"),
     ]
 
     strip = Image.new("RGBA", (TILE * len(tiles), TILE))

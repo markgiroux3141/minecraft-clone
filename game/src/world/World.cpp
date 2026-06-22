@@ -481,10 +481,11 @@ void World::ProcessBlockUpdate(const glm::ivec3& worldPos) {
             m_entities.SpawnBlockDrop(worldPos, def.ResolveDrop(id), 1);
             SetBlock(worldPos, blocks::Air);
         }
-    } else if (def.torch) {
+    } else if (def.torch && !def.redstone) {
         // Torches need a solid surface to hang on (M24): a floor torch
         // (meta 0) wants solid ground below; a wall torch wants the wall it
-        // points away from to still be solid.
+        // points away from to still be solid. (Redstone torches share this rule
+        // but route through the redstone branch below for their on/off logic.)
         const uint8_t meta = GetMeta(worldPos.x, worldPos.y, worldPos.z);
         glm::ivec3 support{worldPos.x, worldPos.y - 1, worldPos.z};
         if (facing::TorchIsWall(meta)) {
@@ -495,18 +496,29 @@ void World::ProcessBlockUpdate(const glm::ivec3& worldPos) {
             SetBlock(worldPos, blocks::Air);
         }
     } else if (def.redstone) {
-        // RS1: wire + the floor lever pop without solid ground below (like a
-        // torch). Otherwise recompute the power network and refresh adjacent
-        // lamps. Sources (redstone block) and lamps have no support rule. The
+        // Support rules first: wire + the floor lever pop without solid ground
+        // below; a redstone torch pops like a plain torch (floor or wall). Then
+        // recompute the power network and refresh adjacent lamps/torches. The
         // SetBlock that woke this cell also woke its 6 neighbours, so a change
         // next to a run reaches the wire cells through this same branch.
-        if ((def.wireOverlay || def.lever) &&
-            !IsSolid(worldPos.x, worldPos.y - 1, worldPos.z)) {
+        if (def.torch) {
+            const uint8_t meta = GetMeta(worldPos.x, worldPos.y, worldPos.z);
+            glm::ivec3 support{worldPos.x, worldPos.y - 1, worldPos.z};
+            if (facing::TorchIsWall(meta)) {
+                support = worldPos - facing::Dir(facing::TorchWallFacing(meta));
+            }
+            if (!IsSolid(support.x, support.y, support.z)) {
+                m_entities.SpawnBlockDrop(worldPos, def.ResolveDrop(id), 1);
+                SetBlock(worldPos, blocks::Air);
+            }
+        } else if ((def.wireOverlay || def.lever) &&
+                   !IsSolid(worldPos.x, worldPos.y - 1, worldPos.z)) {
             m_entities.SpawnBlockDrop(worldPos, def.ResolveDrop(id), 1);
             SetBlock(worldPos, blocks::Air);
-        } else {
-            m_redstone.Update(worldPos);
         }
+        // Recompute even after a pop: a removed source/torch/wire reshapes the
+        // network and unpowers downstream cells (Update re-seeds from pos).
+        m_redstone.Update(worldPos);
     } else if (def.gravity) {
         const BlockId below = GetBlock(worldPos.x, worldPos.y - 1, worldPos.z);
         const BlockDef& belowDef = registry.Def(below);

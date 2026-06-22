@@ -281,11 +281,20 @@ extern BlockId RedstoneLampOff;
 extern BlockId RedstoneLampOn;
 extern BlockId Lever;
 extern BlockId RedstoneWire;
+// RS2a redstone torch: a source AND a NOT-gate inverter (off when its mount
+// block is powered). On/off is the block id (engine swap, like the lamp); the
+// facing rides the existing torch meta (floor/wall). TorchOn is the held/placed
+// item (light 7); TorchOff is hiddenItem.
+extern BlockId RedstoneTorchOn;
+extern BlockId RedstoneTorchOff;
 
 // RS1 wire power ramp: 16 consecutive atlas tiles, sampled as
 // kRedstoneWireTile0 + power (0..15), baked dark->bright red at import. Keep
 // BOTH atlas scripts in sync with this (the first layer after the M39 drops).
 inline constexpr uint16_t kRedstoneWireTile0 = 129;
+// RS2a redstone torch tiles, after the 16-level wire ramp (129..144).
+inline constexpr uint16_t kRedstoneTorchOnTile = 145;
+inline constexpr uint16_t kRedstoneTorchOffTile = 146;
 
 // M18 crack overlay: destroy_stage_0..9 occupy ten consecutive texture
 // layers right after the block tiles — keep BOTH scripts/gen_textures.py
